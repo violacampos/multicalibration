@@ -49,20 +49,16 @@ def generate_one_completion(task_id, prompt):
 if __name__ == "__main__":
 
     llm = LLM(model=HF_MODEL_NAME)
+
     sampling_params = SamplingParams(max_tokens=512)
     sampling_params.logprobs = 0
+    
     print(sampling_params)
 
     problems = read_problems()
 
-    num_samples_per_task = 1
     samples = []
     details = []
-    #samples = [
-    #    dict(task_id=task_id, completion=generate_one_completion(problems[task_id]["prompt"]))
-    #    for task_id in problems
-    #    for _ in range(num_samples_per_task)
-    #]
 
     for task_id in problems:
         info, completion = generate_one_completion(task_id, problems[task_id]["prompt"])   
