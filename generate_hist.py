@@ -7,9 +7,9 @@ from sklearn.calibration import calibration_curve
 logit_data = []
 
 MODEL_NAME  = "Llama-3.1-8B-Instruct"
+PARAMS      = "-temp-0"
 DATASET     = "human-eval"
-
-BASE_DIR = "/data/stud/2025-MA-kuschnereit/"
+BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 
 EVALUATED_SAMPLES_DIR = BASE_DIR+"evaluated_samples/"
 GENERATED_SAMPLES_DIR = BASE_DIR+"generated_samples/"
@@ -17,13 +17,14 @@ CHART_DIR = BASE_DIR+"charts/"
 
 def load_logits_for_task_id(task_id):
     entry = next(filter(lambda a : a['task_id'] == task_id, logit_data), None)
-    return len(entry["completion"]["logprobs"]), entry["completion"]["cumulative_logprob"]
+    return len(entry["logprobs"]), entry["cumulative_logprob"]
  
 
-def create_histogram(data, name):
+def create_histogram(data, name, typ):
     fig, ax = plt.subplots()  
     ax.hist(data, range=(0, 1.0))
     ax.plot([0, 1], [0, 1], transform=ax.transAxes)
+    plt.title(MODEL_NAME+PARAMS+' '+typ)
     plt.savefig(name)
     print(f"Histogram saved: {name}")
 
@@ -38,21 +39,22 @@ def generate_calibration_curve(y, predicted_prob):
     plt.xlabel('Confidence')
     plt.ylabel('Correct')
 
-    plt.savefig(CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+"-calibration_curve.png")
+    plt.savefig(CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+"/calibration_curve.png")
 
 
 def generate_calibration_bar_chart(y, x):
+    plt.title(MODEL_NAME+PARAMS+' Reliability chart')
     plt.bar(y, x, width = 0.1)
     plt.plot([0, 1], [0, 1], linestyle='--')
     plt.xticks(np.arange(0, 1.1, 0.1))
     plt.yticks(np.arange(0, 1.1, 0.1))
     plt.xlabel('Confidence')
     plt.ylabel('Correct')
-    plt.savefig(CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+"-calibration_bar_chart.png")
+    plt.savefig(CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+"/calibration_bar_chart"+PARAMS+".png")
 
 if __name__ == "__main__":
-    eval_results_file_path = EVALUATED_SAMPLES_DIR+DATASET+"-samples-"+MODEL_NAME+"-correct_eval_results.json"
-    sample_logits_file_path = GENERATED_SAMPLES_DIR+DATASET+"/"+DATASET+"-samples-"+MODEL_NAME+".jsonl"
+    eval_results_file_path = EVALUATED_SAMPLES_DIR+DATASET+"/samples-"+MODEL_NAME+PARAMS+"_eval_results.json"
+    sample_logits_file_path = GENERATED_SAMPLES_DIR+DATASET+"/"+MODEL_NAME+"/details-"+MODEL_NAME+PARAMS+".jsonl"
     
     eval_data = read_json(eval_results_file_path)
     logit_data = read_jsonl(sample_logits_file_path)
@@ -81,23 +83,22 @@ if __name__ == "__main__":
     fail_log_value_list = np.array(fail_log_value_list)
 
     # Brechnet Wahrscheinlichleit P(Korrekt| Score in bin 0-0.09, 0.1-0.19, ..., 0.9 )
-    total = len(prob_value_list)
+    total_count = []
     positiv_count = []
     for bin in np.arange(0, 1, 0.1):
         bin = np.round(bin,1)
         if bin == 0.9:
             positiv_count.append(np.count_nonzero((bin <= pass_log_value_list) & (pass_log_value_list <= (np.round(bin+0.1)))))
+            total_count.append(np.count_nonzero((bin <= prob_value_list) & (prob_value_list <= (np.round(bin+0.1)))))
         else:
             positiv_count.append(np.count_nonzero((bin <= pass_log_value_list) & (pass_log_value_list < (np.round(bin+0.1)))))
+            total_count.append(np.count_nonzero((bin <= prob_value_list) & (prob_value_list <= (np.round(bin+0.1)))))
 
-    # Wahrscheinlichkeit, dass Code korrekt ist in den jeweiligen Predictionbins
-    P_correct = np.array(positiv_count)/total
+    # Wahrscheinlichkeit, dass Code korrekt ist in den jeweiligen bins
+    P_correct = np.divide(np.array(positiv_count), np.array(total_count), where=np.array(total_count)!=0)
 
     generate_calibration_bar_chart(np.arange(0.05, 1, 0.1), P_correct)
 
-
-    #generate_calibration_curve(np.array(positiv_count)/total, prob_value_list)
-    #create_histogram(P_correct, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'_test.png')
-    #create_histogram(prob_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'_total.png')
-    #create_histogram(pass_log_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'_pass.png')
-    #create_histogram(fail_log_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'_fail.png')
+    create_histogram(prob_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'.png', 'Total Probabilities')
+    create_histogram(pass_log_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'_pass.png', 'Pass Probabilities')
+    create_histogram(fail_log_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'_fail.png', 'Fail Probabilities')
