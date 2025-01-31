@@ -6,7 +6,7 @@ from sklearn.calibration import calibration_curve
 
 logit_data = []
 
-MODEL_NAME  = "Llama-3.1-8B-Instruct"
+MODEL_NAME  = "Qwen2.5-Coder-7B-Instruct"
 PARAMS      = "-temp-0"
 DATASET     = "human-eval"
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
@@ -17,7 +17,7 @@ CHART_DIR = BASE_DIR+"charts/"
 
 def load_logits_for_task_id(task_id):
     entry = next(filter(lambda a : a['task_id'] == task_id, logit_data), None)
-    return len(entry["logprobs"]), entry["cumulative_logprob"]
+    return entry["logprobs"], len(entry["logprobs"]), entry["cumulative_logprob"]
  
 
 def create_histogram(data, name, typ):
@@ -69,8 +69,17 @@ if __name__ == "__main__":
     print(f"Evaluation from: {eval_data['date']}")
 
     for task, entry in eval_data['eval'].items():
-        token_count, logprob = load_logits_for_task_id(task)
-        avg_prob = np.round(np.exp(logprob / token_count), 2) 
+        logprobs, token_count, cumulative_logprob = load_logits_for_task_id(task)
+
+        avg_prob = np.round(np.exp(cumulative_logprob / token_count), 2) 
+        """print(f"Average cumulative: {avg_prob}")
+        joint_prob = []
+        for logprob in logprobs:
+            prob = np.exp(list(logprob.values())[0][0])
+            joint_prob.append(prob)
+        print(np.sum(np.array(joint_prob))/token_count)   
+        exit()"""
+
         prob_value_list.append(avg_prob)
         if entry[0]['base_status'] == 'fail':
             fail_log_value_list.append(avg_prob)
@@ -86,17 +95,19 @@ if __name__ == "__main__":
     total_count = []
     positiv_count = []
     for bin in np.arange(0, 1, 0.1):
-        bin = np.round(bin,1)
-        if bin == 0.9:
-            positiv_count.append(np.count_nonzero((bin <= pass_log_value_list) & (pass_log_value_list <= (np.round(bin+0.1)))))
-            total_count.append(np.count_nonzero((bin <= prob_value_list) & (prob_value_list <= (np.round(bin+0.1)))))
+        bin_left = np.round(bin,1)
+        bin_right = np.round(bin+0.1, 1)
+
+        if bin_left == 0.9:
+            positiv_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list <= bin_right)))
+            total_count.append(np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list <= bin_right)))
         else:
-            positiv_count.append(np.count_nonzero((bin <= pass_log_value_list) & (pass_log_value_list < (np.round(bin+0.1)))))
-            total_count.append(np.count_nonzero((bin <= prob_value_list) & (prob_value_list <= (np.round(bin+0.1)))))
+            positiv_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list < bin_right)))
+            total_count.append(np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list < bin_right)))
 
     # Wahrscheinlichkeit, dass Code korrekt ist in den jeweiligen bins
     P_correct = np.divide(np.array(positiv_count), np.array(total_count), where=np.array(total_count)!=0)
-
+    
     generate_calibration_bar_chart(np.arange(0.05, 1, 0.1), P_correct)
 
     create_histogram(prob_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'.png', 'Total Probabilities')

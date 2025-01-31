@@ -4,16 +4,20 @@ os.environ['HF_HOME'] = "/data/stud/2025-MA-kuschnereit/hf_models/"
 
 from human_eval.data import write_jsonl, read_problems
 from vllm import LLM, SamplingParams
+from vllm.sampling_params import BeamSearchParams
 import torch
 from huggingface_hub import login
 
-os.environ["CUDA_VISIBLE_DEVICES"]="7"
+os.environ["CUDA_VISIBLE_DEVICES"]="4,5,6,7"
 print('__CUDA Device:',torch.cuda.get_device_properties(0))
+print('__CUDA Device:',torch.cuda.get_device_properties(1))
+print('__CUDA Device:',torch.cuda.get_device_properties(2))
+print('__CUDA Device:',torch.cuda.get_device_properties(3))
 
-HF_MODEL_NAME = "/data/tyler/llms/llama3.1/huggingface/Meta-Llama-3.1-8B-Instruct"
-#HF_MODEL_NAME   = "Qwen/Qwen2.5-Coder-7B-Instruct"
-MODEL_NAME      = "Llama-3.1-8B-Instruct"
-PARAMS          = "-temp-0"
+HF_MODEL_NAME = "/data/tyler/llms/llama3.3/huggingface/Meta-Llama-3.3-70B-Instruct/"
+#HF_MODEL_NAME   = "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+MODEL_NAME      = "Meta-Llama-3.3-70B-Instruct"
+PARAMS          = ""
 
 DATASET     = "human-eval"
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
@@ -30,13 +34,13 @@ def generate_one_completion(task_id, prompt):
                 finish_reason=output.finish_reason), output.text
 
 if __name__ == "__main__":
-
-    llm = LLM(model=HF_MODEL_NAME)
+    llm = LLM(model=HF_MODEL_NAME, tensor_parallel_size=4, max_model_len=2048)
 
     sampling_params = SamplingParams(max_tokens=512)
     sampling_params.logprobs    = 0
-    sampling_params.temperature = 0
-    
+    #sampling_params.temperature = 0
+    #params = BeamSearchParams(beam_width=3, max_tokens=50)
+
     print(sampling_params)
 
     problems = read_problems()
