@@ -14,12 +14,12 @@ Creates charts for the given run (reliability chart, (total, pass, fail) propabi
 
 Runs the generation Process of the MultiPL-E Benchmark (--use-local and dataset) or (--lang rs to chose language).<br/>
 Set --batch-size to 10 for 70B Models.<br/>
-`python automodel_vllm.py --name Qwen/Qwen2.5-Coder-7B-Instruct \
-                          --root-dataset humaneval \
-                          --use-local \
-                          --dataset prompts/mbpp-py-keep.jsonl \
-                          --temperature 1.0 \
-                          --batch-size 20 \
-                          --completion-limit 1 \
+`python automodel_vllm.py --name Qwen/Qwen2.5-Coder-7B-Instruct \<br/>
+                          --root-dataset humaneval \<br/>
+                          --use-local \<br/>
+                          --dataset prompts/mbpp-py-keep.jsonl \<br/>
+                          --temperature 1.0 \<br/>
+                          --batch-size 20 \<br/>
+                          --completion-limit 1 \<br/>
                           --output-dir-prefix runs`
 
