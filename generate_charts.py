@@ -6,8 +6,8 @@ from sklearn.calibration import calibration_curve
 
 logit_data = []
 
-MODEL_NAME  = "Qwen2.5-Coder-7B-Instruct"
-PARAMS      = "-temp-0"
+MODEL_NAME  = "Meta-Llama-3.3-70B-Instruct"
+PARAMS      = ""
 DATASET     = "human-eval"
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 
@@ -72,13 +72,6 @@ if __name__ == "__main__":
         logprobs, token_count, cumulative_logprob = load_logits_for_task_id(task)
 
         avg_prob = np.round(np.exp(cumulative_logprob / token_count), 2) 
-        """print(f"Average cumulative: {avg_prob}")
-        joint_prob = []
-        for logprob in logprobs:
-            prob = np.exp(list(logprob.values())[0][0])
-            joint_prob.append(prob)
-        print(np.sum(np.array(joint_prob))/token_count)   
-        exit()"""
 
         prob_value_list.append(avg_prob)
         if entry[0]['base_status'] == 'fail':
@@ -92,24 +85,41 @@ if __name__ == "__main__":
     fail_log_value_list = np.array(fail_log_value_list)
 
     # Brechnet Wahrscheinlichleit P(Korrekt| Score in bin 0-0.09, 0.1-0.19, ..., 0.9 )
-    total_count = []
-    positiv_count = []
+    total_bin_count = []
+    correct_bin_count = []
+    # conf(S_i)
+    average_bin_confidence = []
     for bin in np.arange(0, 1, 0.1):
         bin_left = np.round(bin,1)
         bin_right = np.round(bin+0.1, 1)
 
         if bin_left == 0.9:
-            positiv_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list <= bin_right)))
-            total_count.append(np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list <= bin_right)))
+            correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list <= bin_right)))
+            bin_count   = np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list <= bin_right))
+            bin_sum     = np.sum(prob_value_list, where=(bin_left <= prob_value_list) & (prob_value_list <= bin_right))
+            total_bin_count.append(bin_count)
+            average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
         else:
-            positiv_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list < bin_right)))
-            total_count.append(np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list < bin_right)))
+            correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list < bin_right)))
+            bin_count   = np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list < bin_right))
+            bin_sum     = np.sum(prob_value_list, where=(bin_left <= prob_value_list) & (prob_value_list < bin_right))
+            total_bin_count.append(bin_count)
+            average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
+    
 
     # Wahrscheinlichkeit, dass Code korrekt ist in den jeweiligen bins
-    P_correct = np.divide(np.array(positiv_count), np.array(total_count), where=np.array(total_count)!=0)
-    
-    generate_calibration_bar_chart(np.arange(0.05, 1, 0.1), P_correct)
+    # corr(S_i)
+    P_correct = np.divide(np.array(correct_bin_count), np.array(total_bin_count), where=np.array(total_bin_count)!=0)
+    #print(P_correct)
+    #print(average_bin_confidence)
+    ece = 0
+    for corr_s_i, conf_s_i, s_i_count in zip(P_correct, average_bin_confidence, total_bin_count):
+        ece = ece + ((abs(s_i_count)/abs(len(prob_value_list)))*abs(corr_s_i-conf_s_i))
 
-    create_histogram(prob_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'.png', 'Total Probabilities')
-    create_histogram(pass_log_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'_pass.png', 'Pass Probabilities')
-    create_histogram(fail_log_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'_fail.png', 'Fail Probabilities')
+    print(f"ECE: {ece}")
+    
+    #generate_calibration_bar_chart(np.arange(0.05, 1, 0.1), P_correct)
+
+    #create_histogram(prob_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'.png', 'Total Probabilities')
+    #create_histogram(pass_log_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'_pass.png', 'Pass Probabilities')
+    #create_histogram(fail_log_value_list, CHART_DIR+'/'+DATASET+'/'+MODEL_NAME+'/Probabilities'+PARAMS+'_fail.png', 'Fail Probabilities')

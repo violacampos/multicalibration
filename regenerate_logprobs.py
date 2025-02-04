@@ -7,12 +7,13 @@ from human_eval.data import write_jsonl, read_problems
 from vllm import LLM, SamplingParams
 import torch
 from huggingface_hub import login
+from vllm.inputs import TokensPrompt
 
 os.environ["CUDA_VISIBLE_DEVICES"]="7"
 print('__CUDA Device:',torch.cuda.get_device_properties(0))
 
-HF_MODEL_NAME   = "Qwen/Qwen2.5-Coder-7B-Instruct"
-MODEL_NAME      = "Qwen2.5-Coder-7B-Instruct"
+HF_MODEL_NAME   = "/data/tyler/llms/llama3.1/huggingface/Meta-Llama-3.1-8B-Instruct/"
+MODEL_NAME      = "Llama-3.1-8B-Instruct"
 PARAMS          = ""
 
 DATASET     = "human-eval"
@@ -36,8 +37,11 @@ if __name__ == "__main__":
 
     for sample in sample_data:
         print(sample["task_id"])
-        RequestOutput = llm.generate(sample["completion"], sp, use_tqdm=False)
+        
+        token_ids = next(filter(lambda a : a['task_id'] == sample["task_id"], details_data), None)['token_ids']
+        tp = TokensPrompt(prompt_token_ids=token_ids)
+        RequestOutput = llm.generate(tp, sp, use_tqdm=False)
         generated_logprobs = next(filter(lambda a : a['task_id'] == sample["task_id"], details_data), None)['logprobs']
-        print(generated_logprobs[1])
-        print(RequestOutput[0].prompt_logprobs[1])
+        print(generated_logprobs[0])
+        print(RequestOutput[0].prompt_logprobs[0])
         break
