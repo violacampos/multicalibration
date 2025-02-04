@@ -11,6 +11,45 @@ import matplotlib.pyplot as plt
 import os
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
+CHART_DIR = BASE_DIR+"charts_multipl_e/"
+
+charts = False
+
+def create_histogram(data, path, run, typ):
+    fig, ax = plt.subplots()  
+    ax.hist(data, range=(0, 1.0))
+    ax.plot([0, 1], [0, 1], transform=ax.transAxes)
+    plt.title(run+' # '+typ, fontsize=7)
+    plt.savefig(path)
+    print(f"Histogram saved: {path}")
+    plt.close()
+
+def generate_calibration_bar_chart(y, x, path, run):
+    plt.title(run+' # Reliability chart', fontsize=7)
+    plt.bar(y, x, width = 0.1)
+    plt.plot([0, 1], [0, 1], linestyle='--')
+    plt.xticks(np.arange(0, 1.1, 0.1))
+    plt.yticks(np.arange(0, 1.1, 0.1))
+    plt.xlabel('Confidence')
+    plt.ylabel('Correct')
+    plt.savefig(path)
+    plt.close()
+
+def prob_sample_to_recover(prob_sample, temp, top_p=1, hidden_vocab_num=None):
+    prob_sample = prob_sample * top_p
+    top_logprobs = len(prob_sample)
+
+    if hidden_vocab_num is None:
+        hidden_vocab_num = 1 if (1 - prob_sample.sum() > 0.001) else 0
+
+    if hidden_vocab_num > 0:
+        hidden_probs = [max(1 - prob_sample.sum(), 0) / hidden_vocab_num] * hidden_vocab_num
+        prob_sample = np.concatenate([prob_sample, hidden_probs])
+
+    prob_recover_unnorm = prob_sample ** temp
+    prob_recover = prob_recover_unnorm / prob_recover_unnorm.sum()
+
+    return prob_recover[:top_logprobs]
 
 def gunzip_json(path: Path) -> Optional[dict]:
     """
@@ -47,6 +86,7 @@ def for_file(path: Path):
         "n": n,
         "c": c,
         "temperature": data["temperature"] if "temperature" in data else 0.2,
+        "top_p": data["top_p"],
         "cumulative_logprob": cumulative_logprob,
         "token_ids": token_ids,
         "token_logprobs": token_logprobs
@@ -59,9 +99,11 @@ def main():
         "dirs", type=str,  help="Directories with results. ", nargs="+")
     args = parser.parse_args()
 
-    results_dict = {}
+    results_scores_dict = {}
+    results_details_dict = {}
 
     run_dirs = [x[0] for x in os.walk(args.dirs[0])]
+    
     run_dirs.sort()
 
     for d in run_dirs:
@@ -74,8 +116,10 @@ def main():
             Path(d).glob("*.results.json"), Path(d).glob("*.results.json.gz"))]
         results = [r for r in results if r is not None]
         temperatures = set(r["temperature"] for r in results)
+        top_p = set(r["top_p"] for r in results)
 
         temperature = list(temperatures)[0]
+        top_p = list(top_p)[0]
         num_problems = len(results)
         print(f"\nRun: {run}")
         print(f"Temperature: {temperature}")
@@ -89,9 +133,19 @@ def main():
         for r in results:
             token_count = len(r["token_ids"])
 
+            #corrected_logprob = []
+
+            #for prob in r['token_logprobs']:
+                #print(prob)
+                #corrected_logprob.append(prob_sample_to_recover(np.array([np.exp(list(prob.values())[0][0])]), temperature, top_p)[0])
+                #print(f"Uncorrected: {np.exp(list(prob.values())[0][0])} -> Corrected: {prob_sample_to_recover(np.array([np.exp(list(prob.values())[0][0])]), temperature, top_p)[0]}")
+
             cumulative_logprob = r["cumulative_logprob"]
 
-            avg_prob = np.round(np.exp(cumulative_logprob / token_count), 2) 
+            #avg_prob = np.sum(np.array(corrected_logprob))/token_count
+            avg_prob = prob_sample_to_recover(np.array([np.exp(cumulative_logprob / token_count)]), temperature, top_p)[0]
+            # Can be used but may be influenced by bug https://github.com/vllm-project/vllm/issues/9453
+            # avg_prob = np.round(np.exp(cumulative_logprob / token_count), 2) 
 
             prob_value_list.append(avg_prob)
             if r["c"] == 0:
@@ -152,18 +206,35 @@ def main():
 
         print(f"Brier Score: {brier_score}")
 
-        results_dict[run] = {
+        results_scores_dict[run] = {
             "temperature": temperature,
+            "top_p": top_p,
             "num problems": num_problems,
             "correct": correct_count,
             "ECE": ece,
             "Brier Score": brier_score
         }
 
-    result_json = json.dumps(results_dict, indent=4)
+        results_details_dict[run] = {
+            "total_bin_count": list(total_bin_count),
+            "P_correct": list(P_correct),
+            "confidence": list(average_bin_confidence),
+        }
+        if charts == True:
+            generate_calibration_bar_chart(np.arange(0.05, 1, 0.1), P_correct, CHART_DIR+run+"/calibration_bar_chart.png", run)
+
+            create_histogram(prob_value_list, CHART_DIR+run+'/Probabilities.png',run ,'Total Probabilities')
+            create_histogram(pass_log_value_list, CHART_DIR+run+'/Probabilities_pass.png',run ,'Pass Probabilities')
+            create_histogram(fail_log_value_list, CHART_DIR+run+'/Probabilities_fail.png',run ,'Fail Probabilities')
+
+    result_scores_json = json.dumps(results_scores_dict, indent=4)
+    result_details_json = json.dumps(results_details_dict, indent=4)
  
-    with open("result.json", "w") as outfile:
-        outfile.write(result_json)
+    with open("result_corrected_scores.json", "w") as outfile:
+        outfile.write(result_scores_json)
+    
+    with open("result_corrected_details.json", "w") as outfile:
+        outfile.write(result_details_json)
 
 if __name__ == "__main__":
     main()
