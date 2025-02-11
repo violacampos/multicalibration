@@ -1,4 +1,13 @@
+import os
+# Must be set before toch import
+os.environ['HF_HOME'] = "/data/stud/2025-MA-kuschnereit/hf_models/"
 import numpy as np
+from human_eval.data import write_jsonl, read_problems
+from vllm import LLM, SamplingParams
+from vllm.sampling_params import BeamSearchParams
+import torch
+from huggingface_hub import login
+
 
 def prob_sample_to_recover(prob_sample, temp, top_p=1, hidden_vocab_num=None):
     prob_sample = prob_sample * top_p
@@ -18,7 +27,7 @@ def prob_sample_to_recover(prob_sample, temp, top_p=1, hidden_vocab_num=None):
 
 # Test case
 
-# Sampling parameters
+"""# Sampling parameters
 temp = 0.5
 top_p = 0.9
 top_logprobs = 3
@@ -44,3 +53,48 @@ print("prob_recover:", prob_recover)
 # Ground truth probabilities
 prob_gt = np.exp(logits) / np.exp(logits).sum()
 print("     prob_gt:", prob_gt)
+"""
+
+
+
+
+os.environ["CUDA_VISIBLE_DEVICES"]="6"
+os.environ["VLLM_USE_V1"]="1"
+print('__CUDA Device:',torch.cuda.get_device_properties(0))
+
+#HF_MODEL_NAME = "/data/tyler/llms/llama3.3/huggingface/Meta-Llama-3.3-70B-Instruct/"
+HF_MODEL_NAME   = "Qwen/Qwen2.5-Coder-7B-Instruct"
+MODEL_NAME      = "Qwen2.5-Coder-7B-Instruct"
+PARAMS          = ""
+
+DATASET     = "human-eval"
+BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
+GENERATED_SAMPLES_DIR = BASE_DIR+"generated_samples/"
+
+
+if __name__ == "__main__":
+    llm = LLM(model=HF_MODEL_NAME, max_model_len=2048)
+
+    sampling_params_temp_0 = SamplingParams(logprobs=1,
+                                            max_tokens=512)
+    sampling_params_temp_0.top_p = 0.8
+    sampling_params_temp_0.temperature = 1
+
+    print(sampling_params_temp_0)
+
+    prompt = ("The Capital from Germany is ")
+
+    RequestOutput_temp_0 = llm.generate(prompt, sampling_params_temp_0)
+    output_temp_0 = RequestOutput_temp_0[0].outputs[0]
+
+    print([{key : [value.logprob, value.rank, value.decoded_token] for key, value in logprobs.items()} for logprobs in output_temp_0.logprobs][:1])
+
+
+    sampling_params_temp_1 = SamplingParams(logprobs=1, 
+                                            max_tokens=512)
+
+    #print(sampling_params_temp_1)
+
+    RequestOutput = llm.generate(prompt, sampling_params_temp_1)
+    output = RequestOutput[0].outputs[0]
+    print([{key : [value.logprob, value.rank, value.decoded_token] for key, value in logprobs.items()} for logprobs in output.logprobs][:1])

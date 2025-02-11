@@ -13,7 +13,8 @@ import os
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts_multipl_e/"
 
-charts = False
+charts = True
+binning_type = 'linear' # other option is linear
 
 def create_histogram(data, path, run, typ):
     fig, ax = plt.subplots()  
@@ -24,9 +25,9 @@ def create_histogram(data, path, run, typ):
     print(f"Histogram saved: {path}")
     plt.close()
 
-def generate_calibration_bar_chart(y, x, path, run):
+def generate_calibration_bar_chart(y, x, path, run, width, bar_colors):
     plt.title(run+' # Reliability chart', fontsize=7)
-    plt.bar(y, x, width = 0.1)
+    plt.bar(y, x, width = width, color=bar_colors, edgecolor='black')
     plt.plot([0, 1], [0, 1], linestyle='--')
     plt.xticks(np.arange(0, 1.1, 0.1))
     plt.yticks(np.arange(0, 1.1, 0.1))
@@ -35,7 +36,17 @@ def generate_calibration_bar_chart(y, x, path, run):
     plt.savefig(path)
     plt.close()
 
-def prob_sample_to_recover(prob_sample, temp, top_p=1, hidden_vocab_num=None):
+def create_stacked_bar_plot(x, y1, y2, path, run, width):
+    plt.bar(x, y1, color='g', width = width, edgecolor='black')
+    plt.bar(x, y2, bottom=y1, color='r', width = width, edgecolor='black')
+    plt.xlabel("Confidence")
+    plt.ylabel("Anzahl")
+    plt.legend(["Pass", "Fail"])
+    plt.title(run, fontsize=7)
+    plt.savefig(path)
+    plt.close()
+
+"""def prob_sample_to_recover(prob_sample, temp, top_p=1, hidden_vocab_num=None):
     prob_sample = prob_sample * top_p
     top_logprobs = len(prob_sample)
 
@@ -49,7 +60,7 @@ def prob_sample_to_recover(prob_sample, temp, top_p=1, hidden_vocab_num=None):
     prob_recover_unnorm = prob_sample ** temp
     prob_recover = prob_recover_unnorm / prob_recover_unnorm.sum()
 
-    return prob_recover[:top_logprobs]
+    return prob_recover[:top_logprobs]"""
 
 def gunzip_json(path: Path) -> Optional[dict]:
     """
@@ -110,8 +121,9 @@ def main():
         if d == args.dirs[0]:
             continue
         run = d.split("/runs/", 1)[1]
+        if not os.path.isdir(CHART_DIR+run):
+            os.makedirs(CHART_DIR+run)
         run = run.replace('/', '')
-
         results = [for_file(p) for p in itertools.chain(
             Path(d).glob("*.results.json"), Path(d).glob("*.results.json.gz"))]
         results = [r for r in results if r is not None]
@@ -137,15 +149,17 @@ def main():
 
             #for prob in r['token_logprobs']:
                 #print(prob)
-                #corrected_logprob.append(prob_sample_to_recover(np.array([np.exp(list(prob.values())[0][0])]), temperature, top_p)[0])
+                #logprob = prob_sample_to_recover(np.array([np.exp(list(prob.values())[0][0])]), temperature, top_p)[0]
+                #corrected_logprob.append(logprob)
                 #print(f"Uncorrected: {np.exp(list(prob.values())[0][0])} -> Corrected: {prob_sample_to_recover(np.array([np.exp(list(prob.values())[0][0])]), temperature, top_p)[0]}")
-
+            
             cumulative_logprob = r["cumulative_logprob"]
 
             #avg_prob = np.sum(np.array(corrected_logprob))/token_count
-            avg_prob = prob_sample_to_recover(np.array([np.exp(cumulative_logprob / token_count)]), temperature, top_p)[0]
+            # avg_prob = prob_sample_to_recover(np.array([np.exp(cumulative_logprob / token_count)]), temperature, top_p)[0]
+
             # Can be used but may be influenced by bug https://github.com/vllm-project/vllm/issues/9453
-            # avg_prob = np.round(np.exp(cumulative_logprob / token_count), 2) 
+            avg_prob = np.round(np.exp(cumulative_logprob / token_count), 2) 
 
             prob_value_list.append(avg_prob)
             if r["c"] == 0:
@@ -162,28 +176,58 @@ def main():
         correct_count = np.count_nonzero(is_correct == 1)
         print(f"Korrekt: {correct_count}")
 
-        # Brechnet Wahrscheinlichleit P(Korrekt| Score in bin 0-0.09, 0.1-0.19, ..., 0.9 )
         total_bin_count = []
         correct_bin_count = []
-        # conf(S_i)
         average_bin_confidence = []
-        for bin in np.arange(0, 1, 0.1):
-            bin_left = np.round(bin,1)
-            bin_right = np.round(bin+0.1, 1)
+        chart_range = []
+        if binning_type == 'linear':
+            chart_range = np.arange(0.05, 1, 0.1)
+            bar_width = 0.1
+            # Brechnet Wahrscheinlichleit P(Korrekt| Score in bin 0-0.09, 0.1-0.19, ..., 0.9 )
+            # conf(S_i)
+            for bin in np.arange(0, 1, 0.1):
+                bin_left = np.round(bin,1)
+                bin_right = np.round(bin+0.1, 1)
 
-            if bin_left == 0.9:
-                correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list <= bin_right)))
-                bin_count   = np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list <= bin_right))
-                bin_sum     = np.sum(prob_value_list, where=(bin_left <= prob_value_list) & (prob_value_list <= bin_right))
-                total_bin_count.append(bin_count)
-                average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
-            else:
-                correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list < bin_right)))
-                bin_count   = np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list < bin_right))
-                bin_sum     = np.sum(prob_value_list, where=(bin_left <= prob_value_list) & (prob_value_list < bin_right))
-                total_bin_count.append(bin_count)
-                average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
-       
+                if bin_left == 0.9:
+                    correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list <= bin_right)))
+                    bin_count   = np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list <= bin_right))
+                    bin_sum     = np.sum(prob_value_list, where=(bin_left <= prob_value_list) & (prob_value_list <= bin_right))
+                    total_bin_count.append(bin_count)
+                    average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
+                else:
+                    correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list < bin_right)))
+                    bin_count   = np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list < bin_right))
+                    bin_sum     = np.sum(prob_value_list, where=(bin_left <= prob_value_list) & (prob_value_list < bin_right))
+                    total_bin_count.append(bin_count)
+                    average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
+        
+        if binning_type == 'quantil':
+            bin_ranges = [0, 
+                          np.quantile(prob_value_list, 0.25),
+                          np.quantile(prob_value_list, 0.50),
+                          np.quantile(prob_value_list, 0.75), 
+                          1]
+            bar_width = []
+            
+            for bin_left, bin_right in zip(bin_ranges, bin_ranges[1:]):
+                chart_range.append(((bin_right-bin_left)/2)+bin_left)
+                bar_width.append(bin_right-bin_left)
+                if bin_right == 1:
+                    correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list <= bin_right)))
+                    bin_count   = np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list <= bin_right))
+                    bin_sum     = np.sum(prob_value_list, where=(bin_left <= prob_value_list) & (prob_value_list <= bin_right))
+                    total_bin_count.append(bin_count)
+                    average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
+                else:
+                    correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list < bin_right)))
+                    bin_count   = np.count_nonzero((bin_left <= prob_value_list) & (prob_value_list < bin_right))
+                    bin_sum     = np.sum(prob_value_list, where=(bin_left <= prob_value_list) & (prob_value_list < bin_right))
+                    total_bin_count.append(bin_count)
+                    average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
+
+           
+        fail_bin_count =  np.array(total_bin_count) - np.array(correct_bin_count)
 
         # Wahrscheinlichkeit, dass Code korrekt ist in den jeweiligen bins
         # corr(S_i)
@@ -196,15 +240,23 @@ def main():
 
         ece = np.round(ece, 2)
         print(f"ECE: {ece}")
-        
-        # Brier Score
-        brier_score = 0
+
+        # Brier Score reference 
+        p_r = correct_count / num_problems
+        brier_score_ref = p_r * (1-p_r)
+        print(f"Brier Score ref: {brier_score_ref}")
+
+        # Brier Score actual
+        brier_score_actual = 0
         for predicted, result in zip(prob_value_list, is_correct):
-            brier_score += (predicted - result)**2
+            brier_score_actual += (predicted - result)**2
 
-        brier_score = np.round((1/num_problems) * brier_score, 2)
+        brier_score_actual = np.round((1/num_problems)*brier_score_actual, 2)
+        print(f"Brier Score actual: {brier_score_actual}")
 
-        print(f"Brier Score: {brier_score}")
+        # Skill Score
+        skill_score = (brier_score_ref-brier_score_actual)/brier_score_ref
+        print(f"Skill Score: {skill_score}")
 
         results_scores_dict[run] = {
             "temperature": temperature,
@@ -212,28 +264,38 @@ def main():
             "num problems": num_problems,
             "correct": correct_count,
             "ECE": ece,
-            "Brier Score": brier_score
+            "p_r": p_r,
+            "brier score ref": brier_score_ref,
+            "brier score actual": brier_score_actual,
+            "skill score": skill_score
         }
 
         results_details_dict[run] = {
             "total_bin_count": list(total_bin_count),
+            "correct_bin": list(correct_bin_count),
+            "fail_bin": list(fail_bin_count),
+            "prob_list": list(prob_value_list),
             "P_correct": list(P_correct),
             "confidence": list(average_bin_confidence),
         }
         if charts == True:
-            generate_calibration_bar_chart(np.arange(0.05, 1, 0.1), P_correct, CHART_DIR+run+"/calibration_bar_chart.png", run)
-
-            create_histogram(prob_value_list, CHART_DIR+run+'/Probabilities.png',run ,'Total Probabilities')
-            create_histogram(pass_log_value_list, CHART_DIR+run+'/Probabilities_pass.png',run ,'Pass Probabilities')
-            create_histogram(fail_log_value_list, CHART_DIR+run+'/Probabilities_fail.png',run ,'Fail Probabilities')
+            colors = []
+            if binning_type == 'linear':
+                total_bin_count_norm = (total_bin_count-np.min(total_bin_count))/(np.max(total_bin_count)-np.min(total_bin_count))
+                for x in total_bin_count_norm:
+                    colors.append((0.0, 0.0, 1.0, x))
+            else:
+                colors = ['tab:red', 'tab:blue', 'tab:green', 'tab:orange']
+            generate_calibration_bar_chart(chart_range, P_correct, CHART_DIR+run+"/calibration_bar_chart_"+binning_type+".png", run, bar_width, colors)
+            create_stacked_bar_plot(chart_range, np.array(correct_bin_count), fail_bin_count, CHART_DIR+run+"/Probabilities_"+binning_type+".png", run, bar_width)
 
     result_scores_json = json.dumps(results_scores_dict, indent=4)
     result_details_json = json.dumps(results_details_dict, indent=4)
  
-    with open("result_corrected_scores.json", "w") as outfile:
+    with open("result_"+binning_type+"_scores.json", "w") as outfile:
         outfile.write(result_scores_json)
     
-    with open("result_corrected_details.json", "w") as outfile:
+    with open("result_"+binning_type+"_details.json", "w") as outfile:
         outfile.write(result_details_json)
 
 if __name__ == "__main__":
