@@ -109,15 +109,14 @@ def main():
 
         # uniform grid 1/m
         m = 10
-        uniform_grid = np.arange(0.0, 1+(1/m), 1/m)
-
-        bin_assignment = []
-
-        for f_x in prob_value_list:
-            bin_assignment.append(np.argmin(np.abs(f_x - uniform_grid)))
-        print(bin_assignment)
-
-        delta_p_f_ = 0
+        uniform_grid = np.arange(0.0, 1+(1/m), 1/m)         
+        bin_assignment = []         
+        
+        for f_x in prob_value_list:             
+            bin_assignment.append(np.argmin(np.abs(f_x - uniform_grid)))         
+            
+        print(bin_assignment)         
+        delta_p_f_ = 0         
         exit()
 
 
