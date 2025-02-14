@@ -14,7 +14,7 @@ BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts_multipl_e/"
 
 charts = True
-binning_type = 'linear' # other option is linear
+binning_type = 'quantil' # other option is linear
 
 def create_histogram(data, path, run, typ):
     fig, ax = plt.subplots()  
@@ -204,9 +204,15 @@ def main():
         
         if binning_type == 'quantil':
             bin_ranges = [0, 
-                          np.quantile(prob_value_list, 0.25),
-                          np.quantile(prob_value_list, 0.50),
-                          np.quantile(prob_value_list, 0.75), 
+                          np.quantile(prob_value_list, 0.1),
+                          np.quantile(prob_value_list, 0.2),
+                          np.quantile(prob_value_list, 0.3),
+                          np.quantile(prob_value_list, 0.4),
+                          np.quantile(prob_value_list, 0.5),
+                          np.quantile(prob_value_list, 0.6),
+                          np.quantile(prob_value_list, 0.7), 
+                          np.quantile(prob_value_list, 0.8),
+                          np.quantile(prob_value_list, 0.9),
                           1]
             bar_width = []
             
@@ -285,7 +291,7 @@ def main():
                 for x in total_bin_count_norm:
                     colors.append((0.0, 0.0, 1.0, x))
             else:
-                colors = ['tab:red', 'tab:blue', 'tab:green', 'tab:orange']
+                colors = ['tab:blue']
             generate_calibration_bar_chart(chart_range, P_correct, CHART_DIR+run+"/calibration_bar_chart_"+binning_type+".png", run, bar_width, colors)
             create_stacked_bar_plot(chart_range, np.array(correct_bin_count), fail_bin_count, CHART_DIR+run+"/Probabilities_"+binning_type+".png", run, bar_width)
 

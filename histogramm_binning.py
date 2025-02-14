@@ -7,10 +7,26 @@ from pathlib import Path
 import gzip
 from typing import Optional
 import os
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
+CHART_DIR = BASE_DIR+"charts_multipl_e/"
 
 binning_type = 'linear'
+
+DEBUG = False
+
+def generate_calibration_bar_chart(y, x, path, run, width, bar_colors="blue"):
+    plt.title(run+' # Reliability chart', fontsize=7)
+    plt.plot(y, x, color=bar_colors)
+    plt.plot([0, 1], [0, 1], linestyle='--')
+    plt.xticks(np.arange(0, 1.1, 0.1))
+    plt.yticks(np.arange(0, 1.1, 0.1))
+    plt.xlabel('Confidence')
+    plt.ylabel('Correct')
+    plt.savefig(path)
+    plt.close()
 
 def gunzip_json(path: Path) -> Optional[dict]:
     """
@@ -54,6 +70,24 @@ def for_file(path: Path):
     }
 
 
+def create_unform_grid(m):
+    return np.round(np.arange(0.0, 1+(1/m), 1/m), 2)   
+
+
+def round_model_to_grid(probs, grid):
+    # Round model to the grid (assign values to bin edges)
+    bin_assignment = []    
+
+    for f_x in probs:             
+        bin_assignment.append(np.round(grid[np.argmin(np.abs(f_x - grid))], 2))         
+    
+    return np.array(bin_assignment)
+
+def calculate_correctnes_per_bin(probs, y, assignments, grid):
+    prob_correct = np.array([np.divide(len(probs[(assignments == i) & (y == 1)]), len(probs[(assignments == i)])) for i in grid])
+    prob_correct[np.isnan(prob_correct)] = 0
+    return prob_correct
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -82,9 +116,9 @@ def main():
         print(f"Temperature: {temperature}")
         print(f"Num Problems: {num_problems}")
 
-        pass_log_value_list = []
-        fail_log_value_list = []
-        prob_value_list = []
+        pass_probs = []
+        fail_probs = []
+        predicted_probs = []
         is_correct = []
 
         for r in results:
@@ -92,33 +126,55 @@ def main():
             cumulative_logprob = r["cumulative_logprob"]
             avg_prob = np.round(np.exp(cumulative_logprob / token_count), 2) 
 
-            prob_value_list.append(avg_prob)
+            predicted_probs.append(avg_prob)
             if r["c"] == 0:
-                fail_log_value_list.append(avg_prob)
+                fail_probs.append(avg_prob)
                 is_correct.append(0)
             if r["c"] == 1:
-                pass_log_value_list.append(avg_prob)
+                pass_probs.append(avg_prob)
                 is_correct.append(1)
 
-        prob_value_list     = np.array(prob_value_list)
-        pass_log_value_list = np.array(pass_log_value_list)
-        fail_log_value_list = np.array(fail_log_value_list)
+        predicted_probs     = np.array(predicted_probs)
+        pass_probs          = np.array(pass_probs)
+        fail_probs          = np.array(fail_probs)
         is_correct          = np.array(is_correct)
         correct_count = np.count_nonzero(is_correct == 1)
-        print(f"Korrekt: {correct_count}")
+        if DEBUG: print(f"Korrekt: {correct_count}") 
+
+        # Split in train and test
+        train_probs, test_probs, train_y, test_y = train_test_split(predicted_probs, is_correct, test_size=0.2)
+        if DEBUG: print(f"Training values: {train_probs}")
+        if DEBUG: print(f"Test values: {test_probs}")
 
         # uniform grid 1/m
-        m = 10
-        uniform_grid = np.arange(0.0, 1+(1/m), 1/m)         
-        bin_assignment = []         
-        
-        for f_x in prob_value_list:             
-            bin_assignment.append(np.argmin(np.abs(f_x - uniform_grid)))         
-            
-        print(bin_assignment)         
-        delta_p_f_ = 0         
-        exit()
+        uniform_grid = create_unform_grid(10)   
+        train_bin_assignments = round_model_to_grid(train_probs, uniform_grid)
 
+        # Calculated the mean correcteness of the assigned bins
+        if DEBUG: print(f"TRAIN Assigned Bins: {train_bin_assignments}")
+        train_correct_per_bin = calculate_correctnes_per_bin(train_probs, train_y, train_bin_assignments, uniform_grid)
+
+        if DEBUG: print(f"Uniform Grid: {uniform_grid}")
+        if DEBUG: print(f"TRAIN Correct per bin: {train_correct_per_bin}")     
+
+        # Calculate correcteness bias in the given bin
+        delta_p_f_ =  uniform_grid - train_correct_per_bin
+ 
+
+        if DEBUG: print(f"TEST Preditions: {test_probs}")    
+        # Test calibration
+        test_bin_assignment = round_model_to_grid(test_probs, uniform_grid)
+        if DEBUG: print(f"TEST Assigned Bins: {test_bin_assignment}")
+        test_correct_per_bin = calculate_correctnes_per_bin(test_probs, test_y, test_bin_assignment, uniform_grid)
+        if DEBUG: print(f"TEST Correct per bin: {test_correct_per_bin}")
+        if DEBUG: print(f"TRAIN Delta_p(f): {delta_p_f_}")  
+        f_dach = np.clip(test_correct_per_bin + delta_p_f_, 0, 1)
+        if DEBUG: print(f"TEST Corrected Values: {f_dach}")
+        if binning_type == 'linear':
+            chart_range = np.arange(0, 1.1, 0.1)
+            bar_width = 0.1
+
+        generate_calibration_bar_chart(chart_range, f_dach, CHART_DIR+run+"/histogramm_binninb_calibration_bar_chart_"+binning_type+".png", run, bar_width)
 
 
 if __name__ == "__main__":
