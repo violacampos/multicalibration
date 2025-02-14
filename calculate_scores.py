@@ -9,12 +9,14 @@ from tools import calibration_scores
 from tools.np_encoder import NpEncoder
 from tools import create_charts
 from tools import data
+from tools import binning
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts_multipl_e/"
 
 charts = True
-binning_type = 'quantil' # other option is linear
+binning_type = 'linear' # other option is linear
+binning_step_size = 0.1
 
 def main():
     parser = argparse.ArgumentParser()
@@ -49,77 +51,26 @@ def main():
         print(f"Num samples: {num_samples}")
 
         probs, is_correct = data.proability_and_correctness_for_samples(results)
-
-        pass_log_value_list = probs[is_correct == 1]
-        correct_count = np.count_nonzero(is_correct == 1)
         
+        correct_count = np.count_nonzero(is_correct == 1)
         print(f"Korrekt: {correct_count}")
 
-        total_bin_count = []
-        correct_bin_count = []
-        average_bin_confidence = []
-        chart_range = []
-        if binning_type == 'linear':
-            chart_range = np.arange(0.05, 1, 0.1)
-            bar_width = 0.1
-            # Brechnet Wahrscheinlichleit P(Korrekt| Score in bin 0-0.09, 0.1-0.19, ..., 0.9 )
-            # conf(S_i)
-            for bin in np.arange(0, 1, 0.1):
-                bin_left = np.round(bin,1)
-                bin_right = np.round(bin+0.1, 1)
-
-                if bin_left == 0.9:
-                    correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list <= bin_right)))
-                    bin_count   = np.count_nonzero((bin_left <= probs) & (probs <= bin_right))
-                    bin_sum     = np.sum(probs, where=(bin_left <= probs) & (probs <= bin_right))
-                    total_bin_count.append(bin_count)
-                    average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
-                else:
-                    correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list < bin_right)))
-                    bin_count   = np.count_nonzero((bin_left <= probs) & (probs < bin_right))
-                    bin_sum     = np.sum(probs, where=(bin_left <= probs) & (probs < bin_right))
-                    total_bin_count.append(bin_count)
-                    average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
-        
+        # Set binning range
         if binning_type == 'quantil':
-            bin_ranges = [0, 
-                          np.quantile(probs, 0.1),
-                          np.quantile(probs, 0.2),
-                          np.quantile(probs, 0.3),
-                          np.quantile(probs, 0.4),
-                          np.quantile(probs, 0.5),
-                          np.quantile(probs, 0.6),
-                          np.quantile(probs, 0.7), 
-                          np.quantile(probs, 0.8),
-                          np.quantile(probs, 0.9),
-                          1]
-            bar_width = []
-            
-            for bin_left, bin_right in zip(bin_ranges, bin_ranges[1:]):
-                chart_range.append(((bin_right-bin_left)/2)+bin_left)
-                bar_width.append(bin_right-bin_left)
-                if bin_right == 1:
-                    correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list <= bin_right)))
-                    bin_count   = np.count_nonzero((bin_left <= probs) & (probs <= bin_right))
-                    bin_sum     = np.sum(probs, where=(bin_left <= probs) & (probs <= bin_right))
-                    total_bin_count.append(bin_count)
-                    average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
-                else:
-                    correct_bin_count.append(np.count_nonzero((bin_left <= pass_log_value_list) & (pass_log_value_list < bin_right)))
-                    bin_count   = np.count_nonzero((bin_left <= probs) & (probs < bin_right))
-                    bin_sum     = np.sum(probs, where=(bin_left <= probs) & (probs < bin_right))
-                    total_bin_count.append(bin_count)
-                    average_bin_confidence.append(np.divide(bin_sum, bin_count, where=np.array(bin_count)!=0))
+            bin_ranges = [(np.quantile(probs, i) if (i != 0) and (i != 1) else i) for i in np.arange(0, 1+binning_step_size, binning_step_size)]   
+        elif binning_type == 'linear':
+            bin_ranges = np.arange(0, 1+binning_step_size, binning_step_size)
 
+        total_per_bin, correct_per_bin, average_bin_confidence, chart_range, bar_width = binning.bin_probabilities(bin_ranges, probs, is_correct)
            
-        fail_bin_count =  np.array(total_bin_count) - np.array(correct_bin_count)
+        fail_bin_count =  total_per_bin - correct_per_bin
 
         # Wahrscheinlichkeit, dass Code korrekt ist in den jeweiligen bins
         # corr(S_i)
-        P_correct = np.divide(np.array(correct_bin_count), np.array(total_bin_count), where=np.array(total_bin_count)!=0)
+        P_correct = np.divide(correct_per_bin, total_per_bin, where=total_per_bin!=0)
 
         # Expected Calibration Error
-        ece = calibration_scores.ece(P_correct, average_bin_confidence, total_bin_count, num_samples)
+        ece = calibration_scores.ece(P_correct, average_bin_confidence, total_per_bin, num_samples)
         print(f"ECE: {ece}")
 
         # Brier Score reference 
@@ -147,8 +98,8 @@ def main():
         }
 
         results_details_dict[run] = {
-            "total_bin_count": list(total_bin_count),
-            "correct_bin": list(correct_bin_count),
+            "total_bin_count": list(total_per_bin),
+            "correct_bin": list(correct_per_bin),
             "fail_bin": list(fail_bin_count),
             "prob_list": list(probs),
             "P_correct": list(P_correct),
@@ -158,13 +109,13 @@ def main():
         if charts == True:
             colors = []
             if binning_type == 'linear':
-                total_bin_count_norm = (total_bin_count-np.min(total_bin_count))/(np.max(total_bin_count)-np.min(total_bin_count))
+                total_bin_count_norm = (total_per_bin-np.min(total_per_bin))/(np.max(total_per_bin)-np.min(total_per_bin))
                 for x in total_bin_count_norm:
                     colors.append((0.0, 0.0, 1.0, x))
             else:
                 colors = ['tab:blue']
             create_charts.calibration_bar_chart(chart_range, P_correct, CHART_DIR+run+"/calibration_bar_chart_"+binning_type+".png", run, bar_width, colors)
-            create_charts.stacked_bar_plot(chart_range, np.array(correct_bin_count), fail_bin_count, CHART_DIR+run+"/Probabilities_"+binning_type+".png", run, bar_width)
+            create_charts.stacked_bar_plot(chart_range, np.array(correct_per_bin), fail_bin_count, CHART_DIR+run+"/Probabilities_"+binning_type+".png", run, bar_width)
 
     result_scores_json = json.dumps(results_scores_dict, indent=4, cls=NpEncoder)
     result_details_json = json.dumps(results_details_dict, indent=4, cls=NpEncoder)
