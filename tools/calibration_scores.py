@@ -25,7 +25,7 @@ def ece(P_correct, average_bin_confidence, total_bin_count, num_samples):
 """
 def brier_ref(correct_sample_count, num_samples):
     p_r = correct_sample_count / num_samples
-    return p_r, p_r * (1-p_r)
+    return np.round(p_r, 2) ,np.round(p_r * (1-p_r), 2)
 
 """
     Caculates the actual brier score for the given data.
@@ -48,5 +48,5 @@ def brier_actual(prediction_prob_list, is_correct, num_problems):
     brier_actual: Actual brier score of the dataset
 """
 def skill_score(brier_ref, brier_actual):
-    return(brier_ref-brier_actual)/brier_ref
+    return np.round((brier_ref-brier_actual)/brier_ref, 2)
 

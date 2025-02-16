@@ -61,7 +61,7 @@ def main():
         elif binning_type == 'linear':
             bin_ranges = np.arange(0, 1+binning_step_size, binning_step_size)
 
-        total_per_bin, correct_per_bin, average_bin_confidence, chart_range, bar_width = binning.bin_probabilities(bin_ranges, probs, is_correct)
+        total_per_bin, correct_per_bin, average_bin_confidence, chart_range, bar_width = binning.bin_range_probabilities(bin_ranges, probs, is_correct)
            
         fail_bin_count =  total_per_bin - correct_per_bin
 
