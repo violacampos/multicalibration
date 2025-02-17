@@ -13,6 +13,7 @@ def round_model_to_grid(probs, grid):
     
     return np.array(bin_assignment)
 
+
 """
     Calculates the needed values for a given bin ranges and assigns the value to the bin if it lies between
 """
