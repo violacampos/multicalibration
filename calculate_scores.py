@@ -15,7 +15,7 @@ BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts_multipl_e/"
 
 charts = True
-binning_type = 'linear' # other option is linear
+binning_type = 'quantil' # other option is linear
 binning_step_size = 0.1
 
 def main():
@@ -32,7 +32,7 @@ def main():
 
     for d in run_dirs:
         # if main dir is in list just continue
-        if d == args.dirs[0]:
+        if d == args.dirs[0] and ("humaneval" not in d and "mbpp" not in d):
             continue
 
         # Get run name

@@ -81,9 +81,10 @@ class hb_calibration:
 
         if self.debug: print(f"TEST Correct per bin: {correct_per_bin}")
 
-        scores = self.calculate_scores(False, X, y, correct_per_bin, correct_count, num_samples, total_per_bin, average_bin_confidence)
-
         f_dach = np.clip(correct_per_bin + self.delta_p_f_, 0, 1)
+
+        scores = self.calculate_scores(False, X, y, f_dach, correct_count, num_samples, total_per_bin, average_bin_confidence)
+
         if self.debug: print(f"TEST Corrected Values: {f_dach}")
 
         return f_dach, scores

@@ -12,7 +12,7 @@ from tabulate import tabulate
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts_multipl_e/"
 
-binning_type = 'linear'
+binning_type = 'quantil'
 binning_step_size = 0.1
 
 DEBUG = False
@@ -33,12 +33,16 @@ def main():
 
     for d in run_dirs:
         # if main dir is in list just continue
-        if d == args.dirs[0]:
+        if d == args.dirs[0] and ("humaneval" not in d and "mbpp" not in d):
             continue
         run_entry = []
         # Get run name
         run = d.split("/runs/", 1)[1]
         run_entry.append(run)
+
+        # create directory for chart generation
+        if not os.path.isdir(CHART_DIR+run):
+            os.makedirs(CHART_DIR+run)
 
         # load the data from the run directory
         run = run.replace('/', '')
@@ -56,7 +60,7 @@ def main():
             grid = binning.create_unform_grid(10)   
         elif binning_type == 'quantil':
             # get quantils for step size n
-            bin_edges = binning.create_qunatil_grid(binning_step_size)
+            bin_edges = binning.create_qunatil_grid(probs, binning_step_size)
             # get the middle of the bins for hb
             grid = np.array(((bin_edges[1:]-bin_edges[:-1])/2)+bin_edges[:-1]) 
        
@@ -66,7 +70,7 @@ def main():
         hb = hb_calibration(grid, OUTPUTS, DEBUG)
 
         # Split in train and test
-        train_probs, test_probs, train_y, test_y = train_test_split(probs, is_correct, test_size=0.2)
+        train_probs, test_probs, train_y, test_y = train_test_split(probs, is_correct, test_size=0.33, random_state=42)
         if DEBUG: print(f"Training values: {train_probs}")
         if DEBUG: print(f"Test values: {test_probs}")
 
@@ -88,14 +92,16 @@ def main():
 
         if binning_type == 'linear':
             chart_range = np.arange(0, 1.1, 0.1)
+        elif binning_type == 'quantil':
+            chart_range = grid
 
         create_charts.calibration_comparision_chart(chart_range, f_dach, fit_correct_per_bin, CHART_DIR+run+"/histogramm_binning_calibration_chart_"+binning_type+".png", run)
         table_print.append(run_entry)
         
-    table_print = tabulate(table_print, headers=['Run', 'Num_samples', 'ECE_diff', 'brier_diff', 'brier_ref_diff', 'skill_score_diff', 'ECE_train', 'brier_train', 'brier_ref_train', 'skill_score_train'], tablefmt='orgtbl')
+    table_print = tabulate(table_print, headers=['Run', 'Num_samples', 'ECE_diff', 'MSE_diff', 'brier_ref_diff', 'skill_score_diff', 'ECE_train', 'MSE_train', 'brier_ref_train', 'skill_score_train'], tablefmt='orgtbl')
     print(table_print)
 
-    with open('results/histogramm_binning_results.txt', 'w') as f:
+    with open('results/histogramm_binning_'+binning_type+'_results.txt', 'w') as f:
         f.write(table_print)
 
 if __name__ == "__main__":

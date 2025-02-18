@@ -3,6 +3,9 @@ import numpy as np
 def create_unform_grid(m):
     return np.round(np.arange(0.0, 1+(1/m), 1/m), 2)   
 
+def create_qunatil_grid(probs, m):
+    return np.array([(np.quantile(probs, i) if (i != 0) and (i != 1) else i) for i in np.arange(0, 1+m, m)])  
+            
 
 def round_model_to_grid(probs, grid):
     # Round model to the grid (assign values to bin edges)
