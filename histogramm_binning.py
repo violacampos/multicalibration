@@ -14,6 +14,7 @@ CHART_DIR = BASE_DIR+"charts_multipl_e/"
 
 binning_type = 'quantil'
 binning_step_size = 0.1
+m = 10
 
 DEBUG = False
 OUTPUTS = False
@@ -41,8 +42,8 @@ def main():
         run_entry.append(run)
 
         # create directory for chart generation
-        if not os.path.isdir(CHART_DIR+run):
-            os.makedirs(CHART_DIR+run)
+        if not os.path.isdir(CHART_DIR+run+'/hb/'):
+            os.makedirs(CHART_DIR+run+'/hb/')
 
         # load the data from the run directory
         run = run.replace('/', '')
@@ -57,12 +58,14 @@ def main():
 
         if binning_type == 'linear':
             # uniform grid 1/m
-            grid = binning.create_unform_grid(10)   
+            grid = binning.create_unform_grid(m)
+            bar_width = 1/m 
         elif binning_type == 'quantil':
             # get quantils for step size n
             bin_edges = binning.create_qunatil_grid(probs, binning_step_size)
             # get the middle of the bins for hb
             grid = np.array(((bin_edges[1:]-bin_edges[:-1])/2)+bin_edges[:-1]) 
+            bar_width = np.array(bin_edges[1:] - bin_edges[:-1])
        
         if OUTPUTS: print(f"Korrekt: {correct_count}") 
         
@@ -84,21 +87,41 @@ def main():
         test_scores = list(list(test_scores.values())[0].values())
         score_difference = np.array(test_scores) - np.array(train_scores)
 
-        for d in score_difference:
-            run_entry.append(d)
-        
-        for d in train_scores:
-            run_entry.append(d)
+        for train, test, diff in zip(train_scores, test_scores, score_difference):
+            run_entry.append(train)
+            run_entry.append(test)
+            run_entry.append(diff)
 
         if binning_type == 'linear':
             chart_range = np.arange(0, 1.1, 0.1)
         elif binning_type == 'quantil':
             chart_range = grid
 
-        create_charts.calibration_comparision_chart(chart_range, f_dach, fit_correct_per_bin, CHART_DIR+run+"/histogramm_binning_calibration_chart_"+binning_type+".png", run)
+        colors = ['tab:blue']
+
+        create_charts.calibration_comparision_chart(chart_range, f_dach, fit_correct_per_bin, CHART_DIR+run+'/hb/'+"/calibration_chart_"+binning_type+".png", run)
+        create_charts.calibration_bar_chart(chart_range, f_dach, CHART_DIR+run+'/hb/'+"/calibration_bar_chart_"+binning_type+"_f_dach.png", run, bar_width, colors)
+        create_charts.calibration_bar_chart(chart_range, fit_correct_per_bin, CHART_DIR+run+'/hb/'+"/calibration_bar_chart_"+binning_type+"_train.png", run, bar_width, colors)
+            
         table_print.append(run_entry)
         
-    table_print = tabulate(table_print, headers=['Run', 'Num_samples', 'ECE_diff', 'MSE_diff', 'brier_ref_diff', 'skill_score_diff', 'ECE_train', 'MSE_train', 'brier_ref_train', 'skill_score_train'], tablefmt='orgtbl')
+    table_print = tabulate(table_print, headers=['Run', 
+                                                 'Num_samples', 
+                                                 'ECE_train', 
+                                                 'ECE_test',
+                                                 'ECE_diff', 
+                                                 'ASCE_train', 
+                                                 'ASCE_test',
+                                                 'ASCE_diff',
+                                                 'MSE_train',
+                                                 'MSE_test', 
+                                                 'MSE_diff',
+                                                 'brier_ref_train', 
+                                                 'brier_ref_test', 
+                                                 'brier_ref_diff', 
+                                                 'skill_score_train', 
+                                                 'skill_score_test',
+                                                'skill_score_diff'], tablefmt='orgtbl')
     print(table_print)
 
     with open('results/histogramm_binning_'+binning_type+'_results.txt', 'w') as f:

@@ -16,6 +16,13 @@ def ece(P_correct, average_bin_confidence, total_bin_count, num_samples):
 
     return np.round(ece, 2)
 
+def asce(P_correct, average_bin_confidence):
+    asce = 0
+    for corr_s_i, conf_s_i in zip(P_correct, average_bin_confidence):
+        asce += (corr_s_i-conf_s_i)**2
+
+    return np.round((1/len(P_correct))*asce, 2)
+
 """
     Calculates the baseline score of the uncalibrated model where every prediction is in one bin.
     p_r is the average correctness in this bin.

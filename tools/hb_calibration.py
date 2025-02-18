@@ -35,9 +35,13 @@ class hb_calibration:
         skill_score = calibration_scores.skill_score(brier_ref, brier_actual)
         if self.outputs: print(f"{colored(prefix, color)} Skill Score: {skill_score}\n") 
 
+        asce = calibration_scores.asce(correct_per_bin, average_bin_confidence)
+        if self.outputs: print(f"{colored(prefix, color)} ASCE: {skill_score}\n") 
+
         results =   {
                         prefix: {
                             "ECE": ece,
+                            "ASCE": asce,
                             "Brier actual": brier_actual,
                             "Brier ref": brier_ref,
                             "Skill Score": skill_score
