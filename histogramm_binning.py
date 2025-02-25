@@ -8,11 +8,12 @@ from sklearn.model_selection import train_test_split
 from tools import data, create_charts, binning
 from tools.hb_calibration import hb_calibration
 from tabulate import tabulate
+import matplotlib.pyplot as plt
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts_multipl_e/"
 
-binning_type = 'quantil'
+binning_type = 'linear'
 binning_step_size = 0.1
 m = 10
 
@@ -49,7 +50,7 @@ def main():
         run = run.replace('/', '')
         results, temperature, top_p, num_samples = data.load_multipl_e_run(d)
         run_entry.append(num_samples)
-        if OUTPUTS: print(f"\nRun: {run}")
+        print(f"\nRun: {run}")
         if OUTPUTS: print(f"Temperature: {temperature}")
         if OUTPUTS: print(f"Num Problems: {num_samples}")
 
@@ -103,6 +104,7 @@ def main():
         
         colors_fit = []
         colors_test = []
+
         # define chart ranges for display reasons
         if binning_type == 'linear':
             chart_range = np.arange(0, 1.1, 0.1)
@@ -120,9 +122,18 @@ def main():
 
 
         # create different charts
-        create_charts.calibration_comparision_chart(chart_range, f_dach, fit_correct_per_bin, CHART_DIR+run+'/hb/'+binning_type+"/calibration_chart.png", run)
-        create_charts.calibration_bar_chart(chart_range, fit_correct_per_bin, CHART_DIR+run+'/hb/'+binning_type+"/calibration_bar_chart_train.png", run, bar_width, colors_fit, fit_total_per_bin)
-        create_charts.calibration_bar_chart(chart_range, f_dach, CHART_DIR+run+'/hb/'+binning_type+"/calibration_bar_chart_f_dach.png", run, bar_width, colors_test, test_total_per_bin)
+        create_charts.calibration_comparision_chart(chart_range[test_total_per_bin != 0], chart_range[fit_total_per_bin != 0], f_dach[test_total_per_bin != 0], fit_correct_per_bin[fit_total_per_bin != 0], CHART_DIR+run+'/hb/'+binning_type+"/calibration_comparison.png", run)
+        
+        fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+        fig.suptitle(run+' # Calibration Charts', fontsize=14)
+        create_charts.calibration_bar_chart(axs[0, 0], 'Training set calibration', chart_range, fit_correct_per_bin, bar_width, colors_fit, fit_total_per_bin)
+        create_charts.calibration_bar_chart(axs[0, 1], 'Test set calibration', chart_range, f_dach, bar_width, colors_test, test_total_per_bin)
+        
+        create_charts.count_distribution(axs[1, 0],'Traing set distribution', chart_range, fit_total_per_bin, bar_width)
+        create_charts.count_distribution(axs[1, 1],'Test set distribution', chart_range, test_total_per_bin, bar_width)
+        
+        plt.savefig(CHART_DIR+run+'/hb/'+binning_type+"/calibration_infos.png")
+        plt.close() 
             
         table_print.append(run_entry)
         

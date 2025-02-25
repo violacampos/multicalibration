@@ -88,13 +88,13 @@ class hb_calibration:
         if self.debug: print(f"TRAIN Correct per bin: {correctness_per_bin}") 
 
         # Calculate correcteness bias in the given bin
-        self.delta_p_f_ =  np.round(np.array([np.mean(y[(assigend_bins == i)] -  X[(assigend_bins == i)]) for i in self.grid]), 2)
+        self.delta_p_f_ =  np.round(np.array([np.mean(y[(assigend_bins == i)] -  assigend_bins[(assigend_bins == i)]) for i in self.grid]), 2)
         self.delta_p_f_[np.isnan(self.delta_p_f_)] = 0
 
         print(f"{colored('Deltas', 'green')}: {self.delta_p_f_}\n")
         # Calculate some scores on the given data like MSE, ECE, ASCE, ...
         scores = self.calculate_scores(True, 
-                                       X, 
+                                       assigend_bins, 
                                        y, 
                                        num_correct, 
                                        num_samples, 
@@ -129,13 +129,13 @@ class hb_calibration:
         total_per_bin, correctness_per_bin, confidence_per_bin = binning.bin_round_probabilities_discret(assigend_bins_corrected, y, self.grid)
 
         # Calculate the deltas on the corrected values
-        deltas_test= np.round(np.array([np.mean(y[(assigend_bins_corrected == i)]) -  np.mean(X_[(assigend_bins_corrected == i)]) for i in self.grid]), 2)
+        deltas_test= np.round(np.array([np.mean(y[(assigend_bins_corrected == i)]) -  np.mean(assigend_bins_corrected[(assigend_bins_corrected == i)]) for i in self.grid]), 2)
         deltas_test[np.isnan(deltas_test)] = 0
 
-        if self.outputs: print(f"{colored('Deltas Test', 'green')}: {deltas_test}\n")
+        print(f"{colored('Deltas Test', 'green')}: {deltas_test}\n")
 
         scores = self.calculate_scores(False, 
-                                       X_, 
+                                       assigend_bins_corrected, 
                                        y, 
                                        num_correct, 
                                        num_samples, 
