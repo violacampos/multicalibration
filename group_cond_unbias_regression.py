@@ -6,6 +6,7 @@ from tools import data, groups, calibration_scores, binning, create_charts
 from tabulate import tabulate
 import re
 from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 
@@ -39,37 +40,20 @@ def main():
         probs, is_correct, programs, prompts = data.proability_and_correctness_for_samples(results)
         correct_count = np.count_nonzero(is_correct == 1)
 
+        # Define group matrix
         groups_w = []
 
         for program, prompt in zip(programs, prompts):
-            """plines = len(program.splitlines()) # Programm Lines
-            print(f"Programm lines: {plines}")
-            plen = len(program)
-            print(f"Programm length: {plen}")
-            contains_import = 1 if "import" in program else 0
-            print(f"Import: {contains_import}")
-            prompt_greater_then_500 = 1 if len(prompt) >= 500 else 0
-            print(f"prompt_greater_then_500: {prompt_greater_then_500}")
-            has_examples = 1 if "example" in prompt else 0
-            print(f"has_examples: {has_examples}")
-            #m = re.search("def ([a-zA-Z0-9_](\w))\w+", prog)
-            input_vars = re.search("\((.*?)\)", program)
-            input_var_count = len(input_vars[0].split(","))
-            print(f"Input var count: {input_var_count}")
-            contains_return = 1 if "return" in program else 0
-            print(f"Return: {contains_return}")"""
-
             groups_w.append(groups.check_groups(prompt, program))
 
         groups_w = np.array(groups_w)
+        
         print(run)
-        #print(groups_w.sum(axis=0))
+        print(f"Gruppen summen: {groups_w.sum(axis=0)}")
 
-        E = np.sum(is_correct*probs) / probs.sum()
-        #print(E)
+        X = np.column_stack([groups_w])
+        y = is_correct - probs
 
-        X = np.column_stack([probs, groups_w])
-        y = np.clip(is_correct, 0, 1)
 
         # Split in train and test
         train_X, test_X, train_y, test_y, train_probs, test_probs, train_correct, test_correct, train_groups, test_groups = train_test_split(X, y, probs, is_correct, groups_w, test_size=0.33, random_state=42)
@@ -82,33 +66,73 @@ def main():
 
         # 
         predictions = reg.predict(test_X)
+        calibrated_predictions = predictions + test_probs
 
-        # group conditional unbiasednes
-        gcu = np.round(np.array([np.mean(train_y[(col == 1)] -  train_probs[(col == 1)]) for col in train_groups.T]), 2)
+        # Calculate different scores
+        gcu = np.round(np.array([np.mean(train_correct[(col == 1)] -  train_probs[(col == 1)]) for col in train_groups.T]), 2)
         gcu[np.isnan(gcu)] = 0
 
-        print(gcu)
+        print(f"Train: Group conditional unbiasednes: {gcu}")
 
-        mse_train = calibration_scores.mse(train_probs, train_y, len(train_probs))
-        print(f"mse_train: {mse_train}")
+        mse_train = calibration_scores.mse(train_probs, train_correct, len(train_probs))
+        print(f"Train: MSE {mse_train}")
 
         grid = binning.create_unform_grid(10)
         bin_assignements = binning.round_model_to_grid(train_probs, grid)
-        tot, corr_1, avg = binning.bin_round_probabilities(bin_assignements, train_probs, train_correct, grid)
+        train_tot, train_corr, avg = binning.bin_round_probabilities(bin_assignements, train_probs, train_correct, grid)
 
-        asce_train = calibration_scores.asce(corr_1, avg, tot,  len(train_probs))
-        print(f"asce_train: {asce_train}")
+        asce_train = calibration_scores.asce(train_corr, avg, train_tot,  len(train_probs))
+        print(f"Train: ASCE {asce_train}")
 
+        ece_train = calibration_scores.asce(train_corr, avg, train_tot,  len(train_probs))
+        print(f"Train: ECE {ece_train}")
 
-        """mse_test = calibration_scores.mse(test_probs, deltas,  len(test_probs))
-        print(f"mse_test: {mse_test}")
-        bin_assignements = binning.round_model_to_grid(test_probs, grid)
-        tot, corr_2, avg = binning.bin_round_probabilities(bin_assignements, test_probs, deltas, grid)
+        # group conditional unbiasednes
+        gcu = np.round(np.array([np.mean(test_correct[(col == 1)] -  calibrated_predictions[(col == 1)]) for col in test_groups.T]), 2)
+        gcu[np.isnan(gcu)] = 0
 
-        asce_test = calibration_scores.asce(corr_2, avg, tot,  len(test_probs))
-        print(f"asce_test: {asce_test}")
+        print(f"Test: Group conditional unbiasednes: {gcu}")
 
-        create_charts.calibration_comparision_chart(grid, corr_2, corr_1, BASE_DIR+"test.png", run)"""
+        mse_test = calibration_scores.mse(calibrated_predictions, test_correct,  len(test_probs))
+        print(f"Test: MSE {mse_test}")
+
+        bin_assignements = binning.round_model_to_grid(calibrated_predictions, grid)
+        test_tot, test_corr, avg = binning.bin_round_probabilities(bin_assignements, calibrated_predictions, test_correct, grid)
+
+        asce_test = calibration_scores.asce(test_corr, avg, test_tot,  len(test_probs))
+        print(f"Test: ASCE: {asce_test}")
+        
+        ece_test = calibration_scores.asce(test_corr, avg, test_tot,  len(test_probs))
+        print(f"Test: ECE {ece_test}")
+        
+
+        # Charts
+        colors_fit = []
+        colors_test = []
+
+        total_bin_count_norm = (train_tot-np.min(train_tot))/(np.max(train_tot)-np.min(train_tot))
+        for x in total_bin_count_norm:
+            colors_fit.append((0.0, 0.0, 1.0, x))
+        total_bin_count_norm = (test_tot-np.min(test_tot))/(np.max(test_tot)-np.min(test_tot))
+        for x in total_bin_count_norm:
+            colors_test.append((0.0, 0.0, 1.0, x))
+
+        chart_range = np.arange(0, 1.1, 0.1)
+        bar_width = 0.1
+
+        fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+        fig.suptitle(run+' # Calibration Charts', fontsize=14)
+        create_charts.calibration_bar_chart(axs[0, 0], 'Training set calibration', chart_range, train_corr, bar_width, colors_fit, train_tot)
+        create_charts.calibration_bar_chart(axs[0, 1], 'Test set calibration', chart_range, test_corr, bar_width, colors_test, test_tot)
+        
+        create_charts.count_distribution(axs[1, 0],'Traing set distribution', chart_range, train_tot, bar_width)
+        create_charts.count_distribution(axs[1, 1],'Test set distribution', chart_range, test_tot, bar_width)
+        
+        plt.savefig(BASE_DIR+"calibration_infos.png")
+        plt.close() 
+
+        create_charts.calibration_comparision_chart(chart_range[test_tot != 0], chart_range[train_tot != 0], test_corr[test_tot != 0], train_corr[train_tot != 0], BASE_DIR+"/calibration_comparison.png", run)
+        
 
         print(reg.coef_)
 
