@@ -42,6 +42,8 @@ def for_file(path: Path):
         
         res_dict = {
             "name": data["name"], 
+            "prompt": data["prompt"],
+            "program": res["program"],
             "n": n,
             "c": c,
             "temperature": data["temperature"] if "temperature" in data else 0.2,
@@ -72,6 +74,8 @@ def load_multipl_e_run(path):
 def proability_and_correctness_for_samples(results, type="avg_logprob"):
     prob_value_list = []
     is_correct = []
+    prompts = []
+    programms = []
 
     # Get the token probailities from the samples and create arrays
     for r in results:
@@ -85,13 +89,15 @@ def proability_and_correctness_for_samples(results, type="avg_logprob"):
                 prob = np.round(np.exp(cumulative_logprob / token_count), 2) 
                 
             # collect average token probabilty and correctnes value
+            programms.append(sample["program"])
+            prompts.append(sample["prompt"])
             prob_value_list.append(prob)
             is_correct.append(1) if sample["c"] == 1 else is_correct.append(0)
 
     prob_value_list     = np.array(prob_value_list)
     is_correct          = np.array(is_correct)
 
-    return prob_value_list, is_correct
+    return prob_value_list, is_correct, programms, prompts
 
 def avg_token_probability(cumulative_logprob, token_count):
     return np.round(np.exp(cumulative_logprob / token_count), 2) 

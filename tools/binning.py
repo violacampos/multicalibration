@@ -69,3 +69,25 @@ def bin_round_probabilities(assigend_bins, probs, is_correct, grid):
     average_bin_confidence = np.divide(bin_sums, total_per_bin, where=np.array(total_per_bin)!=0)
 
     return total_per_bin, correct_per_bin, average_bin_confidence
+
+
+"""
+    Calculates the bin probabilities with a list of assigned bins
+"""
+def bin_round_probabilities_discret(assigend_bins, is_correct, grid):
+    
+    # calculate the total correct per bin
+    correct_per_bin = np.array([np.divide(len(assigend_bins[(assigend_bins == i) & (is_correct == 1)]), len(assigend_bins[(assigend_bins == i)])) for i in grid])
+    correct_per_bin[np.isnan(correct_per_bin)] = 0
+    
+    # calculate the total count per bin
+    total_per_bin = np.array([len(assigend_bins[(assigend_bins == i)]) for i in grid])
+    total_per_bin[np.isnan(total_per_bin)] = 0
+    
+    # sum the probabilities per bin
+    bin_sums = np.array([assigend_bins[assigend_bins == i].sum() for i in grid])
+
+    # calculate the average confidence per bin
+    average_bin_confidence = np.divide(bin_sums, total_per_bin, where=np.array(total_per_bin)!=0)
+
+    return total_per_bin, correct_per_bin, average_bin_confidence

@@ -42,8 +42,8 @@ def main():
         run_entry.append(run)
 
         # create directory for chart generation
-        if not os.path.isdir(CHART_DIR+run+'/hb/'):
-            os.makedirs(CHART_DIR+run+'/hb/')
+        if not os.path.isdir(CHART_DIR+run+'/hb/'+binning_type):
+            os.makedirs(CHART_DIR+run+'/hb/'+binning_type)
 
         # load the data from the run directory
         run = run.replace('/', '')
@@ -53,16 +53,24 @@ def main():
         if OUTPUTS: print(f"Temperature: {temperature}")
         if OUTPUTS: print(f"Num Problems: {num_samples}")
 
-        probs, is_correct = data.proability_and_correctness_for_samples(results)
+        # probs -> confidence of the model
+        # is_correct -> label 1: is correct, 0: is not correct
+        probs, is_correct, _, _ = data.proability_and_correctness_for_samples(results)
         correct_count = np.count_nonzero(is_correct == 1)
+       
+        # split in train and test
+        train_probs, test_probs, train_y, test_y = train_test_split(probs, is_correct, test_size=0.33, random_state=42)
+        if DEBUG: print(f"Training values: {train_probs}")
+        if DEBUG: print(f"Test values: {test_probs}")
 
+        # sets the type of binning
         if binning_type == 'linear':
             # uniform grid 1/m
             grid = binning.create_unform_grid(m)
             bar_width = 1/m 
         elif binning_type == 'quantil':
             # get quantils for step size n
-            bin_edges = binning.create_qunatil_grid(probs, binning_step_size)
+            bin_edges = binning.create_qunatil_grid(train_probs, binning_step_size)
             # get the middle of the bins for hb
             grid = np.array(((bin_edges[1:]-bin_edges[:-1])/2)+bin_edges[:-1]) 
             bar_width = np.array(bin_edges[1:] - bin_edges[:-1])
@@ -72,36 +80,49 @@ def main():
         # Create calibration object
         hb = hb_calibration(grid, OUTPUTS, DEBUG)
 
-        # Split in train and test
-        train_probs, test_probs, train_y, test_y = train_test_split(probs, is_correct, test_size=0.33, random_state=42)
-        if DEBUG: print(f"Training values: {train_probs}")
-        if DEBUG: print(f"Test values: {test_probs}")
-
         # Calculates the deltas for the bins
-        fit_correct_per_bin, train_scores = hb.fit(train_probs, train_y)
+        # fit_correct_per_bin -> correctness per bin
+        # train_scores -> collection of scores on the training dataset
+        fit_correct_per_bin, fit_total_per_bin, train_scores = hb.fit(train_probs, train_y)
 
         # Uses the deltas to calculate the corrected values
-        f_dach, test_scores = hb.predict(test_probs, test_y)
+        # f_dach -> corrected correctness values for each bin
+        # test_scores -> collection of scores on the test dataset
+        f_dach, test_total_per_bin, test_scores = hb.predict(test_probs, test_y)
 
+        # extract score into lists
         train_scores = list(list(train_scores.values())[0].values())
         test_scores = list(list(test_scores.values())[0].values())
         score_difference = np.array(test_scores) - np.array(train_scores)
 
+        # add them to the output list
         for train, test, diff in zip(train_scores, test_scores, score_difference):
             run_entry.append(train)
             run_entry.append(test)
             run_entry.append(diff)
-
+        
+        colors_fit = []
+        colors_test = []
+        # define chart ranges for display reasons
         if binning_type == 'linear':
             chart_range = np.arange(0, 1.1, 0.1)
+            total_bin_count_norm = (fit_total_per_bin-np.min(fit_total_per_bin))/(np.max(fit_total_per_bin)-np.min(fit_total_per_bin))
+            for x in total_bin_count_norm:
+                colors_fit.append((0.0, 0.0, 1.0, x))
+            total_bin_count_norm = (test_total_per_bin-np.min(test_total_per_bin))/(np.max(test_total_per_bin)-np.min(test_total_per_bin))
+            for x in total_bin_count_norm:
+                colors_test.append((0.0, 0.0, 1.0, x))
         elif binning_type == 'quantil':
-            chart_range = grid
+            chart_range = grid            
+            colors_fit = ['tab:blue']
+            colors_test = ['tab:blue']
 
-        colors = ['tab:blue']
 
-        create_charts.calibration_comparision_chart(chart_range, f_dach, fit_correct_per_bin, CHART_DIR+run+'/hb/'+"/calibration_chart_"+binning_type+".png", run)
-        create_charts.calibration_bar_chart(chart_range, f_dach, CHART_DIR+run+'/hb/'+"/calibration_bar_chart_"+binning_type+"_f_dach.png", run, bar_width, colors)
-        create_charts.calibration_bar_chart(chart_range, fit_correct_per_bin, CHART_DIR+run+'/hb/'+"/calibration_bar_chart_"+binning_type+"_train.png", run, bar_width, colors)
+
+        # create different charts
+        create_charts.calibration_comparision_chart(chart_range, f_dach, fit_correct_per_bin, CHART_DIR+run+'/hb/'+binning_type+"/calibration_chart.png", run)
+        create_charts.calibration_bar_chart(chart_range, fit_correct_per_bin, CHART_DIR+run+'/hb/'+binning_type+"/calibration_bar_chart_train.png", run, bar_width, colors_fit, fit_total_per_bin)
+        create_charts.calibration_bar_chart(chart_range, f_dach, CHART_DIR+run+'/hb/'+binning_type+"/calibration_bar_chart_f_dach.png", run, bar_width, colors_test, test_total_per_bin)
             
         table_print.append(run_entry)
         

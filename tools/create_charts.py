@@ -23,10 +23,13 @@ def histogram(data, path, run, typ):
     print(f"Histogram saved: {path}")
     plt.close()
 
-def calibration_bar_chart(y, x, path, run, width, bar_colors):
+
+
+def calibration_bar_chart(y, x, path, run, width, bar_colors, totals):
     plt.title(run+' # Reliability chart', fontsize=7)
-    plt.bar(y, x, width = width, color=bar_colors, edgecolor='black')
+    bars = plt.bar(y, x, width = width, color=bar_colors, edgecolor='black')
     plt.plot([0, 1], [0, 1], linestyle='--')
+    plt.bar_label(bars, totals)
     plt.xticks(np.arange(0, 1.1, 0.1))
     plt.yticks(np.arange(0, 1.1, 0.1))
     plt.xlabel('Confidence')
