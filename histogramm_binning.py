@@ -17,6 +17,8 @@ binning_type = 'linear'
 binning_step_size = 0.1
 m = 10
 
+all_lang = True
+
 DEBUG = False
 OUTPUTS = False
 
@@ -33,12 +35,16 @@ def main():
     run_dirs = [x[0] for x in os.walk(args.dirs[0])]
     run_dirs.sort()
 
+    if all_lang == True:
+        run_dirs = [run_dirs[0]]
+
     for d in run_dirs:
         # if main dir is in list just continue
         if d == args.dirs[0] and ("humaneval" not in d and "mbpp" not in d):
             continue
         run_entry = []
         # Get run name
+
         run = d.split("/runs/", 1)[1]
         run_entry.append(run)
 
@@ -89,15 +95,15 @@ def main():
         # Uses the deltas to calculate the corrected values
         # f_dach -> corrected correctness values for each bin
         # test_scores -> collection of scores on the test dataset
-        f_dach, test_total_per_bin, test_scores = hb.predict(test_probs, test_y)
-
+        #f_dach, test_total_per_bin, test_scores = hb.predict(test_probs, test_y)
+        correctness_per_bin_uncorr, total_per_bin_uncorr, correctness_per_bin_corr, total_per_bin_corr, scores_uncorr, scores_corr = hb.predict(test_probs, test_y) 
         # extract score into lists
-        train_scores = list(list(train_scores.values())[0].values())
-        test_scores = list(list(test_scores.values())[0].values())
-        score_difference = np.array(test_scores) - np.array(train_scores)
+        scores_uncorr = list(list(scores_uncorr.values())[0].values())
+        scores_corr = list(list(scores_corr.values())[0].values())
+        score_difference = np.array(scores_corr) - np.array(scores_uncorr)
 
         # add them to the output list
-        for train, test, diff in zip(train_scores, test_scores, score_difference):
+        for train, test, diff in zip(scores_uncorr, scores_corr, score_difference):
             run_entry.append(train)
             run_entry.append(test)
             run_entry.append(diff)
@@ -108,10 +114,10 @@ def main():
         # define chart ranges for display reasons
         if binning_type == 'linear':
             chart_range = np.arange(0, 1.1, 0.1)
-            total_bin_count_norm = (fit_total_per_bin-np.min(fit_total_per_bin))/(np.max(fit_total_per_bin)-np.min(fit_total_per_bin))
+            total_bin_count_norm = (total_per_bin_uncorr-np.min(total_per_bin_uncorr))/(np.max(total_per_bin_uncorr)-np.min(total_per_bin_uncorr))
             for x in total_bin_count_norm:
                 colors_fit.append((0.0, 0.0, 1.0, x))
-            total_bin_count_norm = (test_total_per_bin-np.min(test_total_per_bin))/(np.max(test_total_per_bin)-np.min(test_total_per_bin))
+            total_bin_count_norm = (total_per_bin_corr-np.min(total_per_bin_corr))/(np.max(total_per_bin_corr)-np.min(total_per_bin_corr))
             for x in total_bin_count_norm:
                 colors_test.append((0.0, 0.0, 1.0, x))
         elif binning_type == 'quantil':
@@ -122,15 +128,15 @@ def main():
 
 
         # create different charts
-        create_charts.calibration_comparision_chart(chart_range[test_total_per_bin != 0], chart_range[fit_total_per_bin != 0], f_dach[test_total_per_bin != 0], fit_correct_per_bin[fit_total_per_bin != 0], CHART_DIR+run+'/hb/'+binning_type+"/calibration_comparison.png", run)
+        create_charts.calibration_comparision_chart(chart_range[total_per_bin_corr != 0], chart_range[total_per_bin_uncorr != 0], correctness_per_bin_corr[total_per_bin_corr != 0], correctness_per_bin_uncorr[total_per_bin_uncorr != 0], CHART_DIR+run+'/hb/'+binning_type+"/calibration_comparison.png", run)
         
         fig, axs = plt.subplots(2, 2, figsize=(10, 10))
-        fig.suptitle(run+' # Calibration Charts', fontsize=14)
-        create_charts.calibration_bar_chart(axs[0, 0], 'Training set calibration', chart_range, fit_correct_per_bin, bar_width, colors_fit, fit_total_per_bin)
-        create_charts.calibration_bar_chart(axs[0, 1], 'Test set calibration', chart_range, f_dach, bar_width, colors_test, test_total_per_bin)
+        fig.suptitle(run+' # Calibration Charts on test set', fontsize=14)
+        create_charts.calibration_bar_chart(axs[0, 0], 'Uncalibrated correctness', chart_range, correctness_per_bin_uncorr, bar_width, colors_fit, total_per_bin_uncorr)
+        create_charts.calibration_bar_chart(axs[0, 1], 'Calibrated correctness', chart_range, correctness_per_bin_corr, bar_width, colors_test, total_per_bin_corr)
         
-        create_charts.count_distribution(axs[1, 0],'Traing set distribution', chart_range, fit_total_per_bin, bar_width)
-        create_charts.count_distribution(axs[1, 1],'Test set distribution', chart_range, test_total_per_bin, bar_width)
+        create_charts.count_distribution(axs[1, 0],'Uncalibrated distribution', chart_range, total_per_bin_uncorr, bar_width)
+        create_charts.count_distribution(axs[1, 1],'Calibrated distribution', chart_range, total_per_bin_corr, bar_width)
         
         plt.savefig(CHART_DIR+run+'/hb/'+binning_type+"/calibration_infos.png")
         plt.close() 

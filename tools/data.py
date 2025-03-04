@@ -4,7 +4,7 @@ import gzip
 from typing import Optional
 import itertools
 import numpy as np
-
+import os
 
 def gunzip_json(path: Path) -> Optional[dict]:
     """
@@ -57,17 +57,39 @@ def for_file(path: Path):
 
     return return_values
 
+# StackOverflow https://stackoverflow.com/questions/27789665/check-if-a-given-directory-contains-any-directory-in-python
+def folders_in(path_to_parent):
+    for fname in os.listdir(path_to_parent):
+        if os.path.isdir(os.path.join(path_to_parent,fname)):
+            yield os.path.join(path_to_parent,fname)
+
+
 def load_multipl_e_run(path):
-    # load the data from the run directory
-    results = [for_file(p) for p in itertools.chain(
-                Path(path).glob("*.results.json"), Path(path).glob("*.results.json.gz"))]
-    results = [r for r in results if r is not None]
+    subfolders = list(folders_in(path))
 
-    temperature = list(set(r[0]["temperature"] for r in results))[0]
-    top_p = list(set(r[0]["top_p"] for r in results))[0]
-    n = list(set(r[0]["n"] for r in results))[0]
+    if not subfolders:
+        # load the data from the run directory
+        results = [for_file(p) for p in itertools.chain(
+                    Path(path).glob("*.results.json"), Path(path).glob("*.results.json.gz"))]
+        results = [r for r in results if r is not None]
 
-    num_samples = len(results) * n
+        temperature = list(set(r[0]["temperature"] for r in results))[0]
+        top_p = list(set(r[0]["top_p"] for r in results))[0]
+        n = list(set(r[0]["n"] for r in results))[0]
+
+        num_samples = len(results) * n
+    else:
+        results = []
+        for folder in subfolders:
+            results_folder = [for_file(p) for p in itertools.chain(
+                                Path(folder).glob("*.results.json"), Path(folder).glob("*.results.json.gz"))]
+            results.extend([r for r in results_folder if r is not None])
+
+        temperature = list(set(r[0]["temperature"] for r in results))[0]
+        top_p = list(set(r[0]["top_p"] for r in results))[0]
+        n = list(set(r[0]["n"] for r in results))[0]
+
+        num_samples = len(results) * n
 
     return results, temperature, top_p, num_samples
 

@@ -119,6 +119,13 @@ class hb_calibration:
         assigend_bins = binning.round_model_to_grid(X, self.grid)
         if self.debug: print(f"TEST Assigned Bins: {assigend_bins}")
 
+        # Calculate some metrics on the UNcorrected values
+        total_per_bin_uncorr, correctness_per_bin_uncorr, confidence_per_bin_uncorr = binning.bin_round_probabilities_discret(assigend_bins, y, self.grid)
+
+        # Calculate the deltas on the uncorrected values
+        deltas_test_uncorr= np.round(np.array([np.mean(y[(assigend_bins == i)]) -  np.mean(assigend_bins[(assigend_bins == i)]) for i in self.grid]), 2)
+        deltas_test_uncorr[np.isnan(deltas_test_uncorr)] = 0
+
         # Correct the model confidence with the calculated deltas
         X_ = np.array([bin_a+self.delta_p_f_[int(bin_a*10)] for bin_a in assigend_bins])
 
@@ -126,25 +133,37 @@ class hb_calibration:
         assigend_bins_corrected = binning.round_model_to_grid(X_, self.grid)
 
         # Calculate some metrics on the corrected values
-        total_per_bin, correctness_per_bin, confidence_per_bin = binning.bin_round_probabilities_discret(assigend_bins_corrected, y, self.grid)
+        total_per_bin_corr, correctness_per_bin_corr, confidence_per_bin_corr = binning.bin_round_probabilities_discret(assigend_bins_corrected, y, self.grid)
 
         # Calculate the deltas on the corrected values
-        deltas_test= np.round(np.array([np.mean(y[(assigend_bins_corrected == i)]) -  np.mean(assigend_bins_corrected[(assigend_bins_corrected == i)]) for i in self.grid]), 2)
-        deltas_test[np.isnan(deltas_test)] = 0
+        deltas_test_corr= np.round(np.array([np.mean(y[(assigend_bins_corrected == i)]) -  np.mean(assigend_bins_corrected[(assigend_bins_corrected == i)]) for i in self.grid]), 2)
+        deltas_test_corr[np.isnan(deltas_test_corr)] = 0
 
-        print(f"{colored('Deltas Test', 'green')}: {deltas_test}\n")
+        print(f"{colored('Deltas Test', 'green')}: {deltas_test_corr}\n")
 
-        scores = self.calculate_scores(False, 
+        scores_corr = self.calculate_scores(False, 
                                        assigend_bins_corrected, 
                                        y, 
                                        num_correct, 
                                        num_samples, 
                                        assigend_bins_corrected, 
-                                       correctness_per_bin, 
-                                       total_per_bin, 
-                                       confidence_per_bin, 
-                                       deltas_test)
+                                       correctness_per_bin_corr, 
+                                       total_per_bin_corr, 
+                                       confidence_per_bin_corr, 
+                                       deltas_test_corr)
 
-        if self.debug: print(f"TEST Corrected Values: {correctness_per_bin}")
+        scores_uncorr = self.calculate_scores(False, 
+                                       assigend_bins, 
+                                       y, 
+                                       num_correct, 
+                                       num_samples, 
+                                       assigend_bins, 
+                                       correctness_per_bin_uncorr, 
+                                       total_per_bin_uncorr, 
+                                       confidence_per_bin_uncorr, 
+                                       deltas_test_uncorr)
 
-        return correctness_per_bin, total_per_bin, scores
+
+        if self.debug: print(f"TEST Corrected Values: {correctness_per_bin_corr}")
+
+        return correctness_per_bin_uncorr, total_per_bin_uncorr, correctness_per_bin_corr, total_per_bin_corr, scores_uncorr, scores_corr

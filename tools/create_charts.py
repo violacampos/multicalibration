@@ -2,10 +2,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 def calibration_comparision_chart(y1, y2, x1, x2 ,path, run):
-    plt.title(run+' # Reliability chart', fontsize=7)
+    plt.title(run+' # Reliability chart on test set', fontsize=7)
     plt.plot(y1, x1, color="green")
     plt.plot(y2, x2, color="red")
-    plt.legend(["Test", "Train"])
+    plt.legend(["Calibrated", "Uncalibrated"])
     plt.plot([0, 1], [0, 1], linestyle='--')
     plt.xticks(np.arange(0, 1.1, 0.1))
     plt.yticks(np.arange(0, 1.1, 0.1))

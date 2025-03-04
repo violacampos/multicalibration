@@ -61,48 +61,48 @@ def main():
         if DEBUG: print(f"Test values: {test_X}")
 
         # Train the linear regression on the train data split
-        reg = LinearRegression().fit(train_X, train_y)
+        reg = LinearRegression().fit(X, y)
         print(reg.score(X, y))
 
         # 
-        predictions = reg.predict(test_X)
-        calibrated_predictions = predictions + test_probs
+        predictions = reg.predict(X)
+        calibrated_predictions = predictions + probs
 
         # Calculate different scores
-        gcu = np.round(np.array([np.mean(train_correct[(col == 1)] -  train_probs[(col == 1)]) for col in train_groups.T]), 2)
+        gcu = np.round(np.array([np.mean(is_correct[(col == 1)] -  probs[(col == 1)]) for col in groups_w.T]), 2)
         gcu[np.isnan(gcu)] = 0
 
         print(f"Train: Group conditional unbiasednes: {gcu}")
 
-        mse_train = calibration_scores.mse(train_probs, train_correct, len(train_probs))
+        mse_train = calibration_scores.mse(probs, is_correct, len(probs))
         print(f"Train: MSE {mse_train}")
 
         grid = binning.create_unform_grid(10)
-        bin_assignements = binning.round_model_to_grid(train_probs, grid)
-        train_tot, train_corr, avg = binning.bin_round_probabilities(bin_assignements, train_probs, train_correct, grid)
+        bin_assignements = binning.round_model_to_grid(probs, grid)
+        train_tot, train_corr, avg = binning.bin_round_probabilities(bin_assignements, probs, is_correct, grid)
 
-        asce_train = calibration_scores.asce(train_corr, avg, train_tot,  len(train_probs))
+        asce_train = calibration_scores.asce(train_corr, avg, train_tot,  len(probs))
         print(f"Train: ASCE {asce_train}")
 
-        ece_train = calibration_scores.asce(train_corr, avg, train_tot,  len(train_probs))
+        ece_train = calibration_scores.asce(train_corr, avg, train_tot,  len(probs))
         print(f"Train: ECE {ece_train}")
 
         # group conditional unbiasednes
-        gcu = np.round(np.array([np.mean(test_correct[(col == 1)] -  calibrated_predictions[(col == 1)]) for col in test_groups.T]), 2)
+        gcu = np.round(np.array([np.mean(is_correct[(col == 1)] -  calibrated_predictions[(col == 1)]) for col in groups_w.T]), 2)
         gcu[np.isnan(gcu)] = 0
 
         print(f"Test: Group conditional unbiasednes: {gcu}")
 
-        mse_test = calibration_scores.mse(calibrated_predictions, test_correct,  len(test_probs))
+        mse_test = calibration_scores.mse(calibrated_predictions, is_correct,  len(calibrated_predictions))
         print(f"Test: MSE {mse_test}")
 
         bin_assignements = binning.round_model_to_grid(calibrated_predictions, grid)
-        test_tot, test_corr, avg = binning.bin_round_probabilities(bin_assignements, calibrated_predictions, test_correct, grid)
+        test_tot, test_corr, avg = binning.bin_round_probabilities(bin_assignements, calibrated_predictions, is_correct, grid)
 
-        asce_test = calibration_scores.asce(test_corr, avg, test_tot,  len(test_probs))
+        asce_test = calibration_scores.asce(test_corr, avg, test_tot,  len(calibrated_predictions))
         print(f"Test: ASCE: {asce_test}")
         
-        ece_test = calibration_scores.asce(test_corr, avg, test_tot,  len(test_probs))
+        ece_test = calibration_scores.asce(test_corr, avg, test_tot,  len(calibrated_predictions))
         print(f"Test: ECE {ece_test}")
         
 
@@ -131,7 +131,7 @@ def main():
         plt.savefig(BASE_DIR+"calibration_infos.png")
         plt.close() 
 
-        create_charts.calibration_comparision_chart(chart_range[test_tot != 0], chart_range[train_tot != 0], test_corr[test_tot != 0], train_corr[train_tot != 0], BASE_DIR+"/calibration_comparison.png", run)
+        create_charts.calibration_comparision_chart(chart_range[test_tot != 0], chart_range[train_tot != 0], test_corr[test_tot != 0], train_corr[train_tot != 0], BASE_DIR+"calibration_comparison.png", run)
         
 
         print(reg.coef_)
