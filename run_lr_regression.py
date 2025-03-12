@@ -8,7 +8,7 @@ from tools.LR_calibration import LR_calibration
 from tabulate import tabulate
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
-CHART_DIR = BASE_DIR+"charts_multipl_e/"
+CHART_DIR = BASE_DIR+"charts/"
 
 DEBUG = False
 OUTPUTS = True
@@ -19,6 +19,7 @@ m = 10
 
 use_train_test_split = True
 control_exp = False
+unit_test = True
 
 all_lang = True
 

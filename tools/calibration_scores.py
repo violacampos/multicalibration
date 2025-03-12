@@ -94,7 +94,7 @@ class score:
         return np.round(expec_var, 2)
 
     def gasce(self, assigned_bins, y, groups):
-        # Calculate correcteness bias in the given bin
+        # Calculate correcteness bias in the given bin and group
         deltas = []
         for i in self.grid:
             temp = []

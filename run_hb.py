@@ -12,7 +12,7 @@ from tabulate import tabulate
 import matplotlib.pyplot as plt
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
-CHART_DIR = BASE_DIR+"charts_multipl_e/"
+CHART_DIR = BASE_DIR+"charts/"
 
 binning_type = 'linear'
 binning_step_size = 0.1

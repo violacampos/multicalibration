@@ -41,8 +41,8 @@ class LR_calibration:
         # Calculate some metrics on the UNcorrected values
         total, correctness, confidence = binning.bin_round_probabilities_discret(assigend_bins, label, self.grid)
 
-        print(f"GCU: {self.gcu(label, probs, groups)}")
-        print(f"GASCE: {self.score_calibration.gasce(assigend_bins, label, groups)}")
+        if self.debug: print(f"GCU: {self.gcu(label, probs, groups)}")
+        if self.debug: print(f"GASCE: {self.score_calibration.gasce(assigend_bins, label, groups)}")
 
         # Calculate calibrations scores
         scores = self.score_calibration.calc_all(set_b_ref, 
