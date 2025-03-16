@@ -20,7 +20,8 @@ class IGHB_calibration:
         
     def fit(self, X, y, groups):
         assigned_bins = binning.round_model_to_grid(X, self.grid)
-        self.deltas, self.gasce = self.score_calibration.gasce(assigned_bins, y, groups)
+        self.deltas = self.get_deltas(assigned_bins, y, groups) 
+        self.gasce = self.score_calibration.gasce(self.deltas)
 
         self.deltas_square = self.deltas**2
 
@@ -40,7 +41,18 @@ class IGHB_calibration:
 
     def predict(self, X, groups):
         assigned_bins = binning.round_model_to_grid(X, self.grid)
-        bin, group = np.unravel_index(self.deltas_square.argmax(), self.deltas.shape)
+
+        P_S_p_g = []
+
+        for i in self.grid:
+            temp = []
+            for g in groups.T:
+                temp.append(len(assigned_bins[(assigned_bins == i) & (g == 1)]) / len(X))
+            P_S_p_g.append(temp)
+
+        P_S_p_g = np.array(P_S_p_g)    
+
+        bin, group = np.unravel_index((P_S_p_g*self.deltas_square).argmax(), self.deltas.shape)
         if self.debug: print(f"Max delta in: Bin {bin}, Group {group}")
         
         max_delta = self.deltas[bin, group]
@@ -57,6 +69,20 @@ class IGHB_calibration:
         gcu = np.round(np.array([np.mean(label[(col == 1)] -  confidence[(col == 1)]) for col in groups.T]), 2)
         gcu[np.isnan(gcu)] = 0
         return gcu
+
+    def get_deltas(self, assigned_bins, y, groups):
+        # Calculate correcteness bias in the given bin and group
+        deltas = []
+        for i in self.grid:
+            temp = []
+            for g in groups.T:
+                temp.append(np.mean(y[(assigned_bins == i) & (g == 1)] -  assigned_bins[(assigned_bins == i) & (g == 1)]))
+            deltas.append(temp)
+        
+        deltas = np.array(deltas)
+        deltas[np.isnan(deltas)] = 0   
+
+        return deltas
     
 
     def calib_score(self, probs, label, groups, set_b_ref=False):

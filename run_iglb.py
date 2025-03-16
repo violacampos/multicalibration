@@ -5,19 +5,20 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from tools import data, binning
 from tools.create_charts import chart_creator
-from tools.ighb_calibration import IGHB_calibration
+from tools.iglb_calibration import IGLB_calibration
 from tools.groups import groups
 from tabulate import tabulate
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts/"
 
-DEBUG = False
+DEBUG = True
 OUTPUTS = True
 
 binning_type = 'linear'
 binning_step_size = 0.1
 m = 10
+alpha = 0.005
 
 use_train_test_split = True
 
@@ -70,6 +71,8 @@ def main():
         if use_train_test_split:
             # Split in train and test
             train_X, test_X, train_y, test_y, train_groups, test_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
+            if DEBUG: print(f"Training values: {train_X}")
+            if DEBUG: print(f"Test values: {test_X}")
         else:
             train_X = probs
             test_X = probs
@@ -89,10 +92,8 @@ def main():
             # get the middle of the bins for hb
             grid = np.array(((bin_edges[1:]-bin_edges[:-1])/2)+bin_edges[:-1]) 
             charts = chart_creator(run, binning_type, grid, save_dir, bin_edges=bin_edges)
-
-        alpha = 0.01
         
-        ighb = IGHB_calibration(grid, alpha, OUTPUTS, DEBUG).fit(test_X, test_y, test_groups)
+        ighb = IGLB_calibration(grid, alpha, OUTPUTS, DEBUG).fit(test_X, test_y, test_groups)
         total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = ighb.calib_score(test_X, test_y, test_groups, set_b_ref=True)
         
         calibrated_conf = test_X

@@ -93,21 +93,13 @@ class score:
 
         return np.round(expec_var, 2)
 
-    def gasce(self, assigned_bins, y, groups):
-        # Calculate correcteness bias in the given bin and group
-        deltas = []
-        for i in self.grid:
-            temp = []
-            for g in groups.T:
-                temp.append(np.mean(y[(assigned_bins == i) & (g == 1)] -  assigned_bins[(assigned_bins == i) & (g == 1)]))
-            deltas.append(temp)
-        
-        deltas = np.array(deltas)
-        deltas[np.isnan(deltas)] = 0   
+    def gasce(self, deltas, iglb=True):
+        if iglb:
+            gasce = np.mean(deltas**2, axis=1)
+        else:
+            gasce = np.mean(deltas**2, axis=0)
 
-        gasce = np.mean(deltas**2, axis=0)
-
-        return deltas, gasce
+        return gasce
 
     def calc_all(   self, 
                     set_brier_ref, # to differentiate between fit and predict
