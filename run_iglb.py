@@ -12,15 +12,15 @@ from tabulate import tabulate
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts/"
 
-DEBUG = True
+DEBUG = False
 OUTPUTS = True
 
 binning_type = 'linear'
 binning_step_size = 0.1
 m = 10
-alpha = 0.005
+alpha = 0.001
 
-use_train_test_split = True
+use_calib_val_split = True
 
 all_lang = True
 
@@ -52,7 +52,7 @@ def main():
         results, temperature, top_p, num_samples = data.load_multipl_e_run(d)
         
         # create directory for chart generation
-        save_dir = CHART_DIR+run+'/ighb/'+binning_type+'/'
+        save_dir = CHART_DIR+run+'/iglb/'+binning_type+'/'
         if not os.path.isdir(save_dir):
             os.makedirs(save_dir)
 
@@ -68,18 +68,18 @@ def main():
         if OUTPUTS: print(f"Gruppen Anzahl: {groups_w.sum(axis=0)}")
 
         # check if we split the data or use the whole dataset for evaluation
-        if use_train_test_split:
+        if use_calib_val_split:
             # Split in train and test
-            train_X, test_X, train_y, test_y, train_groups, test_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
-            if DEBUG: print(f"Training values: {train_X}")
-            if DEBUG: print(f"Test values: {test_X}")
+            calib_X, val_X, calib_y, val_y, calib_groups, val_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
+            if DEBUG: print(f"Calib values: {calib_X}")
+            if DEBUG: print(f"val values: {val_X}")
         else:
-            train_X = probs
-            test_X = probs
-            train_y = is_correct
-            test_y = is_correct
-            train_groups = groups_w
-            test_groups = groups_w
+            calib_X = probs
+            val_X = probs
+            calib_y = is_correct
+            val_y = is_correct
+            calib_groups = groups_w
+            val_groups = groups_w
 
         # sets the type of binning
         if binning_type == 'linear':
@@ -88,25 +88,52 @@ def main():
             charts = chart_creator(run, binning_type, grid, save_dir, m)
         elif binning_type == 'quantil':
             # get quantils for step size n
-            bin_edges = binning.create_qunatil_grid(test_X, binning_step_size)
+            bin_edges = binning.create_qunatil_grid(calib_X, binning_step_size)
             # get the middle of the bins for hb
             grid = np.array(((bin_edges[1:]-bin_edges[:-1])/2)+bin_edges[:-1]) 
             charts = chart_creator(run, binning_type, grid, save_dir, bin_edges=bin_edges)
         
-        ighb = IGLB_calibration(grid, alpha, OUTPUTS, DEBUG).fit(test_X, test_y, test_groups)
-        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = ighb.calib_score(test_X, test_y, test_groups, set_b_ref=True)
+        # Create object and calculate first deltas and so on
+        iglb = IGLB_calibration(grid, alpha, OUTPUTS, DEBUG).fit(calib_X, calib_y, calib_groups)
+        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = iglb.calib_score(calib_X, calib_y, calib_groups, set_b_ref=True)
         
-        calibrated_conf = test_X
-        
-        while ighb.max_error > ighb.alpha:  
+        while True: 
+            # Calculate mse for f_t
+            mse_f_t = iglb.score_calibration.mse(val_X, val_y, len(val_y))
 
-            if DEBUG: print(f"Max Error: {ighb.max_error}")
-            calibrated_conf = ighb.predict(calibrated_conf, test_groups)
-
-            ighb = ighb.fit(calibrated_conf, test_y, test_groups)
-                
+            # Assign bins an calculate the probability for each bin,group and tau combination
+            assigned_bins = binning.round_model_to_grid(calib_X, grid)   
+            P_S_p_g = iglb.get_P_S_p_g(assigned_bins, calib_groups) 
             
-        total_calibrated, correctness_calibrated, scores_calibrated = ighb.calib_score(calibrated_conf, test_y, test_groups)
+            # get the tau, bin, group for which the probality * deltas_squared maximises
+            tau, bin, group = np.unravel_index((P_S_p_g*iglb.deltas_square).argmax(), iglb.deltas.shape)
+            if iglb.debug: print(f"Max delta in: Tau {tau}, Bin {bin}, Group {group}")
+
+            # First break if probability is smaller then alpha
+            if P_S_p_g[tau, bin, group] < alpha:
+                break
+
+            if DEBUG: print(f"Max Error: {iglb.max_error}")
+            # get the calibrated confidences for the calibration subset
+            calib_X = iglb.predict(calib_X, calib_groups, assigned_bins, tau, bin, group)
+
+            # get the calibrated confidences for the validation subset to calculate MSE
+            assigned_bins_val = binning.round_model_to_grid(val_X, grid)   
+            val_X = iglb.predict(val_X, val_groups, assigned_bins_val, tau, bin, group)
+
+            # Second Break if MSE of the new model is greater or equal to the model before
+            mse_h_t_plus_1 = iglb.score_calibration.mse(val_X, val_y, len(val_y))
+            print(f"MSE h_t+1: {mse_h_t_plus_1} >= MSE f_t{mse_f_t}")
+            if mse_h_t_plus_1 >= mse_f_t:
+                break
+            
+            # Set the new model for the next iteration
+            iglb = iglb.fit(calib_X, calib_y, calib_groups)
+                
+        print(f"GASCE: {iglb.gasce}\n")
+
+        total_calibrated, correctness_calibrated, scores_calibrated = iglb.calib_score(calib_X, calib_y, calib_groups)
+        
         # Charts
         charts.set_bar_colors(total_uncalibrated, total_calibrated)
         charts.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)

@@ -1,8 +1,8 @@
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import KFold
 from tools.calibration_scores import score
 from tools import binning
+from scipy.special import logit, expit
+from scipy.optimize import minimize
 
 class IGLB_calibration:
     
@@ -21,130 +21,75 @@ class IGLB_calibration:
 
         
     def fit(self, X, y, groups):
+        # get the assigned bins of the confidences
         assigned_bins = binning.round_model_to_grid(X, self.grid)
 
+        # calculate deltas
         self.deltas = self.get_deltas(assigned_bins, y, groups) 
 
+        # set the group average square calibration error
         self.gasce = np.mean(self.score_calibration.gasce(self.deltas), axis=0)
         if self.debug: print(f"GASCE: {self.gasce}")
         
-        self.deltas_square = self.deltas**2
+        # set deltas_square for further use
+        self.deltas_square = self.deltas**2     
 
-        p_group = groups.sum(axis=0) / len(groups)
-        if self.debug: print(f"P(X)=1: {p_group}")
-        
-        c = self.gasce*p_group
-        if self.debug: print(f"While condition: {c}")
-        
-        self.max_error = c[np.argmax(c)]
-
-        self.LS = self.get_LS(X, y, assigned_bins, groups)
+        # set the linear scaling for every bin, group and tau combination
+        self.LS = self.get_LS(X, y, groups)
 
         return self
 
-    def predict(self, X, groups):
-        assigned_bins = binning.round_model_to_grid(X, self.grid)        
+    def predict(self, X, groups, assigned_bins, tau, bin, group):
         
-        P_S_p_g = self.get_P_S_p_g(assigned_bins, groups) 
-        tau, bin, group = np.unravel_index((P_S_p_g*self.deltas_square).argmax(), self.deltas.shape)
-        if self.debug: print(f"Max delta in: Tau {tau}, Bin {bin}, Group {group}")
-        
-        print(self.LS[tau, bin, group])
-        if self.debug: print(f"Sigmoid Coef: {self.LS[tau, bin, group].coef_}, Intercept: {self.LS[tau, bin, group].intercept_}")
+        # get the alpha and beta values for the given tau, bin, group
+        alpha_star = self.LS[tau, bin, group][0]
+        beta_star = self.LS[tau, bin, group][1]
+        if self.debug: print(f"Alpha: {alpha_star}, Beta: {beta_star}")
 
-        for idx, bin_a in enumerate(assigned_bins):
-            if (int(bin_a*10) <= bin) and (groups[idx, group] == 1) and self.LS[tau, bin, group] is not None:
-                self.LS[tau, bin, group].predict([[X[idx]]])[0]
-            else:
-                bin_a
-
+        # Set the new values with the help of the alpha and beta values for all elements in the set
         if tau == 0:
-            X_ = np.array([self.LS[tau, bin, group].predict([[X[idx]]])[0] if (int(bin_a*10) <= bin) and (groups[idx, group] == 1) and self.LS[tau, bin, group] is not None else X[idx] for idx, bin_a in enumerate(assigned_bins)])
+            X_ = np.array([expit(alpha_star + beta_star * logit(X[idx])) if (int(bin_a*10) <= bin) and (groups[idx, group] == 1) else X[idx] for idx, bin_a in enumerate(assigned_bins)])
         else:
-            X_ = np.array([self.LS[tau, bin, group].predict([[X[idx]]])[0] if (int(bin_a*10) >= bin) and (groups[idx, group] == 1) and self.LS[tau, bin, group] is not None else X[idx] for idx, bin_a in enumerate(assigned_bins)])
+            X_ = np.array([expit(alpha_star + beta_star * logit(X[idx])) if (int(bin_a*10) >= bin) and (groups[idx, group] == 1) else X[idx] for idx, bin_a in enumerate(assigned_bins)])
 
         return X_ 
-
-    """
-        Calculates the group conditional unbiasednes
-    """
-    def gcu(self, label, confidence, groups):
-        gcu = np.round(np.array([np.mean(label[(col == 1)] -  confidence[(col == 1)]) for col in groups.T]), 2)
-        gcu[np.isnan(gcu)] = 0
-        return gcu
-    
+   
     def get_deltas(self, assigned_bins, y, groups):
-        # Calculate correcteness bias in the given bin and group
-        deltas_smaller = []
-        for i in self.grid:
-            temp = []
-            for g in groups.T:
-                temp.append(np.mean(y[(assigned_bins <= i) & (g == 1)] -  assigned_bins[(assigned_bins <= i) & (g == 1)]))
-            deltas_smaller.append(temp)
+        # Calculate correcteness bias in the given bin, group and use smaller then
+        deltas_smaller = [[np.mean(y[(assigned_bins <= i) & (g == 1)] -  assigned_bins[(assigned_bins <= i) & (g == 1)]) for g in groups.T] for i in self.grid]
+
+        # Calculate correcteness bias in the given bin, group and use greater then
+        deltas_greater = [[np.mean(y[(assigned_bins >= i) & (g == 1)] -  assigned_bins[(assigned_bins >= i) & (g == 1)]) for g in groups.T]for i in self.grid]
         
-        deltas_greater = []
-        for i in self.grid:
-            temp = []
-            for g in groups.T:
-                temp.append(np.mean(y[(assigned_bins >= i) & (g == 1)] -  assigned_bins[(assigned_bins >= i) & (g == 1)]))
-            deltas_greater.append(temp)
-        
+        # Stack both arrays index 0 is <= and 1 is >=
         deltas = np.stack([np.array(deltas_smaller), np.array(deltas_greater)])
         deltas[np.isnan(deltas)] = 0   
 
         return deltas
     
     def get_P_S_p_g(self, assigned_bins, groups):
-        P_S_p_g_smaller = []
+        
+        # Create sets with tau <= bin, for each bin and group
+        P_S_p_g_smaller = [[len(assigned_bins[(assigned_bins <= i) & (g == 1)]) / len(assigned_bins) for g in groups.T] for i in self.grid]
 
-        for i in self.grid:
-            temp = []
-            for g in groups.T:
-                temp.append(len(assigned_bins[(assigned_bins <= i) & (g == 1)]) / len(assigned_bins))
-            P_S_p_g_smaller.append(temp)
+        # Create sets with tau >= bin, for each bin and group
+        P_S_p_g_greater = [[len(assigned_bins[(assigned_bins >= i) & (g == 1)]) / len(assigned_bins) for g in groups.T] for i in self.grid]
 
-        P_S_p_g_greater = []
-
-        for i in self.grid:
-            temp = []
-            for g in groups.T:
-                temp.append(len(assigned_bins[(assigned_bins >= i) & (g == 1)]) / len(assigned_bins))
-            P_S_p_g_greater.append(temp)
-
+        # Stack both arrays index 0 is <= and 1 is >=
         P_S_p_g = np.stack([np.array(P_S_p_g_smaller), np.array(P_S_p_g_greater)]) 
         P_S_p_g[np.isnan(P_S_p_g)] = 0   
 
         return P_S_p_g
     
-    def get_LS(self, X, is_correct, assigned_bins, groups):
-        LS_smaller = []
+    def get_LS(self, X, is_correct, groups):
+        # Get alpha and beta values for <= subsets
+        LS_smaller = [[self.linear_scaling(X[(X <= i) & (g == 1)], is_correct[(X <= i) & (g == 1)]) for idx, g in enumerate(groups.T)] for i in self.grid]
         
-        for i in self.grid:
-            temp = []
-            for g in groups.T:
-                calibrator = LogisticRegression()
-                if len(np.unique(is_correct[(X <= i) & (g == 1)])) < 2:
-                    temp.append(None)
-                else:
-                    calibrator.fit(X[(X <= i) & (g == 1)].reshape(-1, 1), is_correct[(X <= i) & (g == 1)])
-                    temp.append(calibrator) 
-            LS_smaller.append(temp)
-
-        LS_greater = []
-
-        for i in self.grid:
-            temp = []
-            for g in groups.T:
-                calibrator = LogisticRegression()
-                if len(np.unique(is_correct[(X >= i) & (g == 1)])) < 2:
-                    temp.append(None)
-                else:
-                    calibrator.fit(X[(X >= i) & (g == 1)].reshape(-1, 1), is_correct[(X >= i) & (g == 1)])
-                    temp.append(calibrator) 
-            LS_greater.append(temp)
-
+        # Get alpha and beta values for >= subsets
+        LS_greater = [[self.linear_scaling(X[(X >= i) & (g == 1)], is_correct[(X >= i) & (g == 1)]) for idx, g in enumerate(groups.T)] for i in self.grid]
+        
+        # Stack both arrays index 0 is <= and 1 is >=
         LS = np.stack([np.array(LS_smaller), np.array(LS_greater)]) 
-
         return LS
 
     def calib_score(self, probs, label, groups, set_b_ref=False):
@@ -173,3 +118,22 @@ class IGLB_calibration:
                                                 confidence)
         
         return total, correctness, scores
+    
+    def linear_scaling(self, X, is_correct):
+        #print(f"\nBin: {i}, Group: {g}")
+        # clip the value to dont get -inf or inf
+        X = np.clip(X, 1e-10, 1 - 1e-10)
+        # get logits for confidences
+        logit_f = logit(X)
+        
+        # mse function to optimize for alpha and beta
+        def mse(params):
+            alpha, beta = params
+            transformed = expit(alpha + beta * logit_f)  # LS[f](x)
+            return np.mean((transformed - is_correct) ** 2)  # calculate the MSE
+
+        # minimize for the mse and get alpha and beta values
+        result = minimize(mse, x0=[0, 1])  
+        alpha_star, beta_star = result.x
+
+        return [alpha_star, beta_star]
