@@ -1,4 +1,20 @@
 import numpy as np
+from tools.create_charts import chart_creator
+
+def get_grid_and_chartmaker(run, binning_type, save_dir, m, probs, binning_step_size):
+    # sets the type of binning
+    if binning_type == 'linear':
+        # uniform grid 1/m
+        grid = create_unform_grid(m)
+        chartmaker = chart_creator(run, binning_type, grid, save_dir, m)
+    elif binning_type == 'quantil':
+        # get quantils for step size n
+        bin_edges = create_qunatil_grid(probs, binning_step_size)
+        # get the middle of the bins for hb
+        grid = np.array(((bin_edges[1:]-bin_edges[:-1])/2)+bin_edges[:-1]) 
+        chartmaker = chart_creator(run, binning_type, grid, save_dir, bin_edges=bin_edges)
+    
+    return grid, chartmaker
 
 def create_unform_grid(m):
     return np.round(np.arange(0.0, 1+(1/m), 1/m), 2)   

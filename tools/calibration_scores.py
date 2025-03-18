@@ -2,6 +2,9 @@ import numpy as np
 import math
 from termcolor import colored
 
+from tabulate import tabulate
+
+from tools import binning
 
 class score:
     def __init__(self, grid, outputs, debug):
@@ -11,6 +14,8 @@ class score:
         self.p_r = 0
         self.brier_ref_score = 0
 
+        self.score_table = []
+        self.printable_table = []
 
     """
         Calculates the expected Calibration error. Weighted average of the deviation from the 
@@ -36,7 +41,7 @@ class score:
 
     def asce_deltas(self, total_bin_count, num_samples, delta_p_f):
         asce = 0
-        for bin_count, delta in zip( total_bin_count, delta_p_f):
+        for bin_count, delta in zip(total_bin_count, delta_p_f):
             asce += (bin_count/num_samples)*(delta)**2
         return np.round(asce, 2)
 
@@ -74,6 +79,10 @@ class score:
     def skill_score(self, brier_ref, brier_actual):
         return np.round((brier_ref-brier_actual)/brier_ref, 2)
 
+    def gcu(self, label, confidence, groups):
+        gcu = np.round(np.array([np.mean(label[(col == 1)] -  confidence[(col == 1)]) for col in groups.T]), 2)
+        gcu[np.isnan(gcu)] = 0
+        return gcu
 
     def expeceted_variance(self, probs, label, bin_assignement, grid, num_samples):
         expec_var = 0.0        
@@ -93,20 +102,19 @@ class score:
 
         return np.round(expec_var, 2)
 
-    def gasce(self, deltas, iglb=True):
-        if iglb:
-            gasce = np.mean(deltas**2, axis=1)
+    def gasce(self, deltas):
+        if deltas.shape[0] == 2 and len(deltas.shape) == 3:
+            gasce = np.mean(np.mean(np.mean(deltas**2, axis=1), axis=0))
+        elif len(deltas.shape) == 2:
+            gasce = np.mean(np.mean(deltas**2, axis=0))
         else:
-            gasce = np.mean(deltas**2, axis=0)
-
+            gasce = np.mean(deltas**2)
         return gasce
 
     def calc_all(   self, 
                     set_brier_ref, # to differentiate between fit and predict
                     confidences, # raw confidences of the model
                     labels, # indicate if sample is correct
-                    num_correct, # total correct
-                    num_samples, # total samples
                     assigned_bins,  # assigend bins for the given confidence
                     correctness_per_bin,  # probability that the sample is correct per bin
                     total_per_bin,  # total samples in bin
@@ -120,31 +128,36 @@ class score:
         else:
             prefix = 'Calib'
             color = 'green'
+
+        num_samples = len(confidences)
+        num_correct = np.count_nonzero(labels == 1)
         
         # Calculate scores for Data
         ece = self.ece(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
-        if self.outputs: print(f"{colored(prefix, color)} ECE: {ece}")
 
         mse = self.mse(confidences, labels, num_samples)
-        if self.outputs: print(f"{colored(prefix, color)} MSE: {mse}")
-        
+
         if delta_p_f is not None:
             asce = self.asce_deltas(total_per_bin, num_samples, delta_p_f)
-            if self.outputs: print(f"{colored(prefix, color)} ASCE: {asce}") 
         else:
             asce = self.asce(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
-            if self.outputs: print(f"{colored(prefix, color)} ASCE: {asce}") 
 
         expeceted_variance = self.expeceted_variance(confidences, labels, assigned_bins, self.grid, num_samples)
-        if self.outputs: print(f"{colored(prefix, color)} Expected Variance: {expeceted_variance}") 
 
         if set_brier_ref:
             self.p_r, self.brier_ref_score = self.brier_ref(num_correct, num_samples)
-            if self.outputs: print(f"{colored(prefix, color)} Baseline: {self.p_r}")
-            if self.outputs: print(f"{colored(prefix, color)} Brier ref: {self.brier_ref_score}")
+            if self.outputs: 
+                print(f"{colored(prefix, color)} Baseline: {self.p_r}")
+                print(f"{colored(prefix, color)} Brier ref: {self.brier_ref_score}")
 
         skill_score = self.skill_score(self.brier_ref_score, mse)
-        if self.outputs: print(f"{colored(prefix, color)} Skill Score: {skill_score}\n") 
+        
+        if self.outputs: 
+            print(f"{colored(prefix, color)} ECE: {ece}")
+            print(f"{colored(prefix, color)} MSE: {mse}")
+            print(f"{colored(prefix, color)} ASCE: {asce}") 
+            print(f"{colored(prefix, color)} Expected Variance: {expeceted_variance}") 
+            print(f"{colored(prefix, color)} Skill Score: {skill_score}\n") 
 
         results =   {
                         prefix: {
@@ -157,4 +170,116 @@ class score:
                     }  
 
         return results
+    
+    def calc_all_new(   self,
+                        confidences,
+                        labels,
+                        groups=None,
+                        deltas=None, # deviation per bin
+                        set_brier_ref=False  # to differentiate between fit and predict
+                    ):
+        
+        if set_brier_ref:
+            prefix = 'Uncalib'
+            color = 'red'
+        else:
+            prefix = 'Calib'
+            color = 'green'
 
+        # Assign the values in X to the corresponding bin (discretize values)
+        assigned_bins = binning.round_model_to_grid(confidences, self.grid)
+        if self.debug: print(f"TEST Assigned Bins: {assigned_bins}")
+
+        # Calculate some metrics on the UNcorrected values
+        total_per_bin, correctness_per_bin, confidence_per_bin = binning.bin_round_probabilities_discret(assigned_bins, labels, self.grid)
+
+        num_samples = len(assigned_bins)
+        num_correct = np.count_nonzero(labels == 1)
+        
+        # Get Expected Calibration Error
+        ece = self.ece(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
+
+        # Get Mean Squared Error
+        mse = self.mse(assigned_bins, labels, num_samples)
+
+        # Get Average Squared Error
+        asce = self.asce(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
+
+        # Get expected Variance 
+        expeceted_variance = self.expeceted_variance(assigned_bins, labels, assigned_bins, self.grid, num_samples)
+
+        # Output results if set
+        if self.outputs: 
+            print(f"{colored(prefix, color)} ECE: {ece}")
+            print(f"{colored(prefix, color)} MSE: {mse}")
+            print(f"{colored(prefix, color)} ASCE: {asce}") 
+            print(f"{colored(prefix, color)} Expected Variance: {expeceted_variance}") 
+        
+        # Get Group conditional unbiasednes
+        if groups is not None:
+            gcu = self.gcu(labels, confidences, groups)
+            if self.outputs: print(f"{colored(prefix, color)} GCU: {gcu}")
+
+        # Set the reference Score for the Skill Score calculation
+        if set_brier_ref:
+            self.p_r, self.brier_ref_score = self.brier_ref(num_correct, num_samples)
+            if self.outputs: 
+                print(f"{colored(prefix, color)} Baseline: {self.p_r}")
+                print(f"{colored(prefix, color)} Brier ref: {self.brier_ref_score}")
+
+        # Calculate the Skill score
+        skill_score = self.skill_score(self.brier_ref_score, mse)
+        if self.outputs: print(f"{colored(prefix, color)} Skill Score: {skill_score}") 
+        
+        # create dict for better overview
+        results =   {
+                        prefix: {
+                            "ECE": ece,
+                            "ASCE": asce,
+                            "MSE": mse,
+                            "Brier ref": self.brier_ref_score,
+                            "Skill Score": skill_score
+                        } 
+                    }  
+        
+        # Get Group Average squared calibration error
+        if deltas is not None:
+            gasce = self.gasce(deltas)
+            if self.outputs: print(f"{colored(prefix, color)} GASCE: {gasce}\n")
+            results[prefix]['GASCE'] = gasce
+
+        return total_per_bin, correctness_per_bin, results
+    
+    def add_to_score_table(self, run, uncalib_scores, calib_scores):
+        
+        uncalib_scores = list(list(uncalib_scores.values())[0].values())
+        calib_scores = list(list(calib_scores.values())[0].values())
+        score_difference = np.array(calib_scores) - np.array(uncalib_scores)
+
+        self.add_entry(run, "Uncalib", uncalib_scores)
+        self.add_entry(run, "Calib", calib_scores)
+        self.add_entry(run, "Diff", score_difference)
+
+    def add_entry(self, run, type, scores):
+        entry = []
+        
+        if type == 'Uncalib':
+            entry.append(run)
+        else:
+            entry.append('')
+        entry.append(type)
+        for s in scores:
+            entry.append(s)
+
+        self.score_table.append(entry)
+
+    def display_score_table(self):
+        self.printable_table = tabulate(self.score_table, headers=[ 'Run', 
+                                                                    'Type',
+                                                                    'ECE', 
+                                                                    'ASCE', 
+                                                                    'MSE',
+                                                                    'brier_ref', 
+                                                                    'skill_score',
+                                                                    'GASCE'], tablefmt='orgtbl')
+        print(self.printable_table)

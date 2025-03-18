@@ -2,9 +2,10 @@ import numpy as np
 import argparse
 import os
 from sklearn.model_selection import train_test_split
-from tools import data, groups, calibration_scores, binning
+from tools import data, calibration_scores, binning
+from tools.groups import groups
 from tools.create_charts import chart_creator
-from tools.LR_calibration import LR_calibration
+from tools.lr_calibration import lr_calibration
 from tabulate import tabulate
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
@@ -19,13 +20,13 @@ m = 10
 
 use_train_test_split = True
 control_exp = False
-unit_test = True
 
 all_lang = True
+save_table = True
 
 np.seterr(divide='ignore', invalid='ignore')
 
-def main():
+def main(extern=False):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "dirs", type=str,  help="Directories with results. ", nargs="+")
@@ -41,10 +42,9 @@ def main():
         # if main dir is in list just continue
         if d == args.dirs[0] and ("humaneval" not in d and "mbpp" not in d):
             continue
-        run_entry = []
+        
         # Get run name
         run = d.split("/runs/", 1)[1]
-        run_entry.append(run)
 
         # load the data from the run directory
         run = run.replace('/', '')
@@ -56,15 +56,9 @@ def main():
             os.makedirs(save_dir)
 
         probs, is_correct, programs, prompts = data.proability_and_correctness_for_samples(results)
-        correct_count = np.count_nonzero(is_correct == 1)
 
         # Define group matrix
-        groups_w = []
-
-        # Check group memebership
-        for program, prompt in zip(programs, prompts):
-            groups_w.append(groups.check_groups(prompt, program))
-
+        groups_w = groups(programs, prompts).create_groups()
         groups_w = np.array(groups_w)
         
         if OUTPUTS: print(f"Run: {run}")
@@ -96,38 +90,51 @@ def main():
             test_label = is_correct
             train_groups = groups_w
             test_groups = groups_w
-
-        # sets the type of binning
-        if binning_type == 'linear':
-            # uniform grid 1/m
-            grid = binning.create_unform_grid(m)
-            charts = chart_creator(run, binning_type, grid, save_dir, m)
-        elif binning_type == 'quantil':
-            # get quantils for step size n
-            bin_edges = binning.create_qunatil_grid(train_probs, binning_step_size)
-            # get the middle of the bins for hb
-            grid = np.array(((bin_edges[1:]-bin_edges[:-1])/2)+bin_edges[:-1]) 
-            charts = chart_creator(run, binning_type, grid, save_dir, bin_edges=bin_edges)
-        
+       
+        # get the grid for binning type and the chartmaker obj        
+        grid, chartmaker = binning.get_grid_and_chartmaker(run, binning_type, save_dir, m, train_probs, binning_step_size)
 
         # Train the linear regression on the train data split
-        lr_calib = LR_calibration(grid, OUTPUTS, DEBUG).fit(train_X, train_y)
+        lr = lr_calibration(grid, OUTPUTS, DEBUG).fit(train_X, train_y)
 
         # Calculate scores on uncalibrated test set
-        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = lr_calib.calib_score(test_probs, test_label, test_groups, set_b_ref=True)
+        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = lr.score_obj.calc_all_new(test_probs, 
+                                                                                                      test_label, 
+                                                                                                      groups=test_groups,
+                                                                                                      deltas=lr.get_deltas(test_probs, test_label), 
+                                                                                                      set_brier_ref=True)
        
         # Make predictions
-        predictions = lr_calib.predict(test_X)
+        predictions = lr.predict(test_X)
+
+        # use predictions to calibrate
         calibrated_predictions = predictions + test_probs
 
         # Calculate scores on uncalibrated test set
-        total_calibrated, correctness_calibrated, scores_calibrated = lr_calib.calib_score(calibrated_predictions, test_label, test_groups)
+        total_calibrated, correctness_calibrated, scores_calibrated = lr.score_obj.calc_all_new(calibrated_predictions, 
+                                                                                                test_label, 
+                                                                                                groups=test_groups,
+                                                                                                deltas=lr.get_deltas(calibrated_predictions, test_label))
        
-        # Charts
-        charts.set_bar_colors(total_uncalibrated, total_calibrated)
-        charts.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)
+        if OUTPUTS: print(f"Group Lamdas: {lr.reg.coef_}")
 
-        print(f"Group Lamdas: {lr_calib.reg.coef_}")
+        # Add entry for the run in the score table
+        lr.score_obj.add_to_score_table(run, scores_uncalibrated, scores_calibrated)
+        
+        # only return values when called from other script
+        if extern:
+            return total_calibrated, correctness_calibrated, scores_calibrated
+        else:
+            # Charts
+            chartmaker.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)
+    
+    # display score table for all runs
+    lr.score_obj.display_score_table()
+
+    # saves the score table
+    if save_table:
+        with open('results/lr_'+binning_type+'_results.txt', 'w') as f:
+            f.write(lr.score_obj.printable_table)
 
 if __name__ == "__main__":
     main()

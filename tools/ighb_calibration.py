@@ -10,7 +10,7 @@ class IGHB_calibration:
         self.alpha = alpha
         self.debug = debug
         self.outputs = outputs
-        self.score_calibration = score(grid, outputs, debug)
+        self.score_obj = score(grid, outputs, debug)
 
         self.deltas = None
         self.deltas_square = None
@@ -21,7 +21,7 @@ class IGHB_calibration:
     def fit(self, X, y, groups):
         assigned_bins = binning.round_model_to_grid(X, self.grid)
         self.deltas = self.get_deltas(assigned_bins, y, groups) 
-        self.gasce = self.score_calibration.gasce(self.deltas)
+        self.gasce = np.mean(self.deltas**2, axis=0)
 
         self.deltas_square = self.deltas**2
 
@@ -62,14 +62,6 @@ class IGHB_calibration:
 
         return X_ 
 
-    """
-        Calculates the group conditional unbiasednes
-    """
-    def gcu(self, label, confidence, groups):
-        gcu = np.round(np.array([np.mean(label[(col == 1)] -  confidence[(col == 1)]) for col in groups.T]), 2)
-        gcu[np.isnan(gcu)] = 0
-        return gcu
-
     def get_deltas(self, assigned_bins, y, groups):
         # Calculate correcteness bias in the given bin and group
         deltas = []
@@ -83,31 +75,3 @@ class IGHB_calibration:
         deltas[np.isnan(deltas)] = 0   
 
         return deltas
-    
-
-    def calib_score(self, probs, label, groups, set_b_ref=False):
-        # Number of samples in X
-        num_samples = len(probs)
-        
-        # Number of correct samples
-        num_correct = np.count_nonzero(label == 1)
-
-        # Assign the values in X to the corresponding bin (discretize values)
-        assigend_bins = binning.round_model_to_grid(probs, self.grid)
-        if self.debug: print(f"TEST Assigned Bins: {assigend_bins}")
-
-        # Calculate some metrics on the UNcorrected values
-        total, correctness, confidence = binning.bin_round_probabilities_discret(assigend_bins, label, self.grid)
-
-        # Calculate calibrations scores
-        scores = self.score_calibration.calc_all(set_b_ref, 
-                                                assigend_bins, 
-                                                label, 
-                                                num_correct, 
-                                                num_samples, 
-                                                assigend_bins, 
-                                                correctness, 
-                                                total, 
-                                                confidence)
-        
-        return total, correctness, scores

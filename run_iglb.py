@@ -20,13 +20,12 @@ binning_step_size = 0.1
 m = 10
 alpha = 0.001
 
-use_calib_val_split = True
-
 all_lang = True
+save_table = True
 
 np.seterr(divide='ignore', invalid='ignore')
 
-def main():
+def main(extern=False):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "dirs", type=str,  help="Directories with results. ", nargs="+")
@@ -42,10 +41,9 @@ def main():
         # if main dir is in list just continue
         if d == args.dirs[0] and ("humaneval" not in d and "mbpp" not in d):
             continue
-        run_entry = []
+        
         # Get run name
         run = d.split("/runs/", 1)[1]
-        run_entry.append(run)
 
         # load the data from the run directory
         run = run.replace('/', '')
@@ -57,8 +55,6 @@ def main():
             os.makedirs(save_dir)
 
         probs, is_correct, programs, prompts = data.proability_and_correctness_for_samples(results)
-        correct_count = np.count_nonzero(is_correct == 1)
-
        
         # Define group matrix
         groups_w = groups(programs, prompts).create_groups()
@@ -67,39 +63,24 @@ def main():
         if OUTPUTS: print(f"Run: {run}")
         if OUTPUTS: print(f"Gruppen Anzahl: {groups_w.sum(axis=0)}")
 
-        # check if we split the data or use the whole dataset for evaluation
-        if use_calib_val_split:
-            # Split in train and test
-            calib_X, val_X, calib_y, val_y, calib_groups, val_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
-            if DEBUG: print(f"Calib values: {calib_X}")
-            if DEBUG: print(f"val values: {val_X}")
-        else:
-            calib_X = probs
-            val_X = probs
-            calib_y = is_correct
-            val_y = is_correct
-            calib_groups = groups_w
-            val_groups = groups_w
-
-        # sets the type of binning
-        if binning_type == 'linear':
-            # uniform grid 1/m
-            grid = binning.create_unform_grid(m)
-            charts = chart_creator(run, binning_type, grid, save_dir, m)
-        elif binning_type == 'quantil':
-            # get quantils for step size n
-            bin_edges = binning.create_qunatil_grid(calib_X, binning_step_size)
-            # get the middle of the bins for hb
-            grid = np.array(((bin_edges[1:]-bin_edges[:-1])/2)+bin_edges[:-1]) 
-            charts = chart_creator(run, binning_type, grid, save_dir, bin_edges=bin_edges)
+        calib_X, val_X, calib_y, val_y, calib_groups, val_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
+        if DEBUG: print(f"Calib values: {calib_X}")
+        if DEBUG: print(f"val values: {val_X}")
         
+        # get the grid for binning type and the chartmaker obj        
+        grid, chartmaker = binning.get_grid_and_chartmaker(run, binning_type, save_dir, m, calib_X, binning_step_size)
+
         # Create object and calculate first deltas and so on
         iglb = IGLB_calibration(grid, alpha, OUTPUTS, DEBUG).fit(calib_X, calib_y, calib_groups)
-        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = iglb.calib_score(calib_X, calib_y, calib_groups, set_b_ref=True)
+        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = iglb.score_obj.calc_all_new(calib_X, 
+                                                                                                        calib_y, 
+                                                                                                        groups=calib_groups, 
+                                                                                                        deltas=iglb.deltas, 
+                                                                                                        set_brier_ref=True)
         
         while True: 
             # Calculate mse for f_t
-            mse_f_t = iglb.score_calibration.mse(val_X, val_y, len(val_y))
+            mse_f_t = iglb.score_obj.mse(val_X, val_y, len(val_y))
 
             # Assign bins an calculate the probability for each bin,group and tau combination
             assigned_bins = binning.round_model_to_grid(calib_X, grid)   
@@ -122,22 +103,35 @@ def main():
             val_X = iglb.predict(val_X, val_groups, assigned_bins_val, tau, bin, group)
 
             # Second Break if MSE of the new model is greater or equal to the model before
-            mse_h_t_plus_1 = iglb.score_calibration.mse(val_X, val_y, len(val_y))
-            print(f"MSE h_t+1: {mse_h_t_plus_1} >= MSE f_t{mse_f_t}")
+            mse_h_t_plus_1 = iglb.score_obj.mse(val_X, val_y, len(val_y))
+            if OUTPUTS: print(f"MSE h_t+1: {mse_h_t_plus_1} >= MSE f_t{mse_f_t}")
             if mse_h_t_plus_1 >= mse_f_t:
                 break
             
             # Set the new model for the next iteration
             iglb = iglb.fit(calib_X, calib_y, calib_groups)
                 
-        print(f"GASCE: {iglb.gasce}\n")
-
-        total_calibrated, correctness_calibrated, scores_calibrated = iglb.calib_score(calib_X, calib_y, calib_groups)
+        #if OUTPUTS: print(f"GASCE: {iglb.gasce}\n")
+        total_calibrated, correctness_calibrated, scores_calibrated = iglb.score_obj.calc_all_new(calib_X, 
+                                                                                                  calib_y, 
+                                                                                                  groups=calib_groups,
+                                                                                                  deltas=iglb.deltas)
         
-        # Charts
-        charts.set_bar_colors(total_uncalibrated, total_calibrated)
-        charts.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)
-    
+        # Add entry for the run in the score table
+        iglb.score_obj.add_to_score_table(run, scores_uncalibrated, scores_calibrated)
 
+        if extern:
+            return total_calibrated, correctness_calibrated, scores_calibrated
+        else:
+            # Charts
+            chartmaker.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)
+
+    # display score table for all runs
+    iglb.score_obj.display_score_table()
+    
+    # saves the score table
+    if save_table:
+        with open('results/iglb_'+binning_type+'_results.txt', 'w') as f:
+            f.write(iglb.score_obj.printable_table)
 if __name__ == "__main__":
     main()

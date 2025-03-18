@@ -4,7 +4,7 @@ import os
 from sklearn.model_selection import train_test_split
 from tools import data, groups, calibration_scores, binning
 from tools.create_charts import chart_creator
-from tools.LR_calibration import LR_calibration
+from tools.lr_calibration import lr_calibration
 from tabulate import tabulate
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
@@ -54,7 +54,7 @@ def run_test_1(grid):
     
     y = is_correct - probs
 
-    lr_calib = LR_calibration(grid, OUTPUTS, DEBUG).fit(X, y)
+    lr_calib = lr_calibration(grid, OUTPUTS, DEBUG).fit(X, y)
 
     predictions = lr_calib.predict(X)
     calibrated_predictions = np.round(predictions + probs, 2)
@@ -85,7 +85,7 @@ def run_test_2(grid):
     
     y = is_correct - probs
 
-    lr_calib = LR_calibration(grid, OUTPUTS, DEBUG).fit(X, y)
+    lr_calib = lr_calibration(grid, OUTPUTS, DEBUG).fit(X, y)
 
     predictions = lr_calib.predict(X)
     calibrated_predictions = np.round(predictions + probs, 2)
@@ -116,7 +116,7 @@ def run_test_3(grid):
     
     y = is_correct - probs
 
-    lr_calib = LR_calibration(grid, OUTPUTS, DEBUG).fit(X, y)
+    lr_calib = lr_calibration(grid, OUTPUTS, DEBUG).fit(X, y)
 
     predictions = lr_calib.predict(X)
     calibrated_predictions = np.round(predictions + probs, 2)
@@ -144,7 +144,7 @@ def run_test_4(grid):
     
     y = is_correct - probs
 
-    lr_calib = LR_calibration(grid, OUTPUTS, DEBUG).fit(X, y)
+    lr_calib = lr_calibration(grid, OUTPUTS, DEBUG).fit(X, y)
 
     predictions = lr_calib.predict(X)
     calibrated_predictions = np.round(predictions + probs, 2)

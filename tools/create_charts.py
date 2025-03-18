@@ -47,6 +47,22 @@ class chart_creator():
         plt.savefig(self.save_dir+"calibration_comparison.png")
         plt.close()
 
+    def calibration_method_comp_chart(self, y1, y2, y3, y4, y5, x1, x2, x3, x4, x5):
+        plt.title(self.run+' # Reliability chart on test set', fontsize=7)
+        plt.plot(y1, x1, color="r")
+        plt.plot(y2, x2, color="b")
+        plt.plot(y3, x3, color="g")
+        plt.plot(y4, x4, color="c")
+        plt.plot(y5, x5, color="m")
+        plt.legend(["Uncalibrated", "HB", "LR", "IGHB", "IGLB"])
+        plt.plot([0, 1], [0, 1], linestyle='--')
+        plt.xticks(np.arange(0, 1.1, 0.1))
+        plt.yticks(np.arange(0, 1.1, 0.1))
+        plt.xlabel('Confidence')
+        plt.ylabel('Correct')
+        plt.savefig(self.save_dir+"calibration_method_comparison.png")
+        plt.close()
+
     def histogram(self, data, path, typ):
         fig, ax = plt.subplots()  
         ax.hist(data, range=(0, 1.0))
@@ -85,6 +101,7 @@ class chart_creator():
         plt.close()
 
     def calibration_info(self, total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated):
+        self.set_bar_colors(total_uncalibrated, total_calibrated)
 
         fig, axs = plt.subplots(2, 2, figsize=(10, 10))
         fig.suptitle(self.run+' # Calibration Charts', fontsize=14)
