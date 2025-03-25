@@ -17,7 +17,7 @@ def get_grid_and_chartmaker(run, binning_type, save_dir, m, probs, binning_step_
     return grid, chartmaker
 
 def create_unform_grid(m):
-    return np.round(np.arange(0.0, 1+(1/m), 1/m), 2)   
+    return np.arange(0.0, 1+(1/m), 1/m)
 
 def create_qunatil_grid(probs, m):
     return np.array([(np.quantile(probs, i) if (i != 0) and (i != 1) else i) for i in np.arange(0, 1+m, m)])  
@@ -28,7 +28,7 @@ def round_model_to_grid(probs, grid):
     bin_assignment = []    
 
     for f_x in probs:             
-        bin_assignment.append(np.round(grid[np.argmin(np.abs(f_x - grid))], 2))         
+        bin_assignment.append(grid[np.argmin(np.abs(f_x - grid))])         
     
     return np.array(bin_assignment)
 

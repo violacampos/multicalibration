@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-
 class chart_creator():
 
     def __init__(self, run, binning_type,  grid, save_dir, m=None, bin_edges=None):
@@ -16,7 +15,7 @@ class chart_creator():
         # define chart ranges for display reasons
         if binning_type == 'linear':
             if not m: exit("m needs to be set with linear binning")
-            self.chart_range = self.grid
+            self.chart_range = grid
             self.bar_width = 1/m 
         elif binning_type == 'quantil':
             if not bin_edges: exit("bin_edges needs to be set with quantil binning")
@@ -80,11 +79,11 @@ class chart_creator():
         ax.set(xlabel ='Confidence')
         ax.set(ylabel ='Count')
 
-    def calibration_bar_chart(self, ax, sub_title, x, bar_colors, totals):
+    def calibration_bar_chart(self, ax, sub_title, x, bar_colors):
         ax.set_title(sub_title, fontsize=12)
         bars = ax.bar(self.chart_range, x, width = self.bar_width, color=bar_colors, edgecolor='black')
         ax.plot([0, 1], [0, 1], linestyle='--')
-        ax.bar_label(bars, totals)
+        #ax.bar_label(bars, totals)
         ax.set_xticks(np.arange(0, 1.1, 0.1))
         ax.set_yticks(np.arange(0, 1.1, 0.1))
         ax.set(xlabel ='Confidence')
@@ -101,12 +100,16 @@ class chart_creator():
         plt.close()
 
     def calibration_info(self, total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated):
+        if len(correctness_calibrated) > 11:
+            # auf 11 bins runterbrechen
+            total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated = self.map_values_to_eleven_bins(total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated)
+
         self.set_bar_colors(total_uncalibrated, total_calibrated)
 
         fig, axs = plt.subplots(2, 2, figsize=(10, 10))
         fig.suptitle(self.run+' # Calibration Charts', fontsize=14)
-        self.calibration_bar_chart(axs[0, 0], 'Test uncalibrated', correctness_uncalibrated, self.colors_uncalibrated, total_uncalibrated)
-        self.calibration_bar_chart(axs[0, 1], 'Test calibrated', correctness_calibrated, self.colors_calibrated, total_calibrated)
+        self.calibration_bar_chart(axs[0, 0], 'Test uncalibrated', correctness_uncalibrated, self.colors_uncalibrated)
+        self.calibration_bar_chart(axs[0, 1], 'Test calibrated', correctness_calibrated, self.colors_calibrated)
         
         self.count_distribution(axs[1, 0], 'Test uncalibrated distribution', total_uncalibrated)
         self.count_distribution(axs[1, 1], 'Test calibrated distribution', total_calibrated)
@@ -115,4 +118,95 @@ class chart_creator():
         plt.close() 
 
         self.calibration_comparision_chart(self.chart_range[total_calibrated != 0], self.chart_range[total_uncalibrated != 0], correctness_calibrated[total_calibrated != 0], correctness_uncalibrated[total_uncalibrated != 0])
-            
+
+        self.reset_chart_range()
+
+    def plot_correctness_change(self, total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated, change, num):
+        if len(correctness_calibrated) > 11:
+            # auf 11 bins runterbrechen
+            total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated = self.map_values_to_eleven_bins(total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated)
+
+        self.set_bar_colors(total_uncalibrated, total_calibrated)
+
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+        fig.suptitle(np.round(change,4), fontsize=14)
+        self.calibration_bar_chart(axs[0], 'Before', correctness_uncalibrated, self.colors_uncalibrated)
+        self.calibration_bar_chart(axs[1], 'After', correctness_calibrated, self.colors_calibrated)
+
+        plt.savefig(self.save_dir+"changes/"+str(num)+"_calibration_changes.png")
+        plt.close() 
+        
+        self.reset_chart_range()
+
+    def map_values_to_eleven_bins(self, total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated):
+        # auf 11 bins runterbrechen
+        new_bins = np.arange(0, 1.1, 0.1)
+        bin_assignment = np.array([new_bins[np.argmin(np.abs(old_bin - new_bins))] for old_bin in self.chart_range])
+
+        t = []
+        for nb in new_bins:
+            t.append(np.sum(total_calibrated[bin_assignment == nb]))
+        total_calibrated = np.array(t)
+        
+        t = []
+        for nb in new_bins:
+            t.append(np.sum(total_uncalibrated[bin_assignment == nb]))
+        total_uncalibrated = np.array(t)
+
+        t = []
+        for nb in new_bins:
+            t.append(np.mean(correctness_uncalibrated[bin_assignment == nb]))
+        correctness_uncalibrated = np.array(t)
+        
+        t = []
+        for nb in new_bins:
+            t.append(np.mean(correctness_calibrated[bin_assignment == nb]))
+        correctness_calibrated = np.array(t)
+
+        self.chart_range = new_bins
+        self.bar_width = 0.1
+
+        return total_calibrated, total_uncalibrated, correctness_calibrated, correctness_uncalibrated
+    
+    def map_correctness_to_eleven_bins(self, correctness):
+        # auf 11 bins runterbrechen
+        new_bins = np.arange(0, 1.1, 0.1)
+        bin_assignment = np.array([new_bins[np.argmin(np.abs(old_bin - new_bins))] for old_bin in self.chart_range])
+
+        t = []
+        for nb in new_bins:
+            t.append(np.mean(correctness[bin_assignment == nb]))
+        correctness = np.array(t)
+
+        return correctness
+    
+    def map_total_to_eleven_bins(self, total):
+        # auf 11 bins runterbrechen
+        new_bins = np.arange(0, 1.1, 0.1)
+        bin_assignment = np.array([new_bins[np.argmin(np.abs(old_bin - new_bins))] for old_bin in self.chart_range])
+
+        t = []
+        for nb in new_bins:
+            t.append(np.sum(total[bin_assignment == nb]))
+        total = np.array(t)
+
+        return total
+    
+    def map_total_to_eleven_bins(self, total, group=False):
+        # auf 11 bins runterbrechen
+        new_bins = np.arange(0, 1.1, 0.1)
+        bin_assignment = np.array([new_bins[np.argmin(np.abs(old_bin - new_bins))] for old_bin in self.chart_range])
+
+        t = []
+        for nb in new_bins:
+            if group:
+                t.append(np.sum(total[(bin_assignment == nb)], axis=0))
+            else:
+                t.append(np.sum(total[(bin_assignment == nb)]))
+        total = np.array(t)
+
+        return total
+      
+    def reset_chart_range(self):
+        self.chart_range = self.grid
+

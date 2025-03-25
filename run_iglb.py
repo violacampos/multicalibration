@@ -17,8 +17,9 @@ OUTPUTS = True
 
 binning_type = 'linear'
 binning_step_size = 0.1
+#m = 10
+epsilon = 0.001
 m = 10
-alpha = 0.001
 
 all_lang = True
 save_table = True
@@ -63,19 +64,24 @@ def main(extern=False):
         if OUTPUTS: print(f"Run: {run}")
         if OUTPUTS: print(f"Gruppen Anzahl: {groups_w.sum(axis=0)}")
 
-        calib_X, val_X, calib_y, val_y, calib_groups, val_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
-        if DEBUG: print(f"Calib values: {calib_X}")
+        # split in 60% train, 20% validation and 20% test
+        train_X, test_X, train_y, test_y, train_groups, test_groups = train_test_split(probs, is_correct, groups_w, test_size=0.2, random_state=42)
+
+        train_X, val_X, train_y, val_y, train_groups, val_groups = train_test_split(train_X, train_y, train_groups, test_size=0.25, random_state=42)
+
+        #calib_X, val_X, calib_y, val_y, calib_groups, val_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
+        if DEBUG: print(f"Calib values: {train_X}")
         if DEBUG: print(f"val values: {val_X}")
         
         # get the grid for binning type and the chartmaker obj        
-        grid, chartmaker = binning.get_grid_and_chartmaker(run, binning_type, save_dir, m, calib_X, binning_step_size)
+        grid, chartmaker = binning.get_grid_and_chartmaker(run, binning_type, save_dir, m, train_X, binning_step_size)
 
         # Create object and calculate first deltas and so on
-        iglb = IGLB_calibration(grid, alpha, OUTPUTS, DEBUG).fit(calib_X, calib_y, calib_groups)
-        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = iglb.score_obj.calc_all_new(calib_X, 
-                                                                                                        calib_y, 
-                                                                                                        groups=calib_groups, 
-                                                                                                        deltas=iglb.deltas, 
+        iglb = IGLB_calibration(grid, epsilon, OUTPUTS, DEBUG).fit(train_X, train_y, train_groups)
+        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = iglb.score_obj.calc_all_new(test_X, 
+                                                                                                        test_y, 
+                                                                                                        groups=test_groups, 
+                                                                                                        deltas=iglb.get_deltas(test_X, test_y, test_groups), 
                                                                                                         set_brier_ref=True)
         
         while True: 
@@ -83,20 +89,24 @@ def main(extern=False):
             mse_f_t = iglb.score_obj.mse(val_X, val_y, len(val_y))
 
             # Assign bins an calculate the probability for each bin,group and tau combination
-            assigned_bins = binning.round_model_to_grid(calib_X, grid)   
-            P_S_p_g = iglb.get_P_S_p_g(assigned_bins, calib_groups) 
+            assigned_bins = binning.round_model_to_grid(train_X, grid)   
+            P_S_p_g = iglb.get_P_S_p_g(assigned_bins, train_groups) 
             
             # get the tau, bin, group for which the probality * deltas_squared maximises
             tau, bin, group = np.unravel_index((P_S_p_g*iglb.deltas_square).argmax(), iglb.deltas.shape)
             if iglb.debug: print(f"Max delta in: Tau {tau}, Bin {bin}, Group {group}")
 
             # First break if probability is smaller then alpha
-            if P_S_p_g[tau, bin, group] < alpha:
+            if P_S_p_g[tau, bin, group] < epsilon:
                 break
 
             if DEBUG: print(f"Max Error: {iglb.max_error}")
             # get the calibrated confidences for the calibration subset
-            calib_X = iglb.predict(calib_X, calib_groups, assigned_bins, tau, bin, group)
+            train_X = iglb.predict(train_X, train_groups, assigned_bins, tau, bin, group)
+
+            # get the calibrated confidences for the test subset
+            assigned_bins_test = binning.round_model_to_grid(test_X, grid)   
+            test_X = iglb.predict(test_X, test_groups, assigned_bins_test, tau, bin, group)
 
             # get the calibrated confidences for the validation subset to calculate MSE
             assigned_bins_val = binning.round_model_to_grid(val_X, grid)   
@@ -109,13 +119,13 @@ def main(extern=False):
                 break
             
             # Set the new model for the next iteration
-            iglb = iglb.fit(calib_X, calib_y, calib_groups)
+            iglb = iglb.fit(train_X, train_y, train_groups)
                 
         #if OUTPUTS: print(f"GASCE: {iglb.gasce}\n")
-        total_calibrated, correctness_calibrated, scores_calibrated = iglb.score_obj.calc_all_new(calib_X, 
-                                                                                                  calib_y, 
-                                                                                                  groups=calib_groups,
-                                                                                                  deltas=iglb.deltas)
+        total_calibrated, correctness_calibrated, scores_calibrated = iglb.score_obj.calc_all_new(test_X, 
+                                                                                                  test_y, 
+                                                                                                  groups=test_groups,
+                                                                                                  deltas=iglb.get_deltas(test_X, test_y, test_groups))
         
         # Add entry for the run in the score table
         iglb.score_obj.add_to_score_table(run, scores_uncalibrated, scores_calibrated)

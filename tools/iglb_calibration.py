@@ -20,11 +20,8 @@ class IGLB_calibration:
 
         
     def fit(self, X, y, groups):
-        # get the assigned bins of the confidences
-        assigned_bins = binning.round_model_to_grid(X, self.grid)
-
         # calculate deltas
-        self.deltas = self.get_deltas(assigned_bins, y, groups) 
+        self.deltas = self.get_deltas(X, y, groups) 
        
         # set deltas_square for further use
         self.deltas_square = self.deltas**2     
@@ -49,7 +46,10 @@ class IGLB_calibration:
 
         return X_ 
    
-    def get_deltas(self, assigned_bins, y, groups):
+    def get_deltas(self, X, y, groups):
+        # get the assigned bins of the confidences
+        assigned_bins = binning.round_model_to_grid(X, self.grid)
+
         # Calculate correcteness bias in the given bin, group and use smaller then
         deltas_smaller = [[np.mean(y[(assigned_bins <= i) & (g == 1)] -  assigned_bins[(assigned_bins <= i) & (g == 1)]) for g in groups.T] for i in self.grid]
 

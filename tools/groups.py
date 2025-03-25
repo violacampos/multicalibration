@@ -23,25 +23,32 @@ class groups:
         loc = np.array([program.count("\n")+1 for program in self.programs])
         self.median_loc = np.median(loc)
 
-    def check_groups(self, prompt, program):
+    def check_groups(self, prompt, program, include_counter=True):
         check = []
         
         """contains_import = 1 if "import" in program else 0
         check.append(contains_import)"""
 
         prompt_greater_then_500 = 1 if len(prompt) >= 500 else 0
+        counter_prompt_greater_then_500 = 0 if len(prompt) >= 500 else 1
         check.append(prompt_greater_then_500)
+        if include_counter: check.append(counter_prompt_greater_then_500)
+
 
         has_examples = 1 if "example" in prompt else 0
+        counter_has_examples = 0 if "example" in prompt else 1
         check.append(has_examples)
+        if include_counter: check.append(counter_has_examples)
 
-        input_vars = re.search("\((.*?)\)", program)
+        """input_vars = re.search("\((.*?)\)", program)
         input_var_count = len(input_vars[0].split(","))
         res = 1 if input_var_count > 2 else 0
-        check.append(res)
+        check.append(res)"""
 
         longer_then_mean_loc = 1 if program.count("\n")+1 > self.median_loc else 0
+        counter_longer_then_mean_loc = 0 if program.count("\n")+1 > self.median_loc else 1
         check.append(longer_then_mean_loc)
+        if include_counter: check.append(counter_longer_then_mean_loc)
 
         """contains_return = 1 if "return" in program else 0
         check.append(contains_return)"""

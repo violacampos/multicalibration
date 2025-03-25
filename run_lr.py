@@ -75,8 +75,12 @@ def main(extern=False):
 
         # check if we split the data or use the whole dataset for evaluation
         if use_train_test_split:
-            # Split in train and test
-            train_X, test_X, train_y, test_y, train_probs, test_probs, train_label, test_label, train_groups, test_groups = train_test_split(X, y, probs, is_correct, groups_w, test_size=0.33, random_state=42)
+            # split in 60% train, 20% validation and 20% test
+            train_X, test_X, train_y, test_y, train_probs, test_probs, train_label, test_label, train_groups, test_groups = train_test_split(X, y, probs, is_correct, groups_w, test_size=0.2, random_state=42)
+
+            train_X, val_X, train_y, val_y, train_probs, val_probs, train_label, val_label, train_groups, val_groups = train_test_split(train_X, train_y, train_probs, train_label, train_groups, test_size=0.25, random_state=42)
+
+            #train_X, test_X, train_y, test_y, train_probs, test_probs, train_label, test_label, train_groups, test_groups = train_test_split(X, y, probs, is_correct, groups_w, test_size=0.33, random_state=42)
             if DEBUG: print(f"Training values: {train_X}")
             if DEBUG: print(f"Test values: {test_X}")
         else:
@@ -101,9 +105,9 @@ def main(extern=False):
         total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = lr.score_obj.calc_all_new(test_probs, 
                                                                                                       test_label, 
                                                                                                       groups=test_groups,
-                                                                                                      deltas=lr.get_deltas(test_probs, test_label), 
+                                                                                                      deltas=lr.get_deltas(test_probs, test_label, test_groups), 
                                                                                                       set_brier_ref=True)
-       
+
         # Make predictions
         predictions = lr.predict(test_X)
 
@@ -114,7 +118,7 @@ def main(extern=False):
         total_calibrated, correctness_calibrated, scores_calibrated = lr.score_obj.calc_all_new(calibrated_predictions, 
                                                                                                 test_label, 
                                                                                                 groups=test_groups,
-                                                                                                deltas=lr.get_deltas(calibrated_predictions, test_label))
+                                                                                                deltas=lr.get_deltas(calibrated_predictions, test_label, test_groups))
        
         if OUTPUTS: print(f"Group Lamdas: {lr.reg.coef_}")
 

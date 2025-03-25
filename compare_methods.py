@@ -1,5 +1,5 @@
 import run_hb
-import run_lr_regression
+import run_lr
 import run_ighb
 import run_iglb
 import numpy as np
@@ -23,7 +23,7 @@ if __name__ == "__main__":
         os.makedirs(save_dir)
 
     grid, uncalib_base, hb_correctness, hb_total, hb_scores = run_hb.main(extern=True)
-    lr_total, lr_correctness, lr_scores = run_lr_regression.main(extern=True)
+    lr_total, lr_correctness, lr_scores = run_lr.main(extern=True)
     ighb_total, ighb_correctness, ighb_scores = run_ighb.main(extern=True)
     iglb_total, iglb_correctness, iglb_scores = run_iglb.main(extern=True)
 
@@ -40,8 +40,25 @@ if __name__ == "__main__":
                                                 'brier_ref',  
                                                 'skill_score'], tablefmt='orgtbl')
     print(table_print)
+    charts = chart_creator(run, binning_type, grid, save_dir, m)    
     
-    charts = chart_creator(run, binning_type, grid, save_dir, m)
+    if len(ighb_correctness) > 11:
+        new_bins = np.arange(0, 1.1, 0.1)
+        bin_assignment = []
+        for old_bin in run_ighb.grid:             
+            bin_assignment.append(new_bins[np.argmin(np.abs(old_bin - new_bins))])
+
+        t = []
+        for nb in new_bins:
+            t.append(np.sum(ighb_total[bin_assignment == nb]))
+        ighb_total = np.array(t)
+
+        t = []
+        for nb in new_bins:
+            t.append(np.mean(ighb_correctness[bin_assignment == nb]))
+        ighb_correctness = np.array(t)
+
+
     charts.calibration_method_comp_chart(charts.chart_range,
                                          charts.chart_range[hb_total != 0],
                                          charts.chart_range[lr_total != 0],

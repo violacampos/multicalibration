@@ -43,7 +43,7 @@ class score:
         asce = 0
         for bin_count, delta in zip(total_bin_count, delta_p_f):
             asce += (bin_count/num_samples)*(delta)**2
-        return np.round(asce, 2)
+        return np.round(np.mean((delta_p_f)**2), 2)
 
     """
         Calculates the baseline score of the uncalibrated model where every prediction is in one bin.
@@ -104,11 +104,11 @@ class score:
 
     def gasce(self, deltas):
         if deltas.shape[0] == 2 and len(deltas.shape) == 3:
-            gasce = np.mean(np.mean(np.mean(deltas**2, axis=1), axis=0))
+            gasce = np.round(np.mean(np.mean(deltas**2, axis=1), axis=0), 4)
         elif len(deltas.shape) == 2:
-            gasce = np.mean(np.mean(deltas**2, axis=0))
+            gasce = np.round(np.array(np.mean(deltas**2, axis=0)), 4)
         else:
-            gasce = np.mean(deltas**2)
+            gasce = np.round(np.mean(deltas**2), 4)
         return gasce
 
     def calc_all(   self, 
@@ -136,12 +136,14 @@ class score:
         ece = self.ece(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
 
         mse = self.mse(confidences, labels, num_samples)
-
+       
         if delta_p_f is not None:
             asce = self.asce_deltas(total_per_bin, num_samples, delta_p_f)
         else:
             asce = self.asce(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
-
+        print(self.asce_deltas(total_per_bin, num_samples, delta_p_f))
+        print(self.asce(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples))
+        
         expeceted_variance = self.expeceted_variance(confidences, labels, assigned_bins, self.grid, num_samples)
 
         if set_brier_ref:
@@ -203,7 +205,7 @@ class score:
         mse = self.mse(assigned_bins, labels, num_samples)
 
         # Get Average Squared Error
-        asce = self.asce(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
+        asce = self.asce_deltas(total_per_bin, num_samples, deltas)
 
         # Get expected Variance 
         expeceted_variance = self.expeceted_variance(assigned_bins, labels, assigned_bins, self.grid, num_samples)
@@ -250,11 +252,43 @@ class score:
 
         return total_per_bin, correctness_per_bin, results
     
+    def get_total_and_correctness(self, confidences, labels):
+        # Assign the values in X to the corresponding bin (discretize values)
+        assigned_bins = binning.round_model_to_grid(confidences, self.grid)
+
+        # Calculate some metrics on the UNcorrected values
+        total_per_bin, correctness_per_bin, _ = binning.bin_round_probabilities_discret(assigned_bins, labels, self.grid)
+
+        return total_per_bin, correctness_per_bin
+
+    def get_total_per_group(self, confidences, labels, groups):
+        # Assign the values in X to the corresponding bin (discretize values)
+        assigned_bins = binning.round_model_to_grid(confidences, self.grid)
+
+        # calculate the total count per bin
+        total_group = np.array([[len(confidences[(assigned_bins == i) & (g == 1)]) for g in groups.T]  for i in self.grid])
+        total_group[np.isnan(total_group)] = 0
+
+        return total_group
+
+    
     def add_to_score_table(self, run, uncalib_scores, calib_scores):
         
         uncalib_scores = list(list(uncalib_scores.values())[0].values())
+        uncalib_gasce = uncalib_scores[-1]
+        uncalib_scores = uncalib_scores[:-1]
+
         calib_scores = list(list(calib_scores.values())[0].values())
-        score_difference = np.array(calib_scores) - np.array(uncalib_scores)
+        calib_gasce = calib_scores[-1]
+        calib_scores = calib_scores[:-1]
+        
+        score_difference = list(np.array(calib_scores) - np.array(uncalib_scores))
+
+        gasce_diff = np.array(calib_gasce) - np.array(uncalib_gasce)
+
+        score_difference.append(gasce_diff)
+        uncalib_scores.append(uncalib_gasce)
+        calib_scores.append(calib_gasce)
 
         self.add_entry(run, "Uncalib", uncalib_scores)
         self.add_entry(run, "Calib", calib_scores)

@@ -67,8 +67,12 @@ def main(extern=False):
         correct_count = np.count_nonzero(is_correct == 1)
 
         if use_train_test_split:
-        # split in train and test
-            train_probs, test_probs, train_y, test_y = train_test_split(probs, is_correct, test_size=0.33, random_state=42)
+            # split in 60% train, 20% validation and 20% test
+            train_probs, test_probs, train_y, test_y = train_test_split(probs, is_correct, test_size=0.2, random_state=42)
+
+            train_probs, val_probs, train_y, val_y = train_test_split(train_probs, train_y, test_size=0.25, random_state=42)
+
+            # train_probs, test_probs, train_y, test_y = train_test_split(probs, is_correct, test_size=0.33, random_state=42)
             if DEBUG: print(f"Training values: {train_probs}")
             if DEBUG: print(f"Test values: {test_probs}")
         else:
@@ -86,7 +90,7 @@ def main(extern=False):
         # calculate scores for the uncalibrated test set
         total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = hb.score_obj.calc_all_new(test_probs, 
                                                                                                       test_y, 
-                                                                                                      deltas=hb.delta_p_f_,
+                                                                                                      deltas=hb.get_deltas(test_probs, test_y),
                                                                                                       set_brier_ref=True)
 
         # Uses the deltas to calculate the corrected values
@@ -95,7 +99,7 @@ def main(extern=False):
         # calculate scores for the calibrated test set
         total_calibrated, correctness_calibrated, scores_calibrated = hb.score_obj.calc_all_new(corrected_probs, 
                                                                                                 test_y,
-                                                                                                deltas=hb.get_deltas(test_probs, test_y))
+                                                                                                deltas=hb.get_deltas(corrected_probs, test_y))
                        
         # Add entry for the run in the score table
         hb.score_obj.add_to_score_table(run, scores_uncalibrated, scores_calibrated)

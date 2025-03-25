@@ -8,6 +8,8 @@ from tools.create_charts import chart_creator
 from tools.ighb_calibration import IGHB_calibration
 from tools.groups import groups
 from tabulate import tabulate
+import streamlit as st
+import pickle 
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts/"
@@ -17,10 +19,12 @@ OUTPUTS = True
 
 binning_type = 'linear'
 binning_step_size = 0.1
-m = 10
-alpha = 0.01
 
-use_train_test_split = False
+alpha = 0.01
+m = np.ceil(1/alpha)
+grid = []
+
+use_train_test_split = True
 
 all_lang = True
 save_table = True
@@ -67,8 +71,12 @@ def main(extern=False):
 
         # check if we split the data or use the whole dataset for evaluation
         if use_train_test_split:
+            # split in 60% train, 20% validation and 20% test
+            train_X, test_X, train_y, test_y, train_groups, test_groups = train_test_split(probs, is_correct, groups_w, test_size=0.2, random_state=42)
+
+            train_X, val_X, train_y, val_y, train_groups, val_groups = train_test_split(train_X, train_y, train_groups, test_size=0.25, random_state=42)
             # Split in train and test
-            train_X, test_X, train_y, test_y, train_groups, test_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
+            #train_X, test_X, train_y, test_y, train_groups, test_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
         else:
             train_X = probs
             test_X = probs
@@ -79,36 +87,51 @@ def main(extern=False):
        
         # get the grid for binning type and the chartmaker obj        
         grid, chartmaker = binning.get_grid_and_chartmaker(run, binning_type, save_dir, m, train_X, binning_step_size)
-        
-        ighb = IGHB_calibration(grid, alpha, OUTPUTS, DEBUG).fit(train_X, train_y, train_groups)
+       
+        ighb = IGHB_calibration(grid, m, alpha, OUTPUTS, DEBUG).fit(train_X, train_y, train_groups)
 
         # Calculate values for uncalibrated test set
         total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = ighb.score_obj.calc_all_new(test_X, 
                                                                                                         test_y, 
                                                                                                         groups=test_groups,
-                                                                                                        deltas=ighb.deltas, 
+                                                                                                        deltas=ighb.get_deltas(test_X, test_y, test_groups), 
                                                                                                         set_brier_ref=True)
-        
+
+        temp_correctness = correctness_uncalibrated
+        temp_total = total_uncalibrated
+        total_group = ighb.score_obj.get_total_per_group(test_X, test_y, test_groups)
+
         # set the conf to calibrate on
         calibrated_conf = train_X
-        
+        history = {}
         while ighb.max_error > ighb.alpha:  
 
             if DEBUG: print(f"Max Error: {ighb.max_error}")
             # get new better calibrated confidences
             calibrated_conf = ighb.predict(calibrated_conf, train_groups)
+            
+            # calculate the corrected values for the test set
+            if use_train_test_split:
+                test_X = ighb.predict(test_X, test_groups, test=True)
+
+            
+            # Calculate some metrics on the UNcorrected values
+            curr_total, curr_correctness = ighb.score_obj.get_total_and_correctness(test_X, test_y)
+            history[len(ighb.changes)] = [chartmaker.map_correctness_to_eleven_bins(temp_correctness), chartmaker.map_correctness_to_eleven_bins(curr_correctness), ighb.changes[-1], total_group]
+            #chartmaker.plot_correctness_change(temp_total, curr_total, temp_correctness, curr_correctness, ighb.changes[-1], len(ighb.changes))
+            temp_correctness = curr_correctness
+            temp_total = curr_total
+            total_group = ighb.score_obj.get_total_per_group(test_X, test_y, test_groups)
+            
 
             # fit the model on the corrected confidences
             ighb = ighb.fit(calibrated_conf, train_y, train_groups)
         
-        # calculate the corrected values for the test set
-        test_X = ighb.predict(test_X, test_groups)
-
         # Calculate values for calibrated test set
-        total_calibrated, correctness_calibrated, scores_calibrated = ighb.score_obj.calc_all_new(calibrated_conf, 
+        total_calibrated, correctness_calibrated, scores_calibrated = ighb.score_obj.calc_all_new(test_X, 
                                                                                                   test_y, 
                                                                                                   groups=test_groups,
-                                                                                                  deltas=ighb.deltas)
+                                                                                                  deltas=ighb.get_deltas(test_X, test_y, test_groups))
         
         # Add entry for the run in the score table
         ighb.score_obj.add_to_score_table(run, scores_uncalibrated, scores_calibrated)
@@ -119,6 +142,9 @@ def main(extern=False):
             # Charts
             chartmaker.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)
         
+        with open('ighb_history.pkl', 'wb') as f:
+            pickle.dump(history, f)
+
     # display score table for all runs
     ighb.score_obj.display_score_table()
     

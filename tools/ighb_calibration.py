@@ -5,30 +5,36 @@ from tools import binning
 
 class IGHB_calibration:
     
-    def __init__(self, grid, alpha, outputs, debug):
+    def __init__(self, grid, m, alpha, outputs, debug):
         self.grid = grid
         self.alpha = alpha
+        self.m = m
         self.debug = debug
         self.outputs = outputs
         self.score_obj = score(grid, outputs, debug)
 
         self.deltas = None
         self.deltas_square = None
+        self.P_S_p_g = []
         self.max_error = 0
         self.gasce = None
+
+        self.changes = []
 
         
     def fit(self, X, y, groups):
         assigned_bins = binning.round_model_to_grid(X, self.grid)
-        self.deltas = self.get_deltas(assigned_bins, y, groups) 
-        self.gasce = np.mean(self.deltas**2, axis=0)
+        
+        self.deltas = self.get_deltas(X, y, groups) 
 
+        self.gasce = np.mean(self.deltas**2, axis=0)
+        if self.debug: print(f"GASCE: {self.gasce}")
+        
         self.deltas_square = self.deltas**2
 
-        if self.debug: print(f"GASCE: {self.gasce}")
+        self.P_S_p_g = np.array([[len(assigned_bins[(assigned_bins == i) & (g == 1)]) / len(X) for g in groups.T] for i in self.grid])
 
         p_group = groups.sum(axis=0) / len(groups)
-        
         if self.debug: print(f"P(X)=1: {p_group}")
         
         c = self.gasce*p_group
@@ -39,37 +45,35 @@ class IGHB_calibration:
 
         return self
 
-    def predict(self, X, groups):
+    def predict(self, X, groups, test=False):
         assigned_bins = binning.round_model_to_grid(X, self.grid)
 
-        P_S_p_g = []
+        bin, group = np.unravel_index((self.P_S_p_g*self.deltas_square).argmax(), self.deltas.shape)
+        if self.debug: print(f"Max delta in: Bin {bin}, Group {group}\n")
 
-        for i in self.grid:
-            temp = []
-            for g in groups.T:
-                temp.append(len(assigned_bins[(assigned_bins == i) & (g == 1)]) / len(X))
-            P_S_p_g.append(temp)
-
-        P_S_p_g = np.array(P_S_p_g)    
-
-        bin, group = np.unravel_index((P_S_p_g*self.deltas_square).argmax(), self.deltas.shape)
-        if self.debug: print(f"Max delta in: Bin {bin}, Group {group}")
-        
         max_delta = self.deltas[bin, group]
         if self.debug: print(f"Max delta: {max_delta}")
 
-        X_ = np.array([bin_a+self.deltas[bin, group] if (int(bin_a*10) == bin) and (groups[idx, group] == 1) else bin_a for idx, bin_a in enumerate(assigned_bins)])
+        X_ = np.array([bin_a+self.deltas[bin, group] if (int(bin_a*self.m) == bin) and (groups[idx, group] == 1) else bin_a for idx, bin_a in enumerate(assigned_bins)])   
+        
+        ab_test = binning.round_model_to_grid(X_, self.grid)
+        #print(f"Changed Elements: {len(ab_test[ab_test != assigned_bins])}")    
+        if test:        
+            self.changes.append([bin, group, max_delta, len(ab_test[ab_test != assigned_bins]), [ab_test[ab_test != assigned_bins], groups[ab_test != assigned_bins]]])                                          
 
         return X_ 
 
-    def get_deltas(self, assigned_bins, y, groups):
+    def get_deltas(self, X, y, groups):
         # Calculate correcteness bias in the given bin and group
+        assigned_bins = binning.round_model_to_grid(X, self.grid)
         deltas = []
         for i in self.grid:
+            #print(len(assigned_bins[assigned_bins == i]))
             temp = []
             for g in groups.T:
                 temp.append(np.mean(y[(assigned_bins == i) & (g == 1)] -  assigned_bins[(assigned_bins == i) & (g == 1)]))
             deltas.append(temp)
+            #print(f"{i}: {temp}")
         
         deltas = np.array(deltas)
         deltas[np.isnan(deltas)] = 0   
