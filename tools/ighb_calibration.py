@@ -45,7 +45,7 @@ class IGHB_calibration:
 
         return self
 
-    def predict(self, X, groups, test=False):
+    def predict(self, X, groups, test=False, is_correct=None):
         assigned_bins = binning.round_model_to_grid(X, self.grid)
 
         bin, group = np.unravel_index((self.P_S_p_g*self.deltas_square).argmax(), self.deltas.shape)
@@ -59,7 +59,7 @@ class IGHB_calibration:
         ab_test = binning.round_model_to_grid(X_, self.grid)
         #print(f"Changed Elements: {len(ab_test[ab_test != assigned_bins])}")    
         if test:        
-            self.changes.append([bin, group, max_delta, len(ab_test[ab_test != assigned_bins]), [ab_test[ab_test != assigned_bins], groups[ab_test != assigned_bins]]])                                          
+            self.changes.append([bin, group, max_delta, len(ab_test[ab_test != assigned_bins]), [ab_test[ab_test != assigned_bins], groups[ab_test != assigned_bins], is_correct[ab_test != assigned_bins]], self.P_S_p_g[bin, group]])                                          
 
         return X_ 
 

@@ -112,7 +112,7 @@ def main(extern=False):
             
             # calculate the corrected values for the test set
             if use_train_test_split:
-                test_X = ighb.predict(test_X, test_groups, test=True)
+                test_X = ighb.predict(test_X, test_groups, test=True, is_correct=test_y)
 
             
             # Calculate some metrics on the UNcorrected values

@@ -13,6 +13,7 @@ st.bar_chart(loaded_dict[iteration][0], x_label="Confidence", y_label="Correctne
 st.markdown(f"**Bin**: {loaded_dict[iteration][2][0]}")
 st.markdown(f"**Group**: {loaded_dict[iteration][2][1]}")
 st.markdown(f"**Delta**: {np.round(loaded_dict[iteration][2][2], 2)}")
+st.markdown(f"**P_S_p_g**: {np.round(loaded_dict[iteration][2][5], 2)}")
 st.markdown(f"**Num element changed**: {loaded_dict[iteration][2][3]}")
 st.header("After", divider=True)
 st.bar_chart(loaded_dict[iteration][1], x_label="Confidence", y_label="Correctness")
@@ -20,6 +21,7 @@ st.header("Total per group", divider=True)
 st.bar_chart(loaded_dict[iteration][3], x_label="Confidence", y_label="Total per group")
 
 t = np.array(loaded_dict[iteration][2][4][1])
+c = np.array(loaded_dict[iteration][2][4][2]).reshape(-1, 1)
 
 data = {'Confidence': loaded_dict[iteration][2][4][0]}
 
@@ -27,5 +29,8 @@ data = {'Confidence': loaded_dict[iteration][2][4][0]}
 df = pd.DataFrame(data)
 
 df[["prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]] = t
+
+df[["is_correct"]] = c
+
 st.header("Element details", divider=True)
 st.table(df)
