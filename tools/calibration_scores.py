@@ -11,6 +11,7 @@ class score:
         self.debug = debug
         self.outputs = outputs
         self.grid = grid
+        self.score_grid = np.arange(0.0, 1+(1/10), 1/10)
         self.p_r = 0
         self.brier_ref_score = 0
 
@@ -37,7 +38,8 @@ class score:
         asce = 0
         for corr_s_i, conf_s_i, bin_count in zip(correctness_per_bin, confidence_per_bin, total_bin_count):
             asce += (bin_count/num_samples)*(corr_s_i-conf_s_i)**2
-        return np.round(asce, 2)
+            #
+        return np.round(asce ,4)
 
     def asce_deltas(self, total_bin_count, num_samples, delta_p_f):
         asce = 0
@@ -110,68 +112,31 @@ class score:
         else:
             gasce = np.round(np.mean(deltas**2), 4)
         return gasce
-
-    def calc_all(   self, 
-                    set_brier_ref, # to differentiate between fit and predict
-                    confidences, # raw confidences of the model
-                    labels, # indicate if sample is correct
-                    assigned_bins,  # assigend bins for the given confidence
-                    correctness_per_bin,  # probability that the sample is correct per bin
-                    total_per_bin,  # total samples in bin
-                    confidence_per_bin, # average confidence per bin
-                    delta_p_f=None # deviation per bin
-                    ):
+    
+    def gasce(self, assigned_bins, labels, groups, grid=None):
+        if grid is None: grid = self.score_grid
+        num_samples = len(assigned_bins)
         
-        if set_brier_ref:
-            prefix = 'Uncalib'
-            color = 'red'
-        else:
-            prefix = 'Calib'
-            color = 'green'
+        # calculate the total correct per bin
+        correct_per_bin_group = np.array([[np.divide(len(assigned_bins[(assigned_bins == i) & (labels == 1) & (g ==1)]), len(assigned_bins[(assigned_bins == i) & (g ==1)])) for g in groups.T] for i in grid])
+        correct_per_bin_group[np.isnan(correct_per_bin_group)] = 0
 
-        num_samples = len(confidences)
-        num_correct = np.count_nonzero(labels == 1)
+        # calculate the total count per bin
+        total_per_bin_group = np.array([[len(assigned_bins[(assigned_bins == i) & (g ==1)]) for g in groups.T]  for i in grid])
+        total_per_bin_group[np.isnan(total_per_bin_group)] = 0
         
-        # Calculate scores for Data
-        ece = self.ece(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
+        # sum the probabilities per bin
+        bin_sums_group = np.array([[assigned_bins[(assigned_bins == i) & (g ==1)].sum() for g in groups.T]  for i in grid])
 
-        mse = self.mse(confidences, labels, num_samples)
-       
-        if delta_p_f is not None:
-            asce = self.asce_deltas(total_per_bin, num_samples, delta_p_f)
-        else:
-            asce = self.asce(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
-        print(self.asce_deltas(total_per_bin, num_samples, delta_p_f))
-        print(self.asce(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples))
+        # calculate the average confidence per bin
+        average_bin_group_confidence = np.divide(bin_sums_group, total_per_bin_group, where=np.array(total_per_bin_group)!=0)
         
-        expeceted_variance = self.expeceted_variance(confidences, labels, assigned_bins, self.grid, num_samples)
+        gasce = 0
+        for corr_bin_group, conf_bin_group, bin_count in zip(correct_per_bin_group, average_bin_group_confidence, total_per_bin_group):
+            gasce += ((bin_count/total_per_bin_group.sum())*((corr_bin_group-conf_bin_group)**2))
+            #gasce += ((bin_count/num_samples)*((corr_bin_group-conf_bin_group)**2))
 
-        if set_brier_ref:
-            self.p_r, self.brier_ref_score = self.brier_ref(num_correct, num_samples)
-            if self.outputs: 
-                print(f"{colored(prefix, color)} Baseline: {self.p_r}")
-                print(f"{colored(prefix, color)} Brier ref: {self.brier_ref_score}")
-
-        skill_score = self.skill_score(self.brier_ref_score, mse)
-        
-        if self.outputs: 
-            print(f"{colored(prefix, color)} ECE: {ece}")
-            print(f"{colored(prefix, color)} MSE: {mse}")
-            print(f"{colored(prefix, color)} ASCE: {asce}") 
-            print(f"{colored(prefix, color)} Expected Variance: {expeceted_variance}") 
-            print(f"{colored(prefix, color)} Skill Score: {skill_score}\n") 
-
-        results =   {
-                        prefix: {
-                            "ECE": ece,
-                            "ASCE": asce,
-                            "MSE": mse,
-                            "Brier ref": self.brier_ref_score,
-                            "Skill Score": skill_score
-                        } 
-                    }  
-
-        return results
+        return np.array(gasce)
     
     def calc_all_new(   self,
                         confidences,
@@ -189,11 +154,11 @@ class score:
             color = 'green'
 
         # Assign the values in X to the corresponding bin (discretize values)
-        assigned_bins = binning.round_model_to_grid(confidences, self.grid)
+        assigned_bins = binning.round_model_to_grid(confidences, self.score_grid)
         if self.debug: print(f"TEST Assigned Bins: {assigned_bins}")
 
         # Calculate some metrics on the UNcorrected values
-        total_per_bin, correctness_per_bin, confidence_per_bin = binning.bin_round_probabilities_discret(assigned_bins, labels, self.grid)
+        total_per_bin, correctness_per_bin, confidence_per_bin = binning.bin_round_probabilities_discret(assigned_bins, labels, self.score_grid)
 
         num_samples = len(assigned_bins)
         num_correct = np.count_nonzero(labels == 1)
@@ -205,10 +170,10 @@ class score:
         mse = self.mse(assigned_bins, labels, num_samples)
 
         # Get Average Squared Error
-        asce = self.asce_deltas(total_per_bin, num_samples, deltas)
+        asce = self.asce(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
 
         # Get expected Variance 
-        expeceted_variance = self.expeceted_variance(assigned_bins, labels, assigned_bins, self.grid, num_samples)
+        expeceted_variance = self.expeceted_variance(assigned_bins, labels, assigned_bins, self.score_grid, num_samples)
 
         # Output results if set
         if self.outputs: 
@@ -243,23 +208,31 @@ class score:
                             "Skill Score": skill_score
                         } 
                     }  
-        
-        # Get Group Average squared calibration error
-        if deltas is not None:
-            gasce = self.gasce(deltas)
-            if self.outputs: print(f"{colored(prefix, color)} GASCE: {gasce}\n")
-            results[prefix]['GASCE'] = gasce
+                      
+        gasce = self.gasce(assigned_bins, labels, groups)
+        if self.outputs: print(f"{colored(prefix, color)} GASCE: {np.round(gasce, 4)}") 
+        results[prefix]['GASCE'] = np.round(gasce, 4)
 
-        return total_per_bin, correctness_per_bin, results
+        return results
     
-    def get_total_and_correctness(self, confidences, labels):
+    def get_total_and_correctness(self, confidences, labels, groups):
         # Assign the values in X to the corresponding bin (discretize values)
-        assigned_bins = binning.round_model_to_grid(confidences, self.grid)
+        assigned_bins = binning.round_model_to_grid(confidences, self.score_grid)
 
         # Calculate some metrics on the UNcorrected values
-        total_per_bin, correctness_per_bin, _ = binning.bin_round_probabilities_discret(assigned_bins, labels, self.grid)
+        correctness_group = np.array([[np.divide(len(labels[(assigned_bins == i) & (labels == 1) & (g ==1)]), len(labels[(assigned_bins == i) & (g ==1)])) for g in groups.T] for i in self.score_grid])
+        correctness_group[np.isnan(correctness_group)] = 0
 
-        return total_per_bin, correctness_per_bin
+        total_group = np.array([[len(assigned_bins[(assigned_bins == i) & (g ==1)]) for g in groups.T]  for i in self.score_grid])
+        total_group[np.isnan(total_group)] = 0
+
+        correctness_bin = np.array([np.divide(len(labels[(assigned_bins == i) & (labels == 1)]), len(labels[(assigned_bins == i)])) for i in self.score_grid])
+        correctness_bin[np.isnan(correctness_bin)] = 0
+
+        total_bin = np.array([len(assigned_bins[(assigned_bins == i)]) for i in self.score_grid])
+        total_bin[np.isnan(total_bin)] = 0
+
+        return total_group, correctness_group, total_bin, correctness_bin
 
     def get_total_per_group(self, confidences, labels, groups):
         # Assign the values in X to the corresponding bin (discretize values)
@@ -282,9 +255,9 @@ class score:
         calib_gasce = calib_scores[-1]
         calib_scores = calib_scores[:-1]
         
-        score_difference = list(np.array(calib_scores) - np.array(uncalib_scores))
+        score_difference = list(np.round(np.array(calib_scores) - np.array(uncalib_scores), 4))
 
-        gasce_diff = np.array(calib_gasce) - np.array(uncalib_gasce)
+        gasce_diff = np.round(np.array(calib_gasce) - np.array(uncalib_gasce), 4)
 
         score_difference.append(gasce_diff)
         uncalib_scores.append(uncalib_gasce)

@@ -2,35 +2,120 @@ import streamlit as st
 import pickle
 import pandas as pd
 import numpy as np
+import altair as alt
 
-with open('ighb_history.pkl', 'rb') as f:
-    loaded_dict = pickle.load(f)
+#st.set_page_config(layout="wide")
+fold = st.toggle("Enable 5-Fold")
+split = st.toggle("Enable Full Dataset", disabled=fold)
+groups = st.toggle("Enable Groups")
+each_iteration = st.toggle("Enable Iteration")
 
-iteration = st.slider("Choose iteration", 1, len(loaded_dict), 1)
-st.header("Before", divider=True)
-st.bar_chart(loaded_dict[iteration][0], x_label="Confidence", y_label="Correctness")
+grid = np.round(np.arange(0.0, 1+(1/10), 1/10),2)
 
-st.markdown(f"**Bin**: {loaded_dict[iteration][2][0]}")
-st.markdown(f"**Group**: {loaded_dict[iteration][2][1]}")
-st.markdown(f"**Delta**: {np.round(loaded_dict[iteration][2][2], 2)}")
-st.markdown(f"**P_S_p_g**: {np.round(loaded_dict[iteration][2][5], 2)}")
-st.markdown(f"**Num element changed**: {loaded_dict[iteration][2][3]}")
-st.header("After", divider=True)
-st.bar_chart(loaded_dict[iteration][1], x_label="Confidence", y_label="Correctness")
-st.header("Total per group", divider=True)
-st.bar_chart(loaded_dict[iteration][3], x_label="Confidence", y_label="Total per group")
+if split:
+    with open('ighb_history_no_split.pkl', 'rb') as f:
+        loaded_dict = pickle.load(f)
+elif fold:
+    with open('ighb_history_kfold.pkl', 'rb') as f:
+        loaded_dict = pickle.load(f)
+    fold = st.slider("Choose Fold", 1, 5, 1)
+    all_fold = loaded_dict
+    loaded_dict = loaded_dict[fold-1]
+else:
+    with open('ighb_history.pkl', 'rb') as f:
+        loaded_dict = pickle.load(f)
 
-t = np.array(loaded_dict[iteration][2][4][1])
-c = np.array(loaded_dict[iteration][2][4][2]).reshape(-1, 1)
+if each_iteration:
+    iteration = st.slider("Choose iteration", 1, len(loaded_dict)-1, 1)
 
-data = {'Confidence': loaded_dict[iteration][2][4][0]}
+    if groups:
+        group = st.slider("Choose Group", 0, 5, 1)
+        before = np.array(loaded_dict[iteration][0])[:, group]
+        after = np.array(loaded_dict[iteration][1])[:, group]
+    else:
+        before = loaded_dict[iteration][4]
+        after = loaded_dict[iteration][5]
 
-# Create DataFrame
-df = pd.DataFrame(data)
+    st.header("Before", divider=True)
+    st.bar_chart(before, x_label="Confidence", y_label="Correctness")
 
-df[["prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]] = t
+    st.markdown(f"**Bin**: {loaded_dict[iteration][2][0]}; **Group**: {loaded_dict[iteration][2][1]}; **Delta**: {np.round(loaded_dict[iteration][2][2], 2)}")
 
-df[["is_correct"]] = c
+    st.markdown(f"**Num element changed**: {loaded_dict[iteration][2][3]}")
+    st.header("After", divider=True)
+    st.bar_chart(after, x_label="Confidence", y_label="Correctness")
+    st.header("Total per group", divider=True)
+    st.bar_chart(loaded_dict[iteration][3], x_label="Confidence", y_label="Total per group")
 
-st.header("Element details", divider=True)
+    t = np.array(loaded_dict[iteration][2][4][1])
+    c = np.array(loaded_dict[iteration][2][4][2]).reshape(-1, 1)
+
+    data = {'Confidence': loaded_dict[iteration][2][4][0]}
+
+    # Create DataFrame
+    df = pd.DataFrame(data)
+    df[["prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]] = t
+    df[["is_correct"]] = c
+
+    st.header("Element details", divider=True)
+    st.table(df)
+
+else:
+    
+    fold_mean = st.toggle("Mean over folds")
+
+    if fold_mean:
+        print(all_fold)
+        exit()
+    else:
+        if groups:
+            group = st.slider("Choose Group", 0, 5, 1)
+
+            before =  pd.DataFrame({'Confidence': np.array(loaded_dict[1][0])[:, group], 'bin': grid})
+            before_total = pd.DataFrame({group: loaded_dict[1][3][:, group] ,'bin': grid})
+
+            after =  pd.DataFrame({'Confidence': np.array(loaded_dict[len(loaded_dict)-1][1])[:, group], 'bin': grid})
+            after_total = pd.DataFrame({group: loaded_dict[len(loaded_dict)-1][3][:, group] ,'bin': grid})
+        else:       
+            before =  pd.DataFrame({'Confidence': loaded_dict[1][4], 'bin': grid})
+            before_total = {'bin': grid}
+            for idx, g in enumerate(np.array(loaded_dict[1][3]).T):
+                before_total[idx] = loaded_dict[1][3].T[idx]
+            before_total = pd.DataFrame(before_total)
+
+            after =  pd.DataFrame({'Confidence': loaded_dict[len(loaded_dict)-1][5], 'bin': grid})
+            after_total = {'bin': grid}
+            for idx, g in enumerate(np.array(loaded_dict[len(loaded_dict)-1][3]).T):
+                after_total[idx] = loaded_dict[len(loaded_dict)-1][3].T[idx]
+            after_total = pd.DataFrame(after_total)
+
+        # Create DataFrame
+        st.header("Before", divider=True)
+        st.bar_chart(data=before, x="bin", y="Confidence", x_label="Confidence", y_label="Correctness")
+        st.header("Total per group", divider=True)
+        st.bar_chart(data=before_total, x="bin", x_label="Confidence", y_label="Total per group")
+
+        st.header("After", divider=True)
+        st.bar_chart(data=after, x="bin", y="Confidence", x_label="Confidence", y_label="Correctness")
+        st.header("Total per group", divider=True)
+        st.bar_chart(data=after_total, x="bin", x_label="Confidence", y_label="Total per group")
+
+st.header("Scores", divider=True)
+df = pd.DataFrame(loaded_dict["score"])
+df.columns = ['Run', 
+            'Type',
+            'ECE', 
+            'ASCE', 
+            'MSE',
+            'brier_ref', 
+            'skill_score',
+            'GASCE']
 st.table(df)
+
+st.header("Groups", divider=True)
+st.markdown("0. prompt >= 500")
+st.markdown("1. not 0")
+st.markdown("2. examples")
+st.markdown("3. not 2")
+st.markdown("4. longer then median LoC")
+st.markdown("5. not 5")

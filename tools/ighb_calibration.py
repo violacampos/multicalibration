@@ -27,12 +27,13 @@ class IGHB_calibration:
         
         self.deltas = self.get_deltas(X, y, groups) 
 
-        self.gasce = np.mean(self.deltas**2, axis=0)
+        self.gasce = self.score_obj.gasce(assigned_bins, y, groups, grid=self.grid)
         if self.debug: print(f"GASCE: {self.gasce}")
         
         self.deltas_square = self.deltas**2
 
         self.P_S_p_g = np.array([[len(assigned_bins[(assigned_bins == i) & (g == 1)]) / len(X) for g in groups.T] for i in self.grid])
+        #self.P_S_p_g = np.array([[len(assigned_bins[(assigned_bins == i) & (g == 1)]) / groups.sum() for g in groups.T] for i in self.grid])
 
         p_group = groups.sum(axis=0) / len(groups)
         if self.debug: print(f"P(X)=1: {p_group}")
@@ -57,9 +58,15 @@ class IGHB_calibration:
         X_ = np.array([bin_a+self.deltas[bin, group] if (int(bin_a*self.m) == bin) and (groups[idx, group] == 1) else bin_a for idx, bin_a in enumerate(assigned_bins)])   
         
         ab_test = binning.round_model_to_grid(X_, self.grid)
-        #print(f"Changed Elements: {len(ab_test[ab_test != assigned_bins])}")    
+
         if test:        
-            self.changes.append([bin, group, max_delta, len(ab_test[ab_test != assigned_bins]), [ab_test[ab_test != assigned_bins], groups[ab_test != assigned_bins], is_correct[ab_test != assigned_bins]], self.P_S_p_g[bin, group]])                                          
+            self.changes.append([bin, group, max_delta, len(ab_test[ab_test != assigned_bins]), [ab_test[ab_test != assigned_bins], groups[ab_test != assigned_bins], is_correct[ab_test != assigned_bins]], self.P_S_p_g[bin, group]])    
+        else:
+            """print(len(ab_test[ab_test != assigned_bins]))
+            print(f"Max delta: {max_delta}")
+            print(f"Max delta in: Bin {bin}, Group {group}\n")
+            t = np.array([bin_a if (int(bin_a*self.m) == bin) and (groups[idx, group] == 1) else 0 for idx, bin_a in enumerate(assigned_bins)])
+            print(t[t!=0])"""
 
         return X_ 
 

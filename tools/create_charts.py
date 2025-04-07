@@ -143,25 +143,13 @@ class chart_creator():
         new_bins = np.arange(0, 1.1, 0.1)
         bin_assignment = np.array([new_bins[np.argmin(np.abs(old_bin - new_bins))] for old_bin in self.chart_range])
 
-        t = []
-        for nb in new_bins:
-            t.append(np.sum(total_calibrated[bin_assignment == nb]))
-        total_calibrated = np.array(t)
+        total_calibrated = np.array([np.sum(total_calibrated[bin_assignment == nb]) for nb in new_bins])
         
-        t = []
-        for nb in new_bins:
-            t.append(np.sum(total_uncalibrated[bin_assignment == nb]))
-        total_uncalibrated = np.array(t)
+        total_uncalibrated = np.array([np.sum(total_uncalibrated[bin_assignment == nb]) for nb in new_bins])
 
-        t = []
-        for nb in new_bins:
-            t.append(np.mean(correctness_uncalibrated[bin_assignment == nb]))
-        correctness_uncalibrated = np.array(t)
+        correctness_uncalibrated = np.array([np.median(correctness_uncalibrated[bin_assignment == nb]) for nb in new_bins])
         
-        t = []
-        for nb in new_bins:
-            t.append(np.mean(correctness_calibrated[bin_assignment == nb]))
-        correctness_calibrated = np.array(t)
+        correctness_calibrated = np.array([np.median(correctness_calibrated[bin_assignment == nb]) for nb in new_bins])
 
         self.chart_range = new_bins
         self.bar_width = 0.1
@@ -173,11 +161,7 @@ class chart_creator():
         new_bins = np.arange(0, 1.1, 0.1)
         bin_assignment = np.array([new_bins[np.argmin(np.abs(old_bin - new_bins))] for old_bin in self.chart_range])
 
-        t = []
-        for nb in new_bins:
-            t.append(np.mean(correctness[bin_assignment == nb]))
-        correctness = np.array(t)
-
+        correctness = np.array([np.median(correctness[bin_assignment == nb], axis=0) for nb in new_bins])
         return correctness
     
     def map_total_to_eleven_bins(self, total):
@@ -185,11 +169,7 @@ class chart_creator():
         new_bins = np.arange(0, 1.1, 0.1)
         bin_assignment = np.array([new_bins[np.argmin(np.abs(old_bin - new_bins))] for old_bin in self.chart_range])
 
-        t = []
-        for nb in new_bins:
-            t.append(np.sum(total[bin_assignment == nb]))
-        total = np.array(t)
-
+        total = np.array([np.sum(total[bin_assignment == nb]) for nb in new_bins])
         return total
     
     def map_total_to_eleven_bins(self, total, group=False):
@@ -197,13 +177,7 @@ class chart_creator():
         new_bins = np.arange(0, 1.1, 0.1)
         bin_assignment = np.array([new_bins[np.argmin(np.abs(old_bin - new_bins))] for old_bin in self.chart_range])
 
-        t = []
-        for nb in new_bins:
-            if group:
-                t.append(np.sum(total[(bin_assignment == nb)], axis=0))
-            else:
-                t.append(np.sum(total[(bin_assignment == nb)]))
-        total = np.array(t)
+        total = np.array([np.sum(total[(bin_assignment == nb)], axis=0) if group else np.sum(total[(bin_assignment == nb)]) for nb in new_bins])
 
         return total
       
