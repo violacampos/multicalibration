@@ -11,6 +11,7 @@ from tabulate import tabulate
 import streamlit as st
 import pickle 
 from sklearn.model_selection import KFold
+import json
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts/"
@@ -29,6 +30,8 @@ use_train_test_split = False
 use_k_fold = True
 
 all_lang = True
+load_scc_results = True
+
 save_table = False
 
 np.seterr(divide='ignore', invalid='ignore')
@@ -62,12 +65,17 @@ def main(extern=False):
         if not os.path.isdir(save_dir):
             os.makedirs(save_dir)
 
-        probs, is_correct, programs, prompts = data.proability_and_correctness_for_samples(results)
+        probs, is_correct, programs, prompts, languages, names = data.proability_and_correctness_for_samples(results)
 
-        # Define group matrix
-        groups_w = groups(programs, prompts).create_groups()
-        groups_w = np.array(groups_w)
-        
+        # Keep in mind that elixir has the extension ex for concating the results
+        # also wierd results for go -> folder was namen go_test.go
+        if load_scc_results:
+            scc_infos = data.load_scc_data(run, languages, names)
+            groups_w = groups(programs, prompts).create_groups(scc=scc_infos)
+        else:
+            # Define group matrix
+            groups_w = groups(programs, prompts).create_groups()
+            
         if OUTPUTS: print(f"Run: {run}")
         if OUTPUTS: print(f"Gruppen Anzahl: {groups_w.sum(axis=0)}")
 
@@ -78,6 +86,7 @@ def main(extern=False):
             history = {}
             for i, (train_index, test_index) in enumerate(kf.split(probs)):
                 print(f"Fold {i}:")
+
                 train_X = probs[train_index]
                 test_X = probs[test_index]
                 train_y = is_correct[train_index]
@@ -220,9 +229,12 @@ def main(extern=False):
                 # Charts
                 #chartmaker.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)
             
-            """with open('ighb_history.pkl', 'wb') as f:
-                pickle.dump(history, f)"""
-
+            if use_train_test_split:
+                with open('ighb_history.pkl', 'wb') as f:
+                    pickle.dump(history, f)
+            else:
+                with open('ighb_history_no_split.pkl', 'wb') as f:
+                    pickle.dump(history, f)
             # display score table for all runs
             ighb.score_obj.display_score_table()
             

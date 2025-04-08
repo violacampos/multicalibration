@@ -1,5 +1,6 @@
 import numpy as np
 from tools.create_charts import chart_creator
+import decimal
 
 def get_grid_and_chartmaker(run, binning_type, save_dir, m, probs, binning_step_size):
     # sets the type of binning
@@ -17,7 +18,9 @@ def get_grid_and_chartmaker(run, binning_type, save_dir, m, probs, binning_step_
     return grid, chartmaker
 
 def create_unform_grid(m):
-    return np.arange(0.0, 1+(1/m), 1/m)
+    d = str(1/m)
+    round_to = len(d)-2
+    return np.round(np.arange(0.0, 1+(1/m), 1/m), round_to) 
 
 def create_qunatil_grid(probs, m):
     return np.array([(np.quantile(probs, i) if (i != 0) and (i != 1) else i) for i in np.arange(0, 1+m, m)])  
