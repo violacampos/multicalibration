@@ -104,14 +104,14 @@ class score:
 
         return np.round(expec_var, 2)
 
-    def gasce(self, deltas):
+    """def gasce(self, deltas):
         if deltas.shape[0] == 2 and len(deltas.shape) == 3:
             gasce = np.round(np.mean(np.mean(deltas**2, axis=1), axis=0), 4)
         elif len(deltas.shape) == 2:
             gasce = np.round(np.array(np.mean(deltas**2, axis=0)), 4)
         else:
             gasce = np.round(np.mean(deltas**2), 4)
-        return gasce
+        return gasce"""
     
     def gasce(self, assigned_bins, labels, groups, grid=None):
         if grid is None: grid = self.score_grid
@@ -132,9 +132,11 @@ class score:
         average_bin_group_confidence = np.divide(bin_sums_group, total_per_bin_group, where=np.array(total_per_bin_group)!=0)
         
         gasce = 0
-        for corr_bin_group, conf_bin_group, bin_count in zip(correct_per_bin_group, average_bin_group_confidence, total_per_bin_group):
-            gasce += ((bin_count/total_per_bin_group.sum())*((corr_bin_group-conf_bin_group)**2))
-            #gasce += ((bin_count/num_samples)*((corr_bin_group-conf_bin_group)**2))
+        deltas = []
+        for corr_bin_group, conf_bin_group, bin_group_count in zip(correct_per_bin_group, average_bin_group_confidence, total_per_bin_group):
+            #gasce += ((bin_count/total_per_bin_group.sum())*((corr_bin_group-conf_bin_group)**2))
+            deltas.append((corr_bin_group-conf_bin_group))
+            gasce += ((bin_group_count/num_samples)*((corr_bin_group-conf_bin_group)**2))
 
         return np.array(gasce)
     

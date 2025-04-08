@@ -42,6 +42,7 @@ def for_file(path: Path):
         
         res_dict = {
             "name": data["name"], 
+            "language": data["language"],
             "prompt": data["prompt"],
             "program": res["program"],
             "n": n,
@@ -98,6 +99,8 @@ def proability_and_correctness_for_samples(results, type="avg_logprob"):
     is_correct = []
     prompts = []
     programms = []
+    languages = []
+    names = []
 
     # Get the token probailities from the samples and create arrays
     for r in results:
@@ -112,6 +115,13 @@ def proability_and_correctness_for_samples(results, type="avg_logprob"):
                 
             # collect average token probabilty and correctnes value
             programms.append(sample["program"])
+            if sample["language"] == 'elixir':
+                languages.append("ex")
+            elif sample["language"] == 'go_test.go':
+                languages.append("go")
+            else:
+                languages.append(sample["language"])
+            names.append(sample["name"])
             prompts.append(sample["prompt"])
             prob_value_list.append(prob)
             is_correct.append(1) if sample["c"] == 1 else is_correct.append(0)
@@ -119,9 +129,38 @@ def proability_and_correctness_for_samples(results, type="avg_logprob"):
     prob_value_list     = np.array(prob_value_list)
     is_correct          = np.array(is_correct)
 
-    return prob_value_list, is_correct, programms, prompts
+    return prob_value_list, is_correct, programms, prompts, languages, names
 
 def avg_token_probability(cumulative_logprob, token_count):
     return np.round(np.exp(cumulative_logprob / token_count), 2) 
+
+
+def load_scc_data(run, languages, names):
+    scc_infos = []
+    with open('./scc/'+run+'.json') as scc:
+        scc_data = json.load(scc)
+        file_list = []
+        comp = []
+        for i in range(len(scc_data)):
+            file_list.extend(scc_data[i]["Files"])
+
+        for lang, name in zip(languages, names):
+            temp = {}
+            t = list(filter(lambda sample: (sample['Filename'].replace('.'+sample['Extension'], '') == name) and (sample['Extension'] == lang), file_list))
+            temp["Bytes"] = t[0]["Bytes"]
+            temp["Lines"] = t[0]["Lines"]
+            temp["Code"] = t[0]["Code"]
+            temp["Comment"] = t[0]["Comment"]
+            temp["Blank"] = t[0]["Blank"]
+            temp["Complexity"] = t[0]["Complexity"]
+            comp.append(t[0]["Complexity"])
+            scc_infos.append(temp)   
+        """print(np.histogram(np.array([d["Blank"] for d in scc_infos]), bins=[0,5,10,20,30,40,100,500]))
+        print(np.histogram(np.array([d["Comment"] for d in scc_infos]), bins=[0,5,10,20,30,40,100,500]))
+        print(np.histogram(np.array([d["Code"] for d in scc_infos]), bins=[0,5,10,20,30,40,100,500]))
+        print(np.mean(np.array([d["Code"] for d in scc_infos])))
+        print(np.median(np.array([d["Code"] for d in scc_infos])))
+        print(np.histogram(np.array([d["Lines"] for d in scc_infos]), bins=[0,5,10,20,30,40,100,500]))"""
+    return scc_infos 
 
 
