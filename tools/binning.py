@@ -2,7 +2,7 @@ import numpy as np
 from tools.create_charts import chart_creator
 import decimal
 
-def get_grid_and_chartmaker(run, binning_type, save_dir, m, probs, binning_step_size):
+def get_grid_and_chartmaker(run, binning_type, save_dir, m, probs=None, binning_step_size=None):
     # sets the type of binning
     if binning_type == 'linear':
         # uniform grid 1/m

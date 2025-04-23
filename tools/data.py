@@ -128,6 +128,7 @@ def proability_and_correctness_for_samples(results, type="avg_logprob"):
 
     prob_value_list     = np.array(prob_value_list)
     is_correct          = np.array(is_correct)
+    languages           = np.array(languages)
 
     return prob_value_list, is_correct, programms, prompts, languages, names
 

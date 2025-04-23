@@ -26,8 +26,8 @@ alpha = 0.01
 m = np.ceil(1/alpha)
 grid = []
 
-use_train_test_split = False
-use_k_fold = True
+use_train_test_split = True
+use_k_fold = False
 
 all_lang = True
 load_scc_results = True
@@ -173,8 +173,7 @@ def main(extern=False):
             # Calculate values for uncalibrated test set
             scores_uncalibrated = ighb.score_obj.calc_all_new(  test_X, 
                                                                 test_y, 
-                                                                groups=test_groups,
-                                                                deltas=ighb.get_deltas(test_X, test_y, test_groups), 
+                                                                groups=test_groups, 
                                                                 set_brier_ref=True)
             
             total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = ighb.score_obj.get_total_and_correctness(test_X, test_y, test_groups) 
@@ -213,18 +212,23 @@ def main(extern=False):
             # Calculate values for calibrated test set
             scores_calibrated = ighb.score_obj.calc_all_new(test_X, 
                                                             test_y, 
-                                                            groups=test_groups,
-                                                            deltas=ighb.get_deltas(test_X, test_y, test_groups))
+                                                            groups=test_groups)
             
             total_group_calibrated, correctness_group_calibrated, total_bin_calibrated, correctness_bin_calibrated = ighb.score_obj.get_total_and_correctness(test_X, test_y, test_groups) 
-
+            total_group, correctness_group, average_group_confidence = ighb.score_obj.get_correctness_per_group(test_X, test_y, test_groups) 
+        
             # Add entry for the run in the score table
             ighb.score_obj.add_to_score_table(run, scores_uncalibrated, scores_calibrated)
 
             history["score"] = ighb.score_obj.score_table
 
             if extern:
-                return total_bin_calibrated, correctness_bin_calibrated, scores_calibrated
+                return [total_bin_calibrated, 
+                        correctness_bin_calibrated, 
+                        correctness_group, 
+                        average_group_confidence, 
+                        total_group,
+                        scores_calibrated]
             #else:
                 # Charts
                 #chartmaker.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)

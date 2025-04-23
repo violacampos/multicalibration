@@ -23,6 +23,7 @@ control_exp = False
 
 all_lang = True
 save_table = True
+load_scc_results = True
 
 np.seterr(divide='ignore', invalid='ignore')
 
@@ -55,11 +56,16 @@ def main(extern=False):
         if not os.path.isdir(save_dir):
             os.makedirs(save_dir)
 
-        probs, is_correct, programs, prompts = data.proability_and_correctness_for_samples(results)
+        probs, is_correct, programs, prompts, languages, names = data.proability_and_correctness_for_samples(results)
 
-        # Define group matrix
-        groups_w = groups(programs, prompts).create_groups()
-        groups_w = np.array(groups_w)
+        # Keep in mind that elixir has the extension ex for concating the results
+        # also wierd results for go -> folder was namen go_test.go
+        if load_scc_results:
+            scc_infos = data.load_scc_data(run, languages, names)
+            groups_w = groups(programs, prompts).create_groups(scc=scc_infos)
+        else:
+            # Define group matrix
+            groups_w = groups(programs, prompts).create_groups()
         
         if OUTPUTS: print(f"Run: {run}")
         if OUTPUTS: print(f"Gruppen Anzahl: {groups_w.sum(axis=0)}")
@@ -102,12 +108,12 @@ def main(extern=False):
         lr = lr_calibration(grid, OUTPUTS, DEBUG).fit(train_X, train_y)
 
         # Calculate scores on uncalibrated test set
-        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = lr.score_obj.calc_all_new(test_probs, 
-                                                                                                      test_label, 
-                                                                                                      groups=test_groups,
-                                                                                                      deltas=lr.get_deltas(test_probs, test_label, test_groups), 
-                                                                                                      set_brier_ref=True)
-
+        scores_uncalibrated = lr.score_obj.calc_all_new(test_probs, 
+                                                        test_label, 
+                                                        groups=test_groups,
+                                                        set_brier_ref=True)
+        #total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = lr.score_obj.get_total_and_correctness(test_probs, test_label, test_groups)
+        
         # Make predictions
         predictions = lr.predict(test_X)
 
@@ -115,22 +121,31 @@ def main(extern=False):
         calibrated_predictions = predictions + test_probs
 
         # Calculate scores on uncalibrated test set
-        total_calibrated, correctness_calibrated, scores_calibrated = lr.score_obj.calc_all_new(calibrated_predictions, 
-                                                                                                test_label, 
-                                                                                                groups=test_groups,
-                                                                                                deltas=lr.get_deltas(calibrated_predictions, test_label, test_groups))
-       
+        scores_calibrated = lr.score_obj.calc_all_new(  calibrated_predictions, 
+                                                        test_label, 
+                                                        groups=test_groups)
+        total_group_calibrated, correctness_group_calibrated, total_bin_calibrated, correctness_bin_calibrated = lr.score_obj.get_total_and_correctness(calibrated_predictions, test_label, test_groups) 
+        total_group, correctness_group, average_group_confidence = lr.score_obj.get_correctness_per_group(calibrated_predictions, test_label, test_groups) 
+        
         if OUTPUTS: print(f"Group Lamdas: {lr.reg.coef_}")
+
+        print(correctness_bin_calibrated)
 
         # Add entry for the run in the score table
         lr.score_obj.add_to_score_table(run, scores_uncalibrated, scores_calibrated)
         
         # only return values when called from other script
         if extern:
-            return total_calibrated, correctness_calibrated, scores_calibrated
+            return [total_bin_calibrated, 
+                    correctness_bin_calibrated, 
+                    correctness_group, 
+                    average_group_confidence, 
+                    total_group,
+                    scores_calibrated]
         else:
+            print()
             # Charts
-            chartmaker.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)
+            #chartmaker.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)
     
     # display score table for all runs
     lr.score_obj.display_score_table()

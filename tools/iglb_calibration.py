@@ -6,18 +6,19 @@ from scipy.optimize import minimize
 
 class IGLB_calibration:
     
-    def __init__(self, grid, alpha, outputs, debug):
+    def __init__(self, grid, alpha, m, outputs, debug):
         self.grid = grid
         self.alpha = alpha
         self.debug = debug
+        self.m = m
         self.outputs = outputs
         self.score_obj = score(grid, outputs, debug)
 
         self.deltas = None
         self.deltas_square = None
-        self.max_error = 0
         self.LS = None
 
+        self.changes = []
         
     def fit(self, X, y, groups):
         # calculate deltas
@@ -27,11 +28,11 @@ class IGLB_calibration:
         self.deltas_square = self.deltas**2     
 
         # set the linear scaling for every bin, group and tau combination
-        self.LS = self.get_LS(X, y, groups)
+        self.LS = self.get_LS(X, y, groups) 
 
         return self
 
-    def predict(self, X, groups, assigned_bins, tau, bin, group):
+    def predict(self, X, groups, assigned_bins, tau, bin, group, test=False, is_correct=None):
         
         # get the alpha and beta values for the given tau, bin, group
         alpha_star = self.LS[tau, bin, group][0]
@@ -40,10 +41,21 @@ class IGLB_calibration:
 
         # Set the new values with the help of the alpha and beta values for all elements in the set
         if tau == 0:
-            X_ = np.array([expit(alpha_star + beta_star * logit(X[idx])) if (int(bin_a*10) <= bin) and (groups[idx, group] == 1) else X[idx] for idx, bin_a in enumerate(assigned_bins)])
+            X_ = np.array([expit(alpha_star + beta_star * logit(X[idx])) if (bin_a <= (bin/self.m)) and (groups[idx, group] == 1) else X[idx] for idx, bin_a in enumerate(assigned_bins)])
         else:
-            X_ = np.array([expit(alpha_star + beta_star * logit(X[idx])) if (int(bin_a*10) >= bin) and (groups[idx, group] == 1) else X[idx] for idx, bin_a in enumerate(assigned_bins)])
-
+            X_ = np.array([expit(alpha_star + beta_star * logit(X[idx])) if (bin_a >= (bin/self.m)) and (groups[idx, group] == 1) else X[idx] for idx, bin_a in enumerate(assigned_bins)])
+        
+        if test:
+            ab_test = binning.round_model_to_grid(X_, self.grid)
+            self.changes.append([tau, bin, group, (alpha_star, beta_star), len(ab_test[ab_test != assigned_bins]), [ab_test[ab_test != assigned_bins], groups[ab_test != assigned_bins], is_correct[ab_test != assigned_bins]]])    
+        
+        """ab_test = binning.round_model_to_grid(X_, self.grid)
+        print(len(ab_test[ab_test != assigned_bins]))
+        t = np.array([bin_a if (bin_a == (bin/self.m)) and (groups[idx, group] == 1) else 0 for idx, bin_a in enumerate(assigned_bins)])
+        print(t[t!=0])
+        print(bin/self.m)
+        print(bin)
+        print()"""
         return X_ 
    
     def get_deltas(self, X, y, groups):

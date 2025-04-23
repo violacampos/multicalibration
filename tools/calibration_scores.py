@@ -38,7 +38,6 @@ class score:
         asce = 0
         for corr_s_i, conf_s_i, bin_count in zip(correctness_per_bin, confidence_per_bin, total_bin_count):
             asce += (bin_count/num_samples)*(corr_s_i-conf_s_i)**2
-            #
         return np.round(asce ,4)
 
     def asce_deltas(self, total_bin_count, num_samples, delta_p_f):
@@ -70,7 +69,7 @@ class score:
         brier_score_actual = 0
         for conf, label in zip(confidences, labels):
             brier_score_actual += (label - conf)**2
-        return np.round((1/num_problems)*brier_score_actual, 2)
+        return np.round((1/num_problems)*brier_score_actual, 4)
 
     """
         Caculates the skill score. Perfect score is 1.0. Negativ mean worse than the baseline. Small positiv values indicate good skill
@@ -157,7 +156,6 @@ class score:
 
         # Assign the values in X to the corresponding bin (discretize values)
         assigned_bins = binning.round_model_to_grid(confidences, self.score_grid)
-        if self.debug: print(f"TEST Assigned Bins: {assigned_bins}")
 
         # Calculate some metrics on the UNcorrected values
         total_per_bin, correctness_per_bin, confidence_per_bin = binning.bin_round_probabilities_discret(assigned_bins, labels, self.score_grid)
@@ -235,7 +233,46 @@ class score:
         total_bin[np.isnan(total_bin)] = 0
 
         return total_group, correctness_group, total_bin, correctness_bin
+    
+    def get_correctness_per_group(self, confidences, labels, groups):
+        # Assign the values in X to the corresponding bin (discretize values)
+        assigned_bins = binning.round_model_to_grid(confidences, self.score_grid)
 
+        # Calculate some metrics on the UNcorrected values
+        correctness_group = np.array([np.divide(len(labels[(labels == 1) & (g ==1)]), len(labels[(g ==1)])) for g in groups.T])
+        correctness_group[np.isnan(correctness_group)] = 0
+
+        total_group = np.array([len(confidences[(g ==1)]) for g in groups.T])
+        total_group[np.isnan(total_group)] = 0
+               
+        # sum the probabilities per bin
+        bin_sums_group = np.array([confidences[(g ==1)].sum() for g in groups.T])
+
+        # calculate the average confidence per bin
+        average_group_confidence = np.divide(bin_sums_group, total_group, where=np.array(total_group)!=0)
+
+        return total_group, correctness_group, average_group_confidence
+    
+    def get_correctness_per_language(self, confidences, labels, language):
+        # Assign the values in X to the corresponding bin (discretize values)
+        assigned_bins = binning.round_model_to_grid(confidences, self.score_grid)
+        unique_lang = np.unique(language)
+        print(unique_lang)
+        # Calculate some metrics on the UNcorrected values
+        correctness_lang = np.array([np.divide(len(labels[(labels == 1) & (language == l)]), len(labels[(language == l)])) for l in unique_lang])
+        correctness_lang[np.isnan(correctness_lang)] = 0
+
+        total_lang = np.array([len(confidences[(language == l)]) for l in unique_lang])
+        total_lang[np.isnan(total_lang)] = 0
+               
+        # sum the probabilities per bin
+        bin_sums_group = np.array([confidences[(language == l)].sum() for l in unique_lang])
+
+        # calculate the average confidence per bin
+        average_lang_confidence = np.divide(bin_sums_group, total_lang, where=np.array(total_lang)!=0)
+
+        return total_lang, correctness_lang, average_lang_confidence 
+       
     def get_total_per_group(self, confidences, labels, groups):
         # Assign the values in X to the corresponding bin (discretize values)
         assigned_bins = binning.round_model_to_grid(confidences, self.grid)

@@ -8,6 +8,7 @@ from tools.create_charts import chart_creator
 from tools.iglb_calibration import IGLB_calibration
 from tools.groups import groups
 from tabulate import tabulate
+import pickle
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts/"
@@ -18,11 +19,13 @@ OUTPUTS = True
 binning_type = 'linear'
 binning_step_size = 0.1
 #m = 10
-epsilon = 0.001
+epsilon = 0.01
 m = 10
 
 all_lang = True
-save_table = True
+load_scc_results = True
+
+save_table = False
 
 np.seterr(divide='ignore', invalid='ignore')
 
@@ -55,11 +58,14 @@ def main(extern=False):
         if not os.path.isdir(save_dir):
             os.makedirs(save_dir)
 
-        probs, is_correct, programs, prompts = data.proability_and_correctness_for_samples(results)
+        probs, is_correct, programs, prompts, languages, names = data.proability_and_correctness_for_samples(results)
        
-        # Define group matrix
-        groups_w = groups(programs, prompts).create_groups()
-        groups_w = np.array(groups_w)
+        if load_scc_results:
+            scc_infos = data.load_scc_data(run, languages, names)
+            groups_w = groups(programs, prompts).create_groups(scc=scc_infos)
+        else:
+            # Define group matrix
+            groups_w = groups(programs, prompts).create_groups()
         
         if OUTPUTS: print(f"Run: {run}")
         if OUTPUTS: print(f"Gruppen Anzahl: {groups_w.sum(axis=0)}")
@@ -70,20 +76,22 @@ def main(extern=False):
         train_X, val_X, train_y, val_y, train_groups, val_groups = train_test_split(train_X, train_y, train_groups, test_size=0.25, random_state=42)
 
         #calib_X, val_X, calib_y, val_y, calib_groups, val_groups = train_test_split(probs, is_correct, groups_w, test_size=0.33, random_state=42)
-        if DEBUG: print(f"Calib values: {train_X}")
-        if DEBUG: print(f"val values: {val_X}")
         
         # get the grid for binning type and the chartmaker obj        
         grid, chartmaker = binning.get_grid_and_chartmaker(run, binning_type, save_dir, m, train_X, binning_step_size)
 
         # Create object and calculate first deltas and so on
-        iglb = IGLB_calibration(grid, epsilon, OUTPUTS, DEBUG).fit(train_X, train_y, train_groups)
-        total_uncalibrated, correctness_uncalibrated, scores_uncalibrated = iglb.score_obj.calc_all_new(test_X, 
-                                                                                                        test_y, 
-                                                                                                        groups=test_groups, 
-                                                                                                        deltas=iglb.get_deltas(test_X, test_y, test_groups), 
-                                                                                                        set_brier_ref=True)
+        iglb = IGLB_calibration(grid, epsilon, m, OUTPUTS, DEBUG).fit(train_X, train_y, train_groups)
+        scores_uncalibrated = iglb.score_obj.calc_all_new(  test_X, 
+                                                            test_y, 
+                                                            groups=test_groups, 
+                                                            set_brier_ref=True)
+        total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = iglb.score_obj.get_total_and_correctness(test_X, test_y, test_groups) 
         
+        temp_group_correctness = correctness_group_uncalibrated
+        temp_bin_correctness = correctness_bin_uncalibrated
+        history = {}
+
         while True: 
             # Calculate mse for f_t
             mse_f_t = iglb.score_obj.mse(val_X, val_y, len(val_y))
@@ -100,41 +108,57 @@ def main(extern=False):
             if P_S_p_g[tau, bin, group] < epsilon:
                 break
 
-            if DEBUG: print(f"Max Error: {iglb.max_error}")
+            if DEBUG: print(f"Max Error: {P_S_p_g[tau, bin, group]}")
             # get the calibrated confidences for the calibration subset
             train_X = iglb.predict(train_X, train_groups, assigned_bins, tau, bin, group)
 
             # get the calibrated confidences for the test subset
             assigned_bins_test = binning.round_model_to_grid(test_X, grid)   
-            test_X = iglb.predict(test_X, test_groups, assigned_bins_test, tau, bin, group)
+            test_X = iglb.predict(test_X, test_groups, assigned_bins_test, tau, bin, group, test=True, is_correct=test_y)
 
             # get the calibrated confidences for the validation subset to calculate MSE
             assigned_bins_val = binning.round_model_to_grid(val_X, grid)   
             val_X = iglb.predict(val_X, val_groups, assigned_bins_val, tau, bin, group)
+            
+            curr_group_total, curr_group_correctness, curr_bin_total, curr_bin_correctness = iglb.score_obj.get_total_and_correctness(test_X, test_y, test_groups)
+            history[len(iglb.changes)] = [temp_group_correctness, curr_group_correctness, iglb.changes[-1], curr_group_total, temp_bin_correctness, curr_bin_correctness] 
+            temp_group_correctness = curr_group_correctness
+            temp_bin_correctness = curr_bin_correctness    
 
             # Second Break if MSE of the new model is greater or equal to the model before
             mse_h_t_plus_1 = iglb.score_obj.mse(val_X, val_y, len(val_y))
-            if OUTPUTS: print(f"MSE h_t+1: {mse_h_t_plus_1} >= MSE f_t{mse_f_t}")
             if mse_h_t_plus_1 >= mse_f_t:
+                if OUTPUTS: print(f"MSE h_t+1: {mse_h_t_plus_1} >= MSE f_t: {mse_f_t}")
                 break
             
             # Set the new model for the next iteration
             iglb = iglb.fit(train_X, train_y, train_groups)
                 
         #if OUTPUTS: print(f"GASCE: {iglb.gasce}\n")
-        total_calibrated, correctness_calibrated, scores_calibrated = iglb.score_obj.calc_all_new(test_X, 
-                                                                                                  test_y, 
-                                                                                                  groups=test_groups,
-                                                                                                  deltas=iglb.get_deltas(test_X, test_y, test_groups))
-        
+        scores_calibrated = iglb.score_obj.calc_all_new(test_X, 
+                                                        test_y, 
+                                                        groups=test_groups)
+        total_group_calibrated, correctness_group_calibrated, total_bin_calibrated, correctness_bin_calibrated = iglb.score_obj.get_total_and_correctness(test_X, test_y, test_groups) 
+        total_group, correctness_group, average_group_confidence = iglb.score_obj.get_correctness_per_group(test_X, test_y, test_groups) 
+                
         # Add entry for the run in the score table
         iglb.score_obj.add_to_score_table(run, scores_uncalibrated, scores_calibrated)
+        history["score"] = iglb.score_obj.score_table
+
+        with open('iglb_history.pkl', 'wb') as f:
+            pickle.dump(history, f)
 
         if extern:
-            return total_calibrated, correctness_calibrated, scores_calibrated
+            return [total_bin_calibrated, 
+                    correctness_bin_calibrated, 
+                    correctness_group, 
+                    average_group_confidence,
+                    total_group, 
+                    scores_calibrated]
         else:
+            print()
             # Charts
-            chartmaker.calibration_info(total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated)
+            # chartmaker.calibration_info(total_bin_uncalibrated, correctness_bin_uncalibrated, total_bin_calibrated, correctness_bin_calibrated)
 
     # display score table for all runs
     iglb.score_obj.display_score_table()

@@ -8,15 +8,16 @@ class chart_creator():
         self.debug = binning_type
         self.save_dir = save_dir
         self.grid = grid
+        self.chart_grid = np.arange(0.0, 1+(1/10), 1/10)
 
         self.colors_uncalibrated = []
         self.colors_calibrated = []
 
         # define chart ranges for display reasons
         if binning_type == 'linear':
-            if not m: exit("m needs to be set with linear binning")
+            #if not m: exit("m needs to be set with linear binning")
             self.chart_range = grid
-            self.bar_width = 1/m 
+            self.bar_width = 1/10
         elif binning_type == 'quantil':
             if not bin_edges: exit("bin_edges needs to be set with quantil binning")
             self.chart_range = self.grid
@@ -73,7 +74,7 @@ class chart_creator():
 
     def count_distribution(self, ax, sub_title, totals):
         ax.set_title(sub_title, fontsize=12)
-        bars = ax.bar(self.chart_range, totals, width = self.bar_width, color=['tab:blue'], edgecolor='black')
+        bars = ax.bar(self.chart_grid, totals, width = self.bar_width, color=['tab:blue'], edgecolor='black')
         ax.bar_label(bars, totals)
         ax.set_xticks(np.arange(0, 1.1, 0.1))
         ax.set(xlabel ='Confidence')
@@ -81,7 +82,7 @@ class chart_creator():
 
     def calibration_bar_chart(self, ax, sub_title, x, bar_colors):
         ax.set_title(sub_title, fontsize=12)
-        bars = ax.bar(self.chart_range, x, width = self.bar_width, color=bar_colors, edgecolor='black')
+        bars = ax.bar(self.chart_grid, x, width = self.bar_width, color=bar_colors, edgecolor='black')
         ax.plot([0, 1], [0, 1], linestyle='--')
         #ax.bar_label(bars, totals)
         ax.set_xticks(np.arange(0, 1.1, 0.1))
@@ -99,11 +100,54 @@ class chart_creator():
         plt.savefig(path)
         plt.close()
 
-    def calibration_info(self, total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated):
-        if len(correctness_calibrated) > 11:
-            # auf 11 bins runterbrechen
-            total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated = self.map_values_to_eleven_bins(total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated)
+    def scatter_plot(self, ax, method, x, y, area):
+        colors = [  
+                    'tab:blue',
+                    'tab:orange',
+                    'tab:green',
+                    'tab:red',
+                    'tab:purple',
+                    #'tab:brown',
+                    'tab:pink',
+                    #'tab:gray',
+                    'tab:olive',
+                    #'tab:cyan'
+                ]
 
+        scatter = ax.scatter(x, y, s=area, c=colors, alpha=0.7, marker=r'$\odot$')
+        ax.set_title(method, fontsize=12)
+        ax.plot([np.min(x), 1 if np.max(x)+0.05 > 1 else np.max(x)+0.05], [np.min(x), 1 if np.max(x)+0.05 > 1 else np.max(x)+0.05], linestyle='--')   
+
+    def group_calibration_scatter(self, 
+                                  uncalib_corr,
+                                  uncalib_conf,
+                                  uncalib_total, 
+                                  hb_corr,
+                                  hb_conf,
+                                  hb_total, 
+                                  lr_corr,
+                                  lr_conf,
+                                  lr_total, 
+                                  ighb_corr,
+                                  ighb_conf,
+                                  ighb_total, 
+                                  iglb_corr,
+                                  iglb_conf,
+                                  iglb_total):
+        
+        fig, axs = plt.subplots(1, 5, figsize=(30, 5))
+        fig.suptitle(self.run+' # Group Calibration Charts', fontsize=14)
+        
+        self.scatter_plot(axs[0], 'Uncalibrated', uncalib_corr, uncalib_conf, uncalib_total)        
+        self.scatter_plot(axs[1], 'HB', hb_corr, hb_conf, hb_total)    
+        self.scatter_plot(axs[2], 'LR', lr_corr, lr_conf, lr_total)    
+        self.scatter_plot(axs[3], 'IGHB', ighb_corr, ighb_conf, ighb_total)    
+        self.scatter_plot(axs[4], 'IGLB', iglb_corr, iglb_conf, iglb_total)
+        
+        plt.savefig(self.save_dir+"group_calibration.png")
+        plt.close()
+
+    def calibration_info(self, total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated):
         self.set_bar_colors(total_uncalibrated, total_calibrated)
 
         fig, axs = plt.subplots(2, 2, figsize=(10, 10))
@@ -119,13 +163,13 @@ class chart_creator():
 
         self.calibration_comparision_chart(self.chart_range[total_calibrated != 0], self.chart_range[total_uncalibrated != 0], correctness_calibrated[total_calibrated != 0], correctness_uncalibrated[total_uncalibrated != 0])
 
-        self.reset_chart_range()
+        """self.reset_chart_range()"""
 
     def plot_correctness_change(self, total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated, change, num):
-        if len(correctness_calibrated) > 11:
+        """if len(correctness_calibrated) > 11:
             # auf 11 bins runterbrechen
             total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated = self.map_values_to_eleven_bins(total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated)
-
+        """
         self.set_bar_colors(total_uncalibrated, total_calibrated)
 
         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
@@ -136,9 +180,9 @@ class chart_creator():
         plt.savefig(self.save_dir+"changes/"+str(num)+"_calibration_changes.png")
         plt.close() 
         
-        self.reset_chart_range()
+        """self.reset_chart_range()"""
 
-    def map_values_to_eleven_bins(self, total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated):
+    """def map_values_to_eleven_bins(self, total_uncalibrated, total_calibrated, correctness_uncalibrated, correctness_calibrated):
         # auf 11 bins runterbrechen
         new_bins = np.arange(0, 1.1, 0.1)
         bin_assignment = np.array([new_bins[np.argmin(np.abs(old_bin - new_bins))] for old_bin in self.chart_range])
@@ -179,8 +223,8 @@ class chart_creator():
 
         total = np.array([np.sum(total[(bin_assignment == nb)], axis=0) if group else np.sum(total[(bin_assignment == nb)]) for nb in new_bins])
 
-        return total
+        return total"""
       
-    def reset_chart_range(self):
-        self.chart_range = self.grid
+    """def reset_chart_range(self):
+        self.chart_range = self.grid"""
 
