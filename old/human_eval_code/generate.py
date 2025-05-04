@@ -4,7 +4,6 @@ os.environ['HF_HOME'] = "/data/stud/2025-MA-kuschnereit/hf_models/"
 
 from human_eval.data import write_jsonl, read_problems
 from vllm import LLM, SamplingParams
-from vllm.sampling_params import BeamSearchParams
 import torch
 from huggingface_hub import login
 

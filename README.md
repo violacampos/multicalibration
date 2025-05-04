@@ -23,3 +23,13 @@ Set --batch-size to 10 for 70B Models.<br/>
                           --completion-limit 1 \
                           --output-dir-prefix runs`
 
+use generate_4_all script to generate code for all different languages. Parameters are specified in the script.
+CUDA_VISIBLE_DEVICES=6,7 python generate_4_all.py --use-local
+
+After generation of samples. use the Multipl_E script to check for correctness. Copy samples to local machin in the Multipl-E repo
+under the folder runs.
+Then excute the following command:
+docker run --rm --network none -v G:/Masterarbeit/MultiPL-E/runs:/runs:rw multipl-e-eval --dir /runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --output-dir /runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1_results --recursive                    
+
+replace dir with the name of the copied folder
+
