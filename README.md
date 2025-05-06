@@ -29,7 +29,19 @@ CUDA_VISIBLE_DEVICES=6,7 python generate_4_all.py --use-local
 After generation of samples. use the Multipl_E script to check for correctness. Copy samples to local machin in the Multipl-E repo
 under the folder runs.
 Then excute the following command:
-docker run --rm --network none -v G:/Masterarbeit/MultiPL-E/runs:/runs:rw multipl-e-eval --dir /runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --output-dir /runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1_results --recursive                    
+docker run --rm --network none -v G:/Masterarbeit/MultiPL-E/runs:/runs:rw multipl-e-eval --dir /runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --output-dir /runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --recursive                    
 
 replace dir with the name of the copied folder
+
+After the evaluation copy the folder onto the hostmachine if necessary.
+
+Run the script create programs to obtain information about the generated code. But before that adjust the run parameter in the script.
+
+After programs are created install scc by boyter and execute the following command.
+scc -f json -o results.json --by-file programs
+
+this will generat a json file with informations about every program. To use them copy them into the scc folder in the project masterarbeit and rename it to the name of the run.
+
+Now you can run the compare_methods script to get a result for all methods:
+python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1 --split --use-scc --prob-method avg_logprob --save-table
 

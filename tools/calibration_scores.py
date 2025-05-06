@@ -257,7 +257,7 @@ class score:
         # Assign the values in X to the corresponding bin (discretize values)
         assigned_bins = binning.round_model_to_grid(confidences, self.score_grid)
         unique_lang = np.unique(language)
-        print(unique_lang)
+
         # Calculate some metrics on the UNcorrected values
         correctness_lang = np.array([np.divide(len(labels[(labels == 1) & (language == l)]), len(labels[(language == l)])) for l in unique_lang])
         correctness_lang[np.isnan(correctness_lang)] = 0
@@ -284,27 +284,31 @@ class score:
         return total_group
 
     
-    def add_to_score_table(self, run, uncalib_scores, calib_scores):
-        
+    def add_to_score_table(self, run, uncalib_scores, calib_scores, baseline=False):
+
         uncalib_scores = list(list(uncalib_scores.values())[0].values())
         uncalib_gasce = uncalib_scores[-1]
         uncalib_scores = uncalib_scores[:-1]
 
-        calib_scores = list(list(calib_scores.values())[0].values())
-        calib_gasce = calib_scores[-1]
-        calib_scores = calib_scores[:-1]
-        
-        score_difference = list(np.round(np.array(calib_scores) - np.array(uncalib_scores), 4))
+        if not baseline:
+            calib_scores = list(list(calib_scores.values())[0].values())
+            calib_gasce = calib_scores[-1]
+            calib_scores = calib_scores[:-1]
+            
+            score_difference = list(np.round(np.array(calib_scores) - np.array(uncalib_scores), 4))
 
-        gasce_diff = np.round(np.array(calib_gasce) - np.array(uncalib_gasce), 4)
+            gasce_diff = np.round(np.array(calib_gasce) - np.array(uncalib_gasce), 4)
 
-        score_difference.append(gasce_diff)
+            score_difference.append(gasce_diff)
+            
+            calib_scores.append(calib_gasce)
+            
         uncalib_scores.append(uncalib_gasce)
-        calib_scores.append(calib_gasce)
-
         self.add_entry(run, "Uncalib", uncalib_scores)
-        self.add_entry(run, "Calib", calib_scores)
-        self.add_entry(run, "Diff", score_difference)
+        
+        if not baseline:
+            self.add_entry(run, "Calib", calib_scores)
+            self.add_entry(run, "Diff", score_difference)
 
     def add_entry(self, run, type, scores):
         entry = []

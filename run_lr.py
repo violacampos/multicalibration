@@ -1,12 +1,9 @@
 import numpy as np
-import argparse
 import os
 from sklearn.model_selection import train_test_split
-from tools import data, calibration_scores, binning
+from tools import data, binning, cmd_input
 from tools.groups import groups
-from tools.create_charts import chart_creator
 from tools.lr_calibration import lr_calibration
-from tabulate import tabulate
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
 CHART_DIR = BASE_DIR+"charts/"
@@ -14,34 +11,20 @@ CHART_DIR = BASE_DIR+"charts/"
 DEBUG = False
 OUTPUTS = True
 
-binning_type = 'linear'
-binning_step_size = 0.1
-m = 10
-
-use_train_test_split = True
-control_exp = False
-
-all_lang = True
-save_table = True
-load_scc_results = True
-
 np.seterr(divide='ignore', invalid='ignore')
 
 def main(extern=False):
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "dirs", type=str,  help="Directories with results. ", nargs="+")
-    args = parser.parse_args()
+    args = cmd_input.load_parser()
 
-    run_dirs = [x[0] for x in os.walk(args.dirs[0])]
+    run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
 
-    if all_lang == True:
+    if args.all_lang == True:
         run_dirs = [run_dirs[0]]
 
     for d in run_dirs:
         # if main dir is in list just continue
-        if d == args.dirs[0] and ("humaneval" not in d and "mbpp" not in d):
+        if d == args.dir[0] and ("humaneval" not in d and "mbpp" not in d):
             continue
         
         # Get run name
@@ -51,16 +34,21 @@ def main(extern=False):
         run = run.replace('/', '')
         results, temperature, top_p, num_samples = data.load_multipl_e_run(d)
         
+        verb_data = None
+        if args.prob_method in ["verbalized_qual", "verbalized_quant"]:
+            verb_data_path = 'verbalized_data/'+args.prob_method+'/'+run+'/verbalized_data.json'
+            verb_data = data.load_json_data(verb_data_path)
+
         # create directory for chart generation
-        save_dir = CHART_DIR+run+'/group_lr/'+binning_type+'/'
+        save_dir = CHART_DIR+run+'/group_lr/'+args.binning_type+'/'
         if not os.path.isdir(save_dir):
             os.makedirs(save_dir)
 
-        probs, is_correct, programs, prompts, languages, names = data.proability_and_correctness_for_samples(results)
+        probs, is_correct, programs, prompts, languages, names, _ = data.proability_and_correctness_for_samples(results, verb_data, type=args.prob_method)
 
         # Keep in mind that elixir has the extension ex for concating the results
         # also wierd results for go -> folder was namen go_test.go
-        if load_scc_results:
+        if args.use_scc:
             scc_infos = data.load_scc_data(run, languages, names)
             groups_w = groups(programs, prompts).create_groups(scc=scc_infos)
         else:
@@ -74,21 +62,17 @@ def main(extern=False):
         X = np.column_stack([groups_w])
 
         # Control experiment to check which groups helps the model to make correct predictions
-        if control_exp:
+        if args.control_exp:
             y = is_correct
         else:
             y = is_correct - probs
 
         # check if we split the data or use the whole dataset for evaluation
-        if use_train_test_split:
+        if args.split:
             # split in 60% train, 20% validation and 20% test
             train_X, test_X, train_y, test_y, train_probs, test_probs, train_label, test_label, train_groups, test_groups = train_test_split(X, y, probs, is_correct, groups_w, test_size=0.2, random_state=42)
 
             train_X, val_X, train_y, val_y, train_probs, val_probs, train_label, val_label, train_groups, val_groups = train_test_split(train_X, train_y, train_probs, train_label, train_groups, test_size=0.25, random_state=42)
-
-            #train_X, test_X, train_y, test_y, train_probs, test_probs, train_label, test_label, train_groups, test_groups = train_test_split(X, y, probs, is_correct, groups_w, test_size=0.33, random_state=42)
-            if DEBUG: print(f"Training values: {train_X}")
-            if DEBUG: print(f"Test values: {test_X}")
         else:
             train_X = X
             test_X = X
@@ -102,7 +86,7 @@ def main(extern=False):
             test_groups = groups_w
        
         # get the grid for binning type and the chartmaker obj        
-        grid, chartmaker = binning.get_grid_and_chartmaker(run, binning_type, save_dir, m, train_probs, binning_step_size)
+        grid, chartmaker = binning.get_grid_and_chartmaker(run, args.binning_type, save_dir, args.bin_count, train_probs, 1/args.bin_count)
 
         # Train the linear regression on the train data split
         lr = lr_calibration(grid, OUTPUTS, DEBUG).fit(train_X, train_y)
@@ -136,12 +120,13 @@ def main(extern=False):
         
         # only return values when called from other script
         if extern:
-            return [total_bin_calibrated, 
-                    correctness_bin_calibrated, 
-                    correctness_group, 
-                    average_group_confidence, 
-                    total_group,
-                    scores_calibrated]
+            return {"total_bin_calibrated": total_bin_calibrated, 
+                    "correctness_bin_calibrated": correctness_bin_calibrated, 
+                    "correctness_group": correctness_group, 
+                    "average_group_confidence": average_group_confidence, 
+                    "total_group": total_group,
+                    "scores_calibrated": scores_calibrated,
+                    "calibrated_probs": calibrated_predictions}
         else:
             print()
             # Charts
@@ -151,8 +136,8 @@ def main(extern=False):
     lr.score_obj.display_score_table()
 
     # saves the score table
-    if save_table:
-        with open('results/lr_'+binning_type+'_results.txt', 'w') as f:
+    if args.save_table:
+        with open('results/'+run+'/lr_'+args.binning_type+'_results.txt', 'w') as f:
             f.write(lr.score_obj.printable_table)
 
 if __name__ == "__main__":

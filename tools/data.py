@@ -6,6 +6,8 @@ import itertools
 import numpy as np
 import os
 
+import re
+
 def gunzip_json(path: Path) -> Optional[dict]:
     """
     Reads a .json.gz file, but produces None if any error occurs.
@@ -94,43 +96,85 @@ def load_multipl_e_run(path):
 
     return results, temperature, top_p, num_samples
 
-def proability_and_correctness_for_samples(results, type="avg_logprob"):
+def load_json_data(path):
+    with open(path, 'r') as file:
+        json_data = json.load(file)
+    return json_data
+
+#  Teile aus https://github.com/parameterlab/apricot/blob/main/src/eval.py
+def proability_and_correctness_for_samples(results, verb_data, type="avg_logprob"):
     prob_value_list = []
     is_correct = []
     prompts = []
     programms = []
     languages = []
     names = []
+    successful = []
+    token_logprobs = []
+
+    QUALITATIVE_SCALE = {
+        "Very low": 0,
+        "Low": 0.3,
+        "Somewhat low": 0.45,
+        "Medium": 0.5,
+        "Somewhat high": 0.65,
+        "High": 0.7,
+        "Very high": 1,
+    }
 
     # Get the token probailities from the samples and create arrays
     for r in results:
         for sample in r:
             token_count = len(sample["token_ids"])
             cumulative_logprob = sample["cumulative_logprob"]
-            # for later use
-            logprobs = [list(logprob.values())[0][0] for logprob in sample["token_logprobs"]]
+            
+            if sample["language"] == 'elixir':
+                lang = "ex"
+            elif sample["language"] == 'go_test.go':
+                lang = "go"
+            else:
+                lang = sample["language"]
 
             if type == "avg_logprob":
-                prob = np.round(np.exp(cumulative_logprob / token_count), 2) 
-                
+                prob = np.round(np.exp(cumulative_logprob / token_count), 2)
+            elif type == "verbalized_quant":
+                try:
+                    template = r"\d{1,3}(?:\.\d+)?\s?\%?"
+                    d = next((item for item in verb_data[lang] if item["task_id"] == sample["name"]), None)
+                    res = re.search(template, d["text"]).group(0)
+                    prob = float(res.replace("%", "")) / 100
+                    if not (0 <= prob <= 1):
+                        successful.append(False)
+                        continue
+                except AttributeError:
+                    successful.append(False)
+                successful.append(True)
+            elif type == "verbalized_qual":
+                try:
+                    template = rf"({'|'.join(QUALITATIVE_SCALE.keys())})"
+                    d = next((item for item in verb_data[lang] if item["task_id"] == sample["name"]), None)
+                    res = re.search(template, d["text"]).group(0)
+                    prob = QUALITATIVE_SCALE[res]
+
+                except AttributeError:
+                    successful.append(False)
+                successful.append(True)
+                                     
             # collect average token probabilty and correctnes value
             programms.append(sample["program"])
-            if sample["language"] == 'elixir':
-                languages.append("ex")
-            elif sample["language"] == 'go_test.go':
-                languages.append("go")
-            else:
-                languages.append(sample["language"])
+            languages.append(lang)
+
             names.append(sample["name"])
             prompts.append(sample["prompt"])
             prob_value_list.append(prob)
             is_correct.append(1) if sample["c"] == 1 else is_correct.append(0)
+            token_logprobs.append(sample["token_logprobs"])
 
     prob_value_list     = np.array(prob_value_list)
     is_correct          = np.array(is_correct)
     languages           = np.array(languages)
 
-    return prob_value_list, is_correct, programms, prompts, languages, names
+    return prob_value_list, is_correct, programms, prompts, languages, names, token_logprobs
 
 def avg_token_probability(cumulative_logprob, token_count):
     return np.round(np.exp(cumulative_logprob / token_count), 2) 
