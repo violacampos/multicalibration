@@ -106,6 +106,7 @@ if __name__ == "__main__":
                 "uncalibrated_probs": baseline_results["uncalibrated_probs"],
                 "is_correct": baseline_results["is_correct"],
                 "language": baseline_results["language"],
+                "groups": baseline_results["groups"],
                 "names": baseline_results["names"],
                 "prompts": baseline_results["prompts"],
                 "token_logprobs": baseline_results["token_logprobs"]

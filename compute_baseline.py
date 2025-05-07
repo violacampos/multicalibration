@@ -65,7 +65,7 @@ def main(extern=False):
 
         if args.split:
             # split in 60% train, 20% validation and 20% test
-            train_X, test_X, train_y, test_y, train_groups, test_groups, train_lang, test_lang, train_names, test_names, train_prompts, test_prompts = train_test_split(probs, is_correct, groups_w, languages, names, prompts, test_size=0.2, random_state=42)
+            train_X, test_X, train_y, test_y, train_groups, test_groups, train_lang, test_lang, train_names, test_names, train_prompts, test_prompts, train_token_logprobs, test_token_logprobs = train_test_split(probs, is_correct, groups_w, languages, names, prompts, token_logprobs, test_size=0.2, random_state=42)
 
             train_X, val_X, train_y, val_y, train_groups, val_groups, train_lang, val_lang = train_test_split(train_X, train_y, train_groups, train_lang, test_size=0.25, random_state=42)
         else:
@@ -106,10 +106,11 @@ def main(extern=False):
                     "scores_uncalibrated": scores_uncalibrated,
                     "uncalibrated_probs": test_X,
                     "is_correct": test_y,
+                    "groups": test_groups,
                     "language": test_lang,
                     "names": test_names,
                     "prompts": test_prompts,
-                    "token_logprobs": token_logprobs}
+                    "token_logprobs": test_token_logprobs}
         else:
             colors_uncalibrated = []
             total_bin_count_norm = (total_bin_uncalibrated-np.min(total_bin_uncalibrated))/(np.max(total_bin_uncalibrated)-np.min(total_bin_uncalibrated))
