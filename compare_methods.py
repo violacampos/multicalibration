@@ -5,7 +5,7 @@ import run_iglb
 import compute_baseline
 from tabulate import tabulate
 import os
-from tools import binning, cmd_input
+from tools import binning, cmd_input, data
 import pickle
 
 BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
@@ -14,15 +14,12 @@ CHART_DIR = BASE_DIR+"charts/"
 if __name__ == "__main__":
     args = cmd_input.load_parser()
 
-    #run = "humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1"    
     run = args.dir[0].split('/')[-1]
 
     # create directory for chart generation
-    save_dir = CHART_DIR+run+'/comparison/'+args.binning_type+'/'+args.prob_method+'/'+('no_split/' if not args.split else '')
-    if not os.path.isdir(save_dir):
-        os.makedirs(save_dir)
+    save_dir = data.generate_save_dir(run, "comparison", args.binning_type, args.prob_method, args.split, args.model, calibration_data=args.save_data , history_data=args.save_history)
     
-    grid, chartmaker = binning.get_grid_and_chartmaker(run, args.binning_type, save_dir, args.bin_count)
+    grid, chartmaker = binning.get_grid_and_chartmaker(run, args.binning_type, save_dir, args.bin_count, False)
     
     baseline_results = compute_baseline.main(extern=True)    
 
@@ -53,9 +50,8 @@ if __name__ == "__main__":
     # CUDA_VISIBLE_DEVICES=6 python compare_methods.py ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1
 
     if args.save_table:
-        if not os.path.isdir('results/'+run+'/comparison/'+args.binning_type+'/'):
-            os.makedirs('results/'+run+'/comparison/'+args.binning_type+'/')
-        with open('results/'+run+'/comparison/'+args.binning_type+'/'+args.prob_method+('_no_split' if not args.split else '')+'_results.txt', 'w') as f:
+
+        with open(save_dir+'scores.txt', 'w') as f:
             f.write(table_print)
 
     if args.save_charts:
@@ -108,13 +104,10 @@ if __name__ == "__main__":
                 "language": baseline_results["language"],
                 "groups": baseline_results["groups"],
                 "names": baseline_results["names"],
+                "programs": baseline_results["programs"],
                 "prompts": baseline_results["prompts"],
                 "token_logprobs": baseline_results["token_logprobs"]
             }
 
-
-            if not os.path.isdir('calibration_data/'+run+'/'+args.binning_type+'/'):
-                os.makedirs('calibration_data/'+run+'/'+args.binning_type+'/')
-
-            with open('calibration_data/'+run+'/'+args.binning_type+'/calibration.pkl', 'wb') as f:
+            with open(save_dir+'calibration_data/calibration.pkl', 'wb') as f:
                 pickle.dump(data, f)

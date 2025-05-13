@@ -45,3 +45,5 @@ this will generat a json file with informations about every program. To use them
 Now you can run the compare_methods script to get a result for all methods:
 python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1 --split --use-scc --prob-method avg_logprob --save-table
 
+python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --use-scc --prob-method avg_logprob --save-table --save-charts --split --save-data
+

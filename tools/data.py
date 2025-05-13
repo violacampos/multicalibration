@@ -5,8 +5,9 @@ from typing import Optional
 import itertools
 import numpy as np
 import os
-
+import datetime
 import re
+import configparser
 
 def gunzip_json(path: Path) -> Optional[dict]:
     """
@@ -137,11 +138,12 @@ def proability_and_correctness_for_samples(results, verb_data, type="avg_logprob
 
             if type == "avg_logprob":
                 prob = np.round(np.exp(cumulative_logprob / token_count), 2)
-            elif type == "verbalized_quant":
+            elif type == "quantitativ":
                 try:
                     template = r"\d{1,3}(?:\.\d+)?\s?\%?"
-                    d = next((item for item in verb_data[lang] if item["task_id"] == sample["name"]), None)
-                    res = re.search(template, d["text"]).group(0)
+                    d = verb_data[lang][sample["name"]]
+                    #d = next((item for item in verb_data[lang] if item["task_id"] == sample["name"]), None)
+                    res = re.search(template, d["completion"]).group(0)
                     prob = float(res.replace("%", "")) / 100
                     if not (0 <= prob <= 1):
                         successful.append(False)
@@ -149,11 +151,12 @@ def proability_and_correctness_for_samples(results, verb_data, type="avg_logprob
                 except AttributeError:
                     successful.append(False)
                 successful.append(True)
-            elif type == "verbalized_qual":
+            elif type == "qualitativ":
                 try:
                     template = rf"({'|'.join(QUALITATIVE_SCALE.keys())})"
-                    d = next((item for item in verb_data[lang] if item["task_id"] == sample["name"]), None)
-                    res = re.search(template, d["text"]).group(0)
+                    d = verb_data[lang][sample["name"]]
+                    #d = next((item for item in verb_data[lang] if item["task_id"] == sample["name"]), None)
+                    res = re.search(template, d["completion"]).group(0)
                     prob = QUALITATIVE_SCALE[res]
 
                 except AttributeError:
@@ -169,7 +172,8 @@ def proability_and_correctness_for_samples(results, verb_data, type="avg_logprob
             prob_value_list.append(prob)
             is_correct.append(1) if sample["c"] == 1 else is_correct.append(0)
             token_logprobs.append(sample["token_logprobs"])
-
+    if type in ["qualitativ", "quantitativ"]:
+        print(f"Succesful extracted: {len(successful)}")
     prob_value_list     = np.array(prob_value_list)
     is_correct          = np.array(is_correct)
     languages           = np.array(languages)
@@ -207,5 +211,70 @@ def load_scc_data(run, languages, names):
         print(np.median(np.array([d["Code"] for d in scc_infos])))
         print(np.histogram(np.array([d["Lines"] for d in scc_infos]), bins=[0,5,10,20,30,40,100,500]))"""
     return scc_infos 
+
+def generate_save_dir(run, method, binning, prob_generation, split, model, calibration_data=False, history_data=False):
+    """
+    Generate a directory with the following structure for different runs and methods
+    (dir) runs
+        (dir) *run_name*
+            (dir) *calibration_method*
+                (dir) *binning_method*
+                    (dir) *prob_generation_method*
+                        (file) timestamp file for traceability
+                        (file) comparison_bar_chart
+                        (file) group_calibration
+                        (file) scores (txt/json)
+                        (dir) *model* (only for qualitativ/qunatitativ prob_generation)
+                            (file) timestamp file for traceability
+                            (file) comparison_bar_chart
+                            (file) group_calibration
+                            (file) scores (txt/json)
+
+    """
+
+    config = load_config()
+
+    dir = config["Paths"]["base_dir"]+"runs/"+run+"/"+method+"/"+binning+"/"+prob_generation+"/"
+
+    if split:
+        dir += "split/"
+    else:
+        dir += "all/"
+
+    if model is not None:
+        dir += model+"/"
+
+    if not os.path.isdir(dir):
+        os.makedirs(dir)
+    
+    if calibration_data:
+        if not os.path.isdir(dir+'calibration_data/'):
+            os.makedirs(dir+'calibration_data/')
+    
+    if history_data:
+        if not os.path.isdir(dir+'history_data/'):
+            os.makedirs(dir+'history_data/')
+
+    content = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    with open(f"{dir}_created_at.txt", "w") as f:
+        f.write(content)
+    
+    return dir
+
+def load_config():
+    config = configparser.ConfigParser()
+    try:
+        file = open("config.ini", "r")
+    except FileNotFoundError:
+        print("Can't find config.ini!")
+        exit()
+
+    config.read_file(file)
+
+    if not config.has_option("Paths", "base_dir"):
+        print("Can't find base_dir in the Paths section of config.ini!")
+        exit()
+
+    return config
 
 

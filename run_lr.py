@@ -29,20 +29,20 @@ def main(extern=False):
         
         # Get run name
         run = d.split("/runs/", 1)[1]
-
-        # load the data from the run directory
         run = run.replace('/', '')
+
+        if not extern:
+            save_dir = data.generate_save_dir(run, "lr", args.binning_type, args.prob_method, args.split, args.model, calibration_data=args.save_data , history_data=args.save_history)
+        else:
+            save_dir = data.load_config()["Paths"]["base_dir"]
+        
+        # load the data from the run directory
         results, temperature, top_p, num_samples = data.load_multipl_e_run(d)
         
         verb_data = None
-        if args.prob_method in ["verbalized_qual", "verbalized_quant"]:
-            verb_data_path = 'verbalized_data/'+args.prob_method+'/'+run+'/verbalized_data.json'
+        if args.prob_method in ["quantitativ", "qualitativ"]:           
+            verb_data_path = 'verbalized_data/'+args.prob_method+'/'+run+'/'+args.model+'/data.json'
             verb_data = data.load_json_data(verb_data_path)
-
-        # create directory for chart generation
-        save_dir = CHART_DIR+run+'/group_lr/'+args.binning_type+'/'
-        if not os.path.isdir(save_dir):
-            os.makedirs(save_dir)
 
         probs, is_correct, programs, prompts, languages, names, _ = data.proability_and_correctness_for_samples(results, verb_data, type=args.prob_method)
 
@@ -86,7 +86,7 @@ def main(extern=False):
             test_groups = groups_w
        
         # get the grid for binning type and the chartmaker obj        
-        grid, chartmaker = binning.get_grid_and_chartmaker(run, args.binning_type, save_dir, args.bin_count, train_probs, 1/args.bin_count)
+        grid, chartmaker = binning.get_grid_and_chartmaker(run, args.binning_type, save_dir, args.bin_count, extern, probs=train_probs, binning_step_size=1/args.bin_count)
 
         # Train the linear regression on the train data split
         lr = lr_calibration(grid, OUTPUTS, DEBUG).fit(train_X, train_y)
@@ -113,8 +113,6 @@ def main(extern=False):
         
         if OUTPUTS: print(f"Group Lamdas: {lr.reg.coef_}")
 
-        print(correctness_bin_calibrated)
-
         # Add entry for the run in the score table
         lr.score_obj.add_to_score_table(run, scores_uncalibrated, scores_calibrated)
         
@@ -137,7 +135,7 @@ def main(extern=False):
 
     # saves the score table
     if args.save_table:
-        with open('results/'+run+'/lr_'+args.binning_type+'_results.txt', 'w') as f:
+        with open(save_dir+'scores.txt', 'w') as f:
             f.write(lr.score_obj.printable_table)
 
 if __name__ == "__main__":

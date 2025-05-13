@@ -126,13 +126,13 @@ if __name__ == "__main__":
 
             for out, name, lang in zip(outputs, names, langs):
                 d = {}
-                d[name] = dict( text=out.text,
-                                token_ids=out.token_ids, 
-                                logprobs=[{key : [value.logprob, value.rank, value.decoded_token] for key, value in logprobs.items()} for logprobs in out.logprobs],
-                                cumulative_logprob=out.cumulative_logprob, 
-                                finish_reason=out.finish_reason)
+                verbalized_data[lang][name]= dict(  text=out.text,
+                                                    token_ids=out.token_ids, 
+                                                    logprobs=[{key : [value.logprob, value.rank, value.decoded_token] for key, value in logprobs.items()} for logprobs in out.logprobs],
+                                                    cumulative_logprob=out.cumulative_logprob, 
+                                                    finish_reason=out.finish_reason)
 
-                verbalized_data[lang].append(d)
+                
             print(f"Batch number {i}")
             i=i+1
 

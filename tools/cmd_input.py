@@ -1,4 +1,4 @@
-
+import sys
 import argparse
 
 def load_parser():
@@ -28,6 +28,7 @@ def load_parser():
     parser.add_argument(
         "--use-scc", 
         action="store_true",
+        default=True,
         help="Flag to use information generated with scc.")       
 
     parser.add_argument(
@@ -37,7 +38,7 @@ def load_parser():
     
     parser.add_argument(
         "--prob-method", 
-        choices=["avg_logprob", "verbalized_qual", "verbalized_quant"],
+        choices=["avg_logprob", "qualitativ", "quantitativ"],
         default="avg_logprob",
         help="Choose which probability to use.")      
 
@@ -88,6 +89,12 @@ def load_parser():
         type=float,  
         default=0.01,
         help="Epsilon value only for IGLB method.") 
+    
+    parser.add_argument(
+        "--model", 
+        choices=["gpt_4o_mini"],
+        required=("quantitativ" in sys.argv or "qualitativ" in sys.argv),
+        help="Model with which the verbalized data was created") 
          
     args = parser.parse_args()
 

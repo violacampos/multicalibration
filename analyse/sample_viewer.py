@@ -51,9 +51,9 @@ st.dataframe(groups, hide_index=True)
 
 red = Color("red")
 colors = list(red.range_to(Color("green"),100))
-
-st.write("**Prompt**:")
-st.code(data["prompts"][item_id])
+with st.expander("See prompt"):
+    st.write("**Prompt**:")
+    st.code(data["prompts"][item_id])
 
 output = ''
 for token in data["token_logprobs"][item_id]:
@@ -61,7 +61,11 @@ for token in data["token_logprobs"][item_id]:
     prob = np.round(np.exp(tv[0]),2)
     output += '<span style="color:'+str(colors[int(prob*100)-1])+'">'+tv[2].replace("Ġ", " ").replace("Ċ", "\n")+'</span>'
 
-st.write("**Generated code**:")
-st.html('<pre style="background-color: #EBECE4">'+output+'</pre>')
+with st.expander("See higlighted code"):
+    st.write("**Generated code**:")
+    st.html('<pre style="background-color: #EBECE4">'+output+'</pre>')
+
+st.write("**Evaluated program**:")
+st.code(data["programs"][item_id])
 
 

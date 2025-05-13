@@ -31,29 +31,29 @@ def main(extern=False):
         
         # Get run name
         run = d.split("/runs/", 1)[1]
+        run = run.replace('/', '')
 
         # create directory for chart generation
-        if not os.path.isdir(CHART_DIR+run+'/baseline/'+args.binning_type+'/'+args.prob_method):
-            os.makedirs(CHART_DIR+run+'/baseline/'+args.binning_type+'/'+args.prob_method)
-
+        if not extern:
+            save_dir = data.generate_save_dir(run, "baseline", args.binning_type, args.prob_method, args.split, args.model, calibration_data=args.save_data , history_data=args.save_history)
+        else:
+            save_dir = data.load_config()["Paths"]["base_dir"]
         # load the data from the run directory
-        run = run.replace('/', '')
         results, temperature, top_p, num_samples = data.load_multipl_e_run(d)
 
         verb_data = None
-        if args.prob_method in ["verbalized_qual", "verbalized_quant"]:
-            verb_data_path = 'verbalized_data/'+args.prob_method+'/'+run+'/verbalized_data.json'
+        if args.prob_method in ["quantitativ", "qualitativ"]:          
+            verb_data_path = 'verbalized_data/'+args.prob_method+'/'+run+'/'+args.model+'/data.json'
             verb_data = data.load_json_data(verb_data_path)
 
-               
         print(f"\nRun: {run}")
-        save_dir = CHART_DIR+run+'/baseline/'+args.binning_type+'/'+args.prob_method+'/'
         if OUTPUTS: print(f"Temperature: {temperature}")
         if OUTPUTS: print(f"Num Problems: {num_samples}")
 
         # probs -> confidence of the model
         # is_correct -> label 1: is correct, 0: is not correct
         probs, is_correct, programs, prompts, languages, names, token_logprobs = data.proability_and_correctness_for_samples(results, verb_data, type=args.prob_method)
+        
         correct_count = np.count_nonzero(is_correct == 1)
 
         if args.use_scc:
@@ -65,7 +65,7 @@ def main(extern=False):
 
         if args.split:
             # split in 60% train, 20% validation and 20% test
-            train_X, test_X, train_y, test_y, train_groups, test_groups, train_lang, test_lang, train_names, test_names, train_prompts, test_prompts, train_token_logprobs, test_token_logprobs = train_test_split(probs, is_correct, groups_w, languages, names, prompts, token_logprobs, test_size=0.2, random_state=42)
+            train_X, test_X, train_y, test_y, train_groups, test_groups, train_lang, test_lang, train_names, test_names, train_prompts, test_prompts, train_token_logprobs, test_token_logprobs, train_programs, test_programs = train_test_split(probs, is_correct, groups_w, languages, names, prompts, token_logprobs, programs, test_size=0.2, random_state=42)
 
             train_X, val_X, train_y, val_y, train_groups, val_groups, train_lang, val_lang = train_test_split(train_X, train_y, train_groups, train_lang, test_size=0.25, random_state=42)
         else:
@@ -75,9 +75,19 @@ def main(extern=False):
             test_y = is_correct
             train_groups = groups_w
             test_groups = groups_w
+            train_lang = languages
+            test_lang = languages 
+            train_names = names 
+            test_names = names  
+            train_prompts = prompts 
+            test_prompts = prompts  
+            train_token_logprobs = token_logprobs 
+            test_token_logprobs = token_logprobs  
+            train_programs = programs 
+            test_programs = programs 
 
         # get the grid for binning type and the chartmaker obj        
-        grid, chartmaker = binning.get_grid_and_chartmaker(run, args.binning_type, save_dir, args.bin_count, train_X, 1/args.bin_count)
+        grid, chartmaker = binning.get_grid_and_chartmaker(run, args.binning_type, save_dir, args.bin_count, extern, probs=train_X, binning_step_size=1/args.bin_count)
                
         score_obj = score(grid, OUTPUTS, DEBUG)
 
@@ -109,6 +119,7 @@ def main(extern=False):
                     "groups": test_groups,
                     "language": test_lang,
                     "names": test_names,
+                    "programs": test_programs,
                     "prompts": test_prompts,
                     "token_logprobs": test_token_logprobs}
         else:
@@ -118,7 +129,7 @@ def main(extern=False):
                 colors_uncalibrated.append((0.0, 0.0, 1.0, x))
             fig, axs = plt.subplots(1, 1, figsize=(7, 5))
             chartmaker.calibration_bar_chart(axs, 'Baseline reliability', correctness_bin_uncalibrated, colors_uncalibrated, total_bin_uncalibrated)
-            plt.savefig(chartmaker.save_dir+"calibration_"+'no_split' if not args.split else ''+".png")
+            plt.savefig(chartmaker.save_dir+"calibration.png")
             plt.close() 
         
     # display score table for all runs
@@ -126,9 +137,7 @@ def main(extern=False):
 
     # saves the score table
     if args.save_table:
-        if not os.path.isdir('results/'+run):
-            os.makedirs('results/'+run)
-        with open('results/'+run+'/baseline_'+args.binning_type+'_'+args.prob_method+'_'+('no_split' if not args.split else '')+'_results.txt', 'w') as f:
+        with open(save_dir+'scores.txt', 'w') as f:
             f.write(score_obj.printable_table)
 
 
