@@ -5,21 +5,30 @@ import run_iglb
 import compute_baseline
 from tabulate import tabulate
 import os
-from tools import binning, cmd_input, data
+from tools import binning, cmd_input
+from tools.data import data_loader
 import pickle
-
-BASE_DIR    = "/data/stud/2025-MA-kuschnereit/masterarbeit/"
-CHART_DIR = BASE_DIR+"charts/"
 
 if __name__ == "__main__":
     args = cmd_input.load_parser()
 
     run = args.dir[0].split('/')[-1]
-
-    # create directory for chart generation
-    save_dir = data.generate_save_dir(run, "comparison", args.binning_type, args.prob_method, args.split, args.model, calibration_data=args.save_data , history_data=args.save_history)
     
-    grid, chartmaker = binning.get_grid_and_chartmaker(run, args.binning_type, save_dir, args.bin_count, False)
+    run_dirs = [x[0] for x in os.walk(args.dir[0])]
+    run_dirs.sort()
+
+    if args.all_lang == True:
+        run_dirs = [run_dirs[0]]
+
+    run_dir = run_dirs[0]
+
+    data_obj = data_loader(args, run_dir, False, "comparison")
+    
+    grid, chartmaker = binning.get_grid_and_chartmaker(run, 
+                                                       args.binning_type, 
+                                                       data_obj.save_dir, 
+                                                       args.bin_count, 
+                                                       False)
     
     baseline_results = compute_baseline.main(extern=True)    
 
@@ -46,12 +55,10 @@ if __name__ == "__main__":
                                                 'skill_score',
                                                 'GASCE'], tablefmt='orgtbl')
     print(table_print)
-
     # CUDA_VISIBLE_DEVICES=6 python compare_methods.py ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1
 
     if args.save_table:
-
-        with open(save_dir+'scores.txt', 'w') as f:
+        with open(data_obj.save_dir+'scores.txt', 'w') as f:
             f.write(table_print)
 
     if args.save_charts:
@@ -65,6 +72,8 @@ if __name__ == "__main__":
                                             lr_results["correctness_bin_calibrated"][lr_results["total_bin_calibrated"] != 0], 
                                             ighb_results["correctness_bin_calibrated"][ighb_results["total_bin_calibrated"]  != 0], 
                                             iglb_results["correctness_bin_calibrated"][iglb_results["total_bin_calibrated"] != 0])
+        
+
         
         chartmaker.calibration_method_comp_bar_chart(baseline_results["total_bin_uncalibrated"],
                                             hb_results["total_bin_calibrated"],
@@ -109,5 +118,5 @@ if __name__ == "__main__":
                 "token_logprobs": baseline_results["token_logprobs"]
             }
 
-            with open(save_dir+'calibration_data/calibration.pkl', 'wb') as f:
+            with open(data_obj.save_dir+'calibration_data/calibration.pkl', 'wb') as f:
                 pickle.dump(data, f)

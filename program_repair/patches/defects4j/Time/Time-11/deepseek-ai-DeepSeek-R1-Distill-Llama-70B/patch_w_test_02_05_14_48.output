@@ -1,0 +1,397 @@
+
+####################
+Response
+####################
+Okay, I have this Java code that's part of the Joda Time library, specifically the ZoneInfoCompiler class. The user provided a test case that's failing, and I need to figure out why and fix it. Let me try to understand the problem.
+
+The test in question is testDateTimeZoneBuilder in the TestCompiler class. It's a multithreading test where two threads are trying to create DateTimeZone instances using the same builder. The error is an assertion failure, which suggests that one of the threads isn't getting the expected result.
+
+Looking at the test, it creates a DateTimeZoneBuilder, configures it, and then calls toDateTimeZone on it from the main thread and another thread. The problem arises because the DateTimeZoneBuilder might not be thread-safe. If multiple threads are accessing and modifying the builder's state simultaneously, it could lead to race conditions, causing unexpected behavior or errors.
+
+I should check the DateTimeZoneBuilder class to see if it's thread-safe. From what I recall, in Joda Time, the builder is not intended to be used concurrently by multiple threads. Each thread should have its own instance to avoid conflicts.
+
+Wait, in the provided ZoneInfoCompiler code, the compile method creates a new DateTimeZoneBuilder for each zone. That's good because each zone's builder is independent. But looking at the test, it's using the same builder instance across threads. That's probably the issue.
+
+Wait, no, in the test, each thread is calling getTestDataTimeZoneBuilder(), which I assume creates a new instance each time. Hmm, maybe I'm misunderstanding the setup.
+
+Alternatively, perhaps the issue is with static variables in ZoneInfoCompiler. Looking at the code, I see that cVerbose is a ThreadLocal, which is fine. But what about cStartOfYear and cLenientISO? These are static and initialized once. If their initialization isn't thread-safe, that could cause problems.
+
+Wait, cStartOfYear is initialized lazily in getStartOfYear(), which uses a double-checked locking with a volatile variable? No, looking at the code, the getStartOfYear method does:
+
+if (cStartOfYear == null) {
+    cStartOfYear = new DateTimeOfYear();
+}
+
+But since it's not synchronized, this could lead to multiple initializations in a multi-threaded environment, which is not thread-safe. The same applies to cLenientISO in getLenientISOChronology().
+
+So when multiple threads call these getter methods, they might both see cStartOfYear as null and create new instances, leading to unexpected behavior. This could cause the test to fail because each thread's DateTimeZoneBuilder might be using different instances of these static variables, leading to inconsistent state.
+
+To fix this, I should make the initialization of these static variables thread-safe. One common approach is to use the double-checked locking with the volatile keyword. Alternatively, since Java 5, using the Initialization on Demand Holder idiom is more efficient and thread-safe.
+
+So for cStartOfYear and cLenientISO, I'll refactor their initialization to use a static inner class holder. This ensures that the instances are created only once and in a thread-safe manner.
+
+Let me outline the changes:
+
+1. For cStartOfYear, create a static inner class that holds the instance. The getStartOfYear() method will then return the instance from the holder.
+
+2. Similarly, do the same for cLenientISO in getLenientISOChronology().
+
+This way, the initialization is thread-safe, and the test should pass because each thread will correctly get the same singleton instances without race conditions.
+
+Let me write the fixed code for these methods.
+</think>
+
+To fix the bug, I made the initialization of `cStartOfYear` and `cLenientISO` thread-safe by using the Initialization on Demand Holder idiom. This ensures that these static variables are initialized in a thread-safe manner, preventing race conditions in multi-threaded environments.
+
+Here is the fixed code:
+
+```java
+public class ZoneInfoCompiler {
+    static DateTimeOfYear cStartOfYear;
+    static Chronology cLenientISO;
+
+    //... other existing code...
+
+    static DateTimeOfYear getStartOfYear() {
+        return StartOfYearHolder.INSTANCE;
+    }
+
+    static Chronology getLenientISOChronology() {
+        return LenientISOHolder.INSTANCE;
+    }
+
+    private static class StartOfYearHolder {
+        static final DateTimeOfYear INSTANCE = new DateTimeOfYear();
+    }
+
+    private static class LenientISOHolder {
+        static final Chronology INSTANCE = LenientChronology.getInstance(ISOChronology.getInstanceUTC());
+    }
+
+    //... rest of the code remains unchanged...
+}
+```
+
+The fixed code ensures that `cStartOfYear` and `cLenientISO` are initialized safely across multiple threads.
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the bug in the provided Java code. The problem is that the test `testDateTimeZoneBuilder` is failing with an `AssertionFailedError`. Let me try to understand what's going on here.
+
+Looking at the test, it seems to be testing the thread safety of the `DateTimeZoneBuilder` class. The main thread creates a `DateTimeZone` named "TestDTZ1", and a separate thread creates another named "TestDTZ2". The issue is probably related to some shared state that's not thread-safe.
+
+I recall that in the provided `ZoneInfoCompiler` class, there are static variables like `cStartOfYear` and `cLenientISO`. These are initialized lazily, which might cause problems in a multi-threaded environment because the initialization isn't thread-safe. If two threads access these static variables at the same time, it could lead to race conditions or inconsistent states.
+
+Let me check the initialization of these static variables. 
+
+- `cStartOfYear` is initialized in a static block, but it's done in a lazy manner inside `getStartOfYear()`. Similarly, `cLenientISO` is initialized lazily in `getLenientISOChronology()`. 
+
+This lazy initialization without proper synchronization could be the root cause. If one thread starts initializing `cStartOfYear` and another thread accesses it before it's fully initialized, it might see a partially constructed object, leading to unexpected behavior.
+
+To fix this, I should make the initialization of these static variables thread-safe. One way to do this is by using double-checked locking with the `synchronized` keyword. Alternatively, I can initialize them eagerly when the class is loaded, which is thread-safe in Java.
+
+Let me consider initializing `cStartOfYear` and `cLenientISO` when the class is loaded, rather than lazily. This way, they are fully constructed before any threads start using them.
+
+So, I'll change the static initializers:
+
+1. `cStartOfYear` should be initialized directly in the declaration, not inside a method. So, `static DateTimeOfYear cStartOfYear = new DateTimeOfYear();`.
+
+2. Similarly, `cLenientISO` can be initialized as `static Chronology cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());`.
+
+Wait, but `ISOChronology.getInstanceUTC()` might also have its own static initialization. I should check if that's thread-safe. Since it's a method from Joda Time, I assume it's properly handled.
+
+By initializing these variables statically, I ensure that they are set up when the class loads, avoiding any race conditions during runtime.
+
+Let me apply these changes to the code.
+
+So, in the `ZoneInfoCompiler` class, I'll modify the static variables:
+
+- Remove the `static {... }` block that initializes `cVerbose` and `cStartOfYear`.
+- Initialize `cStartOfYear` directly as `static DateTimeOfYear cStartOfYear = new DateTimeOfYear();`.
+- Initialize `cLenientISO` directly as `static Chronology cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());`.
+
+This should make the static initializations thread-safe and prevent the test from failing due to race conditions.
+
+I also need to ensure that the `cVerbose` thread-local variable is correctly initialized. Since it's a `ThreadLocal`, each thread will have its own value, and the initial value is set using `cVerbose.set(Boolean.FALSE);` in the static block. That part seems okay, but I'll leave it as is.
+
+Let me update the code accordingly and test it again. This should fix the issue where the test fails due to thread-safety problems in the static initializations.
+</think>
+
+To fix the thread-safety issue in the `ZoneInfoCompiler` class, we need to ensure that the static variables `cStartOfYear` and `cLenientISO` are properly initialized in a thread-safe manner. 
+
+**Problem:** The static variables were being initialized lazily without proper synchronization, leading to potential race conditions in multi-threaded environments.
+
+**Solution:** Initialize `cStartOfYear` and `cLenientISO` directly when the class is loaded to avoid lazy initialization issues.
+
+Here's the fixed code:
+
+```java
+public class ZoneInfoCompiler {
+    static DateTimeOfYear cStartOfYear = new DateTimeOfYear();
+
+    static Chronology cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());
+
+    static ThreadLocal<Boolean> cVerbose = new ThreadLocal<Boolean>();
+    static {
+        cVerbose.set(Boolean.FALSE);
+    }
+
+    //... rest of the code remains unchanged...
+}
+```
+
+This ensures that both `cStartOfYear` and `cLenientISO` are fully initialized when the class loads, preventing any thread-related issues during their access.
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the bug in the provided Java code. Let me start by understanding the problem. The user provided a class called ZoneInfoCompiler, and it's failing a test called testDateTimeZoneBuilder. The error is a generic AssertionFailedError, so I need to figure out what's wrong.
+
+Looking at the test, it's testing multithreading. It creates a DateTimeZoneBuilder, then spawns a thread that does the same and assigns it to a zone array. After starting and joining the thread, it asserts that zone[0] is not null. The error suggests that zone[0] might be null, causing the test to fail.
+
+Hmm, why would zone[0] be null? Let me check the code related to DateTimeZoneBuilder. Wait, in the provided code, I don't see the DateTimeZoneBuilder class. Oh, but the ZoneInfoCompiler uses it. So maybe the issue is in how the builder is being used.
+
+Wait, looking at the ZoneInfoCompiler's compile method, it creates a DateTimeZoneBuilder and calls addToBuilder for each zone. Then it calls toDateTimeZone. But the test is using multiple threads to create DateTimeZone instances.
+
+I recall that DateTimeZoneBuilder might not be thread-safe. If multiple threads are using the same builder instance, it could cause issues. Let me check the code in the test: it creates a new builder each time, right? The test calls getTestDataTimeZoneBuilder() which probably creates a new instance each time. So each thread has its own builder. That should be fine.
+
+Wait, but in the ZoneInfoCompiler's compile method, when it processes each zone, it creates a new DateTimeZoneBuilder for each zone. So that's thread-safe because each zone has its own builder. So why is the test failing?
+
+Wait, looking at the test, it's calling toDateTimeZone with the same name but different instances. Maybe there's a static variable somewhere that's causing a conflict.
+
+Looking back at the ZoneInfoCompiler class, I notice some static variables: cStartOfYear and cLenientISO. These are initialized in static blocks. Oh, wait, if these are shared across all instances, they might cause thread-safety issues.
+
+In the test, when two threads create DateTimeZone instances, they might be accessing these static variables. If the initializations of these statics are not thread-safe, it could cause problems. For example, if one thread initializes cStartOfYear and another does the same, maybe it's causing a race condition.
+
+Let me look at how these statics are used. The getStartOfYear() method returns a singleton instance of DateTimeOfYear. Similarly, getLenientISOChronology() returns a singleton instance of Chronology. If these are being accessed by multiple threads, perhaps their initialization isn't thread-safe.
+
+In Java, the initialization of static variables is thread-safe in the sense that the JVM ensures that static initializers are executed once. However, if the static blocks have side effects that aren't atomic, there might be issues. Wait, the static block for cVerbose sets it to FALSE, which is thread-safe because it's a ThreadLocal. But cStartOfYear and cLenientISO are initialized lazily in their getter methods, using double-checked locking without synchronization. Wait, no, actually, looking at the code:
+
+In getStartOfYear(), it's checking if cStartOfYear is null, and if so, creates a new instance. But this isn't synchronized. So in a multi-threaded scenario, multiple threads might enter the if block and create multiple instances, which is not thread-safe. The same applies to getLenientISOChronology().
+
+This could cause issues because if two threads call these methods at the same time, they might both see cStartOfYear as null and both create instances, leading to unexpected behavior. However, in the test, each thread is creating its own DateTimeZoneBuilder and using it, so maybe the issue is that the static variables are being modified concurrently, causing the builders to behave incorrectly.
+
+Wait, but in the test, each thread is using a separate builder, so the static variables shouldn't affect each other. Unless the DateTimeZoneBuilder is using these static variables in a way that's not thread-safe.
+
+Alternatively, perhaps the problem is in the ZoneInfoCompiler's compile method. Let me check that method. It initializes cVerbose as a ThreadLocal, which is correct. But in the compile method, when it creates a new DateTimeZoneBuilder for each zone, it's possible that the static variables in ZoneInfoCompiler are causing issues.
+
+Wait, no. Each zone's processing is done with a new builder, so the statics shouldn't interfere across threads. Unless the problem is that the static variables are being accessed and modified by multiple threads, causing their initializations to interfere.
+
+Wait, let me think about the double-checked locking in getStartOfYear(). The code is:
+
+if (cStartOfYear == null) {
+    cStartOfYear = new DateTimeOfYear();
+}
+
+This is not thread-safe because multiple threads could pass the null check and create multiple instances. The correct approach is to use a synchronized block or make the variable volatile. But in this case, since cStartOfYear is a static variable, perhaps initializing it in a static block would be better.
+
+Alternatively, making the method synchronized. Let me check the Java Memory Model. Without synchronization, the initialization may not be visible across threads. So one thread might see cStartOfYear as null even after another thread has initialized it.
+
+So, the problem could be that when multiple threads are initializing the static variables, they might end up creating multiple instances, which could cause the DateTimeZoneBuilder to malfunction.
+
+To fix this, I should make the initialization of cStartOfYear and cLenientISO thread-safe. One way is to use the "Initialization on Demand Holder" idiom, which is thread-safe. Alternatively, use synchronized blocks or make the variables volatile.
+
+Let me update the getStartOfYear() and getLenientISOChronology() methods to use double-checked locking with synchronization.
+
+For getStartOfYear():
+
+Make the method synchronized, or synchronize the block where the instance is created. Alternatively, use a volatile variable.
+
+But since these are static methods, making them synchronized could have performance implications. Alternatively, use a static inner class to hold the instances, which is initialized when the inner class is loaded.
+
+Wait, another approach: change the static variables to be final and initialize them in the static block.
+
+For example:
+
+static DateTimeOfYear cStartOfYear = new DateTimeOfYear();
+
+But wait, looking at the code, the default constructor of DateTimeOfYear sets some default values. So initializing it statically would be fine.
+
+Similarly for cLenientISO:
+
+static Chronology cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());
+
+Wait, can I initialize this in the static block?
+
+Yes. Because ISOChronology.getInstanceUTC() is a static method that returns a singleton. So initializing cLenientISO in the static block would ensure it's done once, thread-safely.
+
+So, instead of initializing cStartOfYear and cLenientISO lazily, I can initialize them in the static block. This way, the JVM will ensure they're initialized in a thread-safe manner.
+
+So, the fix would involve changing the static variables to be initialized in the static block, rather than being lazily initialized in the getter methods.
+
+Let me modify the code accordingly.
+
+Change:
+
+static DateTimeOfYear cStartOfYear;
+
+static Chronology cLenientISO;
+
+To:
+
+static DateTimeOfYear cStartOfYear = new DateTimeOfYear();
+static Chronology cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());
+
+And then, the getter methods can simply return these variables without any null checks.
+
+So, the getStartOfYear() method becomes:
+
+static DateTimeOfYear getStartOfYear() {
+    return cStartOfYear;
+}
+
+And getLenientISOChronology():
+
+static Chronology getLenientISOChronology() {
+    return cLenientISO;
+}
+
+This way, the static variables are initialized when the class is loaded, ensuring thread safety without the need for synchronization.
+
+I think this should fix the issue because now the static variables are properly initialized in a thread-safe manner, avoiding any race conditions during their initialization.
+
+So, the main changes are:
+
+1. Initialize cStartOfYear and cLenientISO in the static block.
+2. Modify the getter methods to return the variables directly without lazy initialization.
+
+This should make the code thread-safe and pass the test.
+</think>
+
+To fix this issue, we need to ensure that the static variables `cStartOfYear` and `cLenientISO` in the `ZoneInfoCompiler` class are initialized in a thread-safe manner. The problem arises because these variables were being lazily initialized without proper synchronization, leading to potential race conditions in multi-threaded environments. By initializing these variables in the static block, we leverage the JVM's built-in thread safety for class initialization.
+
+Here is the fixed code:
+
+```java
+public class ZoneInfoCompiler {
+    static DateTimeOfYear cStartOfYear = new DateTimeOfYear();
+    static Chronology cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());
+
+    static ThreadLocal<Boolean> cVerbose = new ThreadLocal<Boolean>();
+    static {
+        cVerbose.set(Boolean.FALSE);
+    }
+
+    //... (rest of the code remains unchanged)
+
+    static DateTimeOfYear getStartOfYear() {
+        return cStartOfYear;
+    }
+
+    static Chronology getLenientISOChronology() {
+        return cLenientISO;
+    }
+
+    //... (rest of the code remains unchanged)
+}
+```
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the bug in the provided Java code. The problem is that a test is failing when using the DateTimeZoneBuilder in a multithreaded environment. The test creates two DateTimeZone instances in different threads and one of them fails. 
+
+Looking at the error, it's an assertion failure, which suggests that one of the zones is null or not properly initialized. The issue might be related to thread safety in the DateTimeZoneBuilder or related classes.
+
+I notice that the ZoneInfoCompiler class has some static variables, like cStartOfYear and cLenientISO. These are initialized lazily. The problem arises when multiple threads access these static variables. If one thread initializes them while another is in the process, it could cause race conditions, leading to inconsistent states.
+
+The getStartOfYear() method initializes cStartOfYear if it's null. Similarly, getLenientISOChronology() does the same for cLenientISO. However, since these methods are called from the constructor of MutableDateTime, which is used in parseTime(), this might not be thread-safe.
+
+To fix this, I should make the initialization of these static variables thread-safe. One way is to use double-checked locking with synchronized blocks. Alternatively, I can initialize them eagerly when the class loads, but that might not be ideal if they're heavy to create. So, using a synchronized approach would be better.
+
+Let me update the getStartOfYear() and getLenientISOChronology() methods. I'll make them synchronized and use double-checked locking to ensure they're only initialized once, safely across threads.
+
+So, I'll modify getStartOfYear() to check if cStartOfYear is null, and if so, create a new DateTimeOfYear instance. I'll do the same for getLenientISOChronology(), ensuring that LenientChronology is created only once.
+
+By making these methods thread-safe, the test should pass because each thread will correctly initialize the static variables without race conditions.
+</think>
+
+To fix this issue, we need to ensure that the static initializations of `cStartOfYear` and `cLenientISO` in the `ZoneInfoCompiler` class are thread-safe. The problem arises because multiple threads may access these static variables without proper synchronization, leading to potential race conditions.
+
+Here is the fixed code with thread-safe initialization:
+
+```java
+static DateTimeOfYear getStartOfYear() {
+    if (cStartOfYear == null) {
+        synchronized (ZoneInfoCompiler.class) {
+            if (cStartOfYear == null) {
+                cStartOfYear = new DateTimeOfYear();
+            }
+        }
+    }
+    return cStartOfYear;
+}
+
+static Chronology getLenientISOChronology() {
+    if (cLenientISO == null) {
+        synchronized (ZoneInfoCompiler.class) {
+            if (cLenientISO == null) {
+                cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());
+            }
+        }
+    }
+    return cLenientISO;
+}
+```
+
+This fix uses double-checked locking with synchronization to ensure that the static variables are initialized in a thread-safe manner.
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the bug in the provided Java code. The test that's failing is `testDateTimeZoneBuilder` in `TestCompiler`. The error is an `AssertionFailedError`, which suggests that the test expected a non-null value but got null. 
+
+Looking at the test code, it's testing multithreading. It creates two `DateTimeZone` instances in different threads. The main thread creates one, and a spawned thread creates another. The problem is that the spawned thread's result is null, causing the assertion to fail.
+
+Hmm, why would `zone[0]` be null? Let me check the code where `toDateTimeZone` is called. Wait, the `ZoneInfoCompiler` class has a static `cVerbose` ThreadLocal variable. ThreadLocal variables are not shared between threads by default. So, when the main thread sets `cVerbose.set(verbose);`, the spawned thread doesn't see this unless it's set in that thread.
+
+Wait, looking at the `compile` method, it sets `cVerbose.set(verbose);` before compiling. But in the test, each thread is creating its own `DateTimeZoneBuilder` and calling `toDateTimeZone`. If `DateTimeZoneBuilder` uses `cVerbose`, which is a ThreadLocal, then in the spawned thread, `cVerbose` might not be set, causing issues.
+
+Wait, in the `compile` method, `cVerbose.set(verbose);` is called, which sets it for the current thread. But in the test, each thread (main and spawned) calls `compile` or `toDateTimeZone` directly. So if `toDateTimeZone` relies on `cVerbose` being set, then in the spawned thread, it's not set, leading to possible errors.
+
+Looking at the `DateTimeZoneBuilder` class (not fully provided here), it might be using `ZoneInfoCompiler.verbose()`, which returns `cVerbose.get()`. If `cVerbose` wasn't set in the thread, it returns null, which is treated as false. But that shouldn't cause a null `DateTimeZone`.
+
+Wait, maybe the issue is elsewhere. Another possibility is that `DateTimeZoneBuilder` is not thread-safe. If it's being used by multiple threads, perhaps it's causing race conditions. 
+
+Alternatively, looking at the `compile` method, it's using `cVerbose.set(verbose);` which is correct for that thread. But in the test, the `DateTimeZoneBuilder` might be using static state that isn't thread-safe.
+
+Wait, perhaps the issue is that `getStartOfYear()` and `getLenientISOChronology()` are using static variables that are not thread-safe. Let me check those methods.
+
+In `ZoneInfoCompiler`, `cStartOfYear` and `cLenientISO` are static and initialized lazily. The `getStartOfYear()` method checks if `cStartOfYear` is null and creates a new instance if so. Similarly for `getLenientISOChronology()`. 
+
+In a multi-threaded environment, if multiple threads call these methods at the same time, it could lead to race conditions. The code isn't synchronized, so it might create multiple instances or throw exceptions when it shouldn't.
+
+Looking at the `DateTimeOfYear` constructor, it's a simple no-arg constructor. But if multiple threads initialize `cStartOfYear` at the same time, it might cause issues. Same with `cLenientISO`.
+
+So, to fix this, I should make the initialization of these static variables thread-safe. One way is to use double-checked locking or make the methods synchronized.
+
+Alternatively, I can initialize these variables eagerly when the class is loaded, using static initializers. That way, they're set once and thread-safely.
+
+So, I can change the static variables to be initialized directly in the declaration. For example:
+
+static DateTimeOfYear cStartOfYear = new DateTimeOfYear();
+static Chronology cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());
+
+This way, they're initialized when the class is loaded, avoiding any lazy initialization issues in a multi-threaded environment.
+
+I think this should fix the problem because it ensures that these static variables are properly initialized in a thread-safe manner, preventing any race conditions that might cause the test to fail.
+
+Let me update the code accordingly. Remove the lazy initialization and set the static variables directly. Also, remove the static initializer block for `cVerbose` since it's a ThreadLocal and initialized in the declaration.
+
+So, the fixed code will have:
+
+static DateTimeOfYear cStartOfYear = new DateTimeOfYear();
+static Chronology cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());
+
+And remove the static block for `cVerbose`.
+
+Wait, the original code had a static block for `cVerbose` to set it to FALSE. Since it's a ThreadLocal, each thread will have its own value, and the initial value is null. So, in the static block, it's setting the initial value for the main thread. But in other threads, it's null unless set.
+
+But in the `compile` method, `cVerbose.set(verbose);` is called, which sets it for that thread. So perhaps the static block is unnecessary because `cVerbose` is a ThreadLocal, and each thread should set its own value.
+
+Wait, the `verbose()` method returns `cVerbose.get()`, which for a ThreadLocal returns null if not set. But the method returns a boolean, so it would return false if null. So maybe the static block isn't needed anymore, and we can remove it.
+
+So, to sum up, the main issue is the lazy initialization of static variables in a multi-threaded context. By initializing them eagerly, we avoid race conditions.
+</think>
+
+To fix this issue, the static variables `cStartOfYear` and `cLenientISO` were initialized lazily without proper thread-safety. By initializing them eagerly, we prevent race conditions in multi-threaded environments.
+
+```java
+public class ZoneInfoCompiler {
+    static DateTimeOfYear cStartOfYear = new DateTimeOfYear();
+    static Chronology cLenientISO = LenientChronology.getInstance(ISOChronology.getInstanceUTC());
+
+    static ThreadLocal<Boolean> cVerbose = new ThreadLocal<Boolean>();
+    //... rest of the code remains unchanged...
+}
+```
+~~~~~~~~~~~~~~~~~

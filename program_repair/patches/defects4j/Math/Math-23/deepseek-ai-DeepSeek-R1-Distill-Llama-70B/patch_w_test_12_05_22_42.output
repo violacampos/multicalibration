@@ -1,0 +1,2246 @@
+
+####################
+Response
+####################
+Okay, I have this Java code that's part of an optimization algorithm, specifically the Brent optimizer. It's failing a test called testKeepInitIfBest. The error message says "Best point not reported," which suggests that the optimizer isn't correctly identifying and keeping the best point it's found, especially the initial point if it's the best.
+
+Looking at the test, it sets up a function f which is the sum of a sine function and a step function. The initial guess is set to minSin + 1.5 * offset. The step function has a dip at minSin + offset, so the initial point is slightly to the right of this dip. The optimizer is supposed to find the minimum, which should be at the dip, but the test expects that if the initial point is better, it should be reported as the best.
+
+In the current code, the doOptimize() method initializes the best point as the initial guess. Then, during each iteration, it updates a, b, v, w, x, etc. The problem might be that the code isn't correctly handling the case where the initial point is indeed the best, so it's getting overwritten by a worse point later.
+
+Let me look at how the best point is tracked. The code has variables like previous and current, which are UnivariatePointValuePair objects. The best() method is used to decide which point to return when convergence is met. But maybe the way the points are updated isn't correctly keeping track of the best point, especially when the initial point is better than subsequent points.
+
+Wait, the initial point is set as current. Then, in each iteration, current is updated to u, which is the new point being evaluated. But perhaps in some cases, the new point u isn't better than the current best, so the code should keep the current best. However, looking at the code, after computing fu, it decides whether to update a, b, etc., based on whether fu is better than fx. But maybe when the initial point is the best, the code isn't correctly retaining it because the new points are being considered as better when they're not.
+
+Another possibility is in the best() method. Let me check how that's implemented. Oh, wait, the best() method is called when returning, and it's supposed to choose between current and previous. But if the initial point is the best, perhaps during the first iteration, it's getting replaced incorrectly.
+
+Looking at the code flow: after computing fu, the code checks if fu <= fx. If so, it updates a or b, and sets x to u, fx to fu. Otherwise, it adjusts a or b and updates v, w, etc. But maybe when the initial point is the best, after the first iteration, the code incorrectly moves away from it.
+
+Wait, in the test, the function f has a dip at minSin + offset. The initial point is minSin + 1.5*offset, which is to the right of the dip. The function f is sin(x) plus a step that's -1 at minSin + offset and 0 elsewhere. So f(init) would be sin(init) which is around 1, because sin(3π/2 + something small) is around -1, but wait, no: 3π/2 is where sin is -1. Adding a small offset, so sin(minSin + offset) would be slightly more than -1. Then, the step function at minSin + offset is -1, so f at minSin + offset is sin(minSin + offset) + (-1). At minSin + 1.5*offset, the step function is 0, so f is just sin(init). Wait, no, the step function is defined as:
+
+It's a step function where for x < minSin, f=0; for minSin <=x < minSin + offset, f=-1; for x >= minSin + offset, f=0 again? Or is it the other way around? The test sets up f2 as new StepFunction with points at minSin, minSin + offset, minSin + 2*offset, and values 0, -1, 0. So, for x < minSin, f2 is 0; between minSin and minSin + offset, f2 is -1; between minSin + offset and minSin + 2*offset, f2 is 0; beyond that, it's 0 again? Or does it stay at 0 beyond minSin + 2*offset? Wait, the StepFunction in Apache Commons Math typically holds the last value beyond the last point. So in this case, for x >= minSin + 2*offset, f2 is 0.
+
+So the function f is sin(x) + f2(x). So at minSin, sin is -1, f2 is 0, so f is -1. At minSin + offset, sin is slightly higher, but f2 is -1, so f is sin(...) -1. At minSin + 1.5*offset, f2 is 0 again, so f is sin(...).
+
+The initial guess is minSin + 1.5*offset. The optimizer is supposed to find the minimum. The dip is at minSin + offset, where f is lower than at minSin + 1.5*offset. But the test is asserting that the best point is kept, meaning that if the initial point is the best found so far, it should be reported.
+
+Wait, but in the test, the initial point is not the best. The dip is at minSin + offset, which is lower. So why is the test expecting the initial point to be the best? Or perhaps I'm misunderstanding the test.
+
+Wait, the test is named testKeepInitIfBest. It might be that the initial point is actually the best, and the optimizer should not move away from it. But in this setup, the initial point is minSin + 1.5*offset, which is after the dip. So perhaps the function is designed such that the initial point is the best, and the optimizer should return it.
+
+Alternatively, perhaps the function is such that the initial point is the best, and the optimizer's steps are causing it to move away, thus not keeping the initial as the best.
+
+Hmm. So the problem is that the code isn't correctly keeping track of the best point, especially when the initial point is better than any subsequent points.
+
+Looking back at the code, the initial current is set to x (mid), and then in each iteration, it computes u, evaluates fu, and then decides whether to update x and fx. But the best point is only updated when a better point is found. So if the initial point is the best, but in later iterations, the code doesn't find a better point, it should still return the initial point.
+
+But perhaps in the code, after the first iteration, the current point is being set to u, which is worse than the initial point, but the code doesn't check whether u is better than the current best, leading to the best being overwritten.
+
+Wait, let me see. The code has:
+
+previous = current;
+current = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+Then, if the checker is null, it proceeds to update a, b, etc.
+
+But in the case where the initial point is better than u, the code should keep the initial as the best.
+
+Looking at the code after computing fu:
+
+if (fu <= fx) {
+    // update a or b, and set x = u, fx = fu
+} else {
+    // update a or b, and possibly update v, w, etc.
+}
+
+So in the else clause, when fu > fx, meaning u is worse than x (current best), the code adjusts a or b and updates v and w if necessary. But does it correctly keep track of the best point?
+
+Wait, in the else block:
+
+if (fu <= fw || Precision.equals(w, x)) {
+    v = w;
+    fv = fw;
+    w = u;
+    fw = fu;
+} else if (fu <= fv || Precision.equals(v, x) || Precision.equals(v, w)) {
+    v = u;
+    fv = fu;
+}
+
+So it's updating v and w, which are used for the parabolic interpolation. But the current best (x) is only updated when fu is better. So in this case, if u is worse, x remains the same. So the current point is still x, which is better than u.
+
+But wait, the current variable is being set to u regardless. Because before this, current is set to u, which is worse. So the previous is x, current is u. Then, when the checker is called, it might think that the best is u, which is worse than x.
+
+Wait, that's a problem. Because in the code, after computing u and setting current to u, even if u is worse than the previous best, current becomes u. Then, when the checker is called, it checks if it has converged based on previous (x) and current (u). But the best point is not being tracked separately.
+
+So the code only keeps track of the current point, which might not be the best overall. It only considers the current and previous points, not the best so far.
+
+Ah, that's the issue. The code doesn't maintain a separate variable for the best point found so far. Instead, it only uses the current and previous points, which might not capture the actual best if the current point isn't better than the previous.
+
+So, to fix this, the code should track the best point separately. Let's see where that can be done.
+
+In the current code, the best() method is called when returning, which compares current and previous and returns the better one. But this might not be sufficient because the best point could have been found several steps back, not just the last two.
+
+So, the fix would be to introduce a variable that keeps track of the best point encountered so far, updating it whenever a better point is found.
+
+Let me outline the steps:
+
+1. Initialize bestPoint as the initial point (mid).
+2. In each iteration, after computing u and evaluating fu, compare it to the current bestPoint.
+3. If fu is better (based on isMinim), update bestPoint to u.
+4. When convergence is checked, compare current and previous, but also ensure that bestPoint is the best overall.
+
+Wait, but the code currently returns the best between current and previous when converged. But if bestPoint is a separate variable, it should be considered instead.
+
+Alternatively, after each iteration, update bestPoint if the new point is better.
+
+So, in the code, after computing fu, we can check if it's better than the current bestPoint, and update accordingly.
+
+Let me think about how to implement this.
+
+I'll add a new variable, say, best, initialized to the initial current point.
+
+Then, after each iteration, if the new current point (u) is better than best, update best.
+
+Wait, but in the code, current is set to u, which may not be better than the previous best.
+
+Alternatively, after computing fu, we can compare it to the best's function value and update best if necessary.
+
+Let me modify the code as follows:
+
+- Declare a variable best, initialized to current.
+- After computing fu, if fu is better than best's function value, update best to current (u).
+- When returning, return best instead of calling best(current, previous, isMinim).
+
+Wait, but in the code, the best() method is used to choose between current and previous. Maybe it's better to have a separate best variable.
+
+Alternatively, perhaps the issue is that the code is not correctly updating the best when the initial point is better than all subsequent points. So, adding a best variable that is only updated when a better point is found would fix this.
+
+So, let me adjust the code:
+
+Add a variable:
+
+UnivariatePointValuePair best = current;
+
+Then, inside the loop, after computing fu and before the convergence check:
+
+if (isMinim) {
+    if (fu < best.getObjectiveValue()) {
+        best = current;
+    }
+} else {
+    if (fu > best.getObjectiveValue()) {
+        best = current;
+    }
+}
+
+Wait, no. Because current is set to u, which has fu as its objective value. So if fu is better than the current best's value, then best should be updated to current.
+
+But wait, in the code, current is set to u regardless of whether it's better. So, perhaps the best should be the minimum of all points evaluated so far.
+
+So, the steps would be:
+
+1. Initialize best as the initial current (mid).
+2. In each iteration, compute u and fu.
+3. Set current to u, with fu as its value.
+4. Compare fu with best's value, and if better, update best.
+
+But in the code, current is set to u before checking if it's better. So perhaps the best should be updated only when the new current is better.
+
+Alternatively, perhaps the best should be updated before setting current to u.
+
+Wait, no. Because current is the new point being evaluated, so after computing fu, we can check if it's better than the current best and update accordingly.
+
+So, in code:
+
+After computing fu, create a new current point. Then, compare this new point to the best, and if it's better, update best.
+
+Let me adjust the code:
+
+Inside the loop:
+
+//... compute u and fu...
+
+// Create new current point
+UnivariatePointValuePair newCurrent = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+// Check if newCurrent is better than best
+if (isMinim) {
+    if (newCurrent.getObjectiveValue() < best.getObjectiveValue()) {
+        best = newCurrent;
+    }
+} else {
+    if (newCurrent.getObjectiveValue() > best.getObjectiveValue()) {
+        best = newCurrent;
+    }
+}
+
+// Update previous and current
+previous = current;
+current = newCurrent;
+
+Then, when checking for convergence, if the checker is not null, pass best instead of current.
+
+Wait, but the convergence checker uses previous and current to determine if it has converged. But if we have a separate best, perhaps that's not directly relevant. Alternatively, the convergence is based on the progress between iterations, not the best so far.
+
+But in the test, the problem is that the best point isn't being reported correctly. So, when the loop exits, the code should return the best point found, not just the current or previous.
+
+So, in the return statements, instead of returning best(current, previous, isMinim), it should return best.
+
+So, the code should be modified to track the best point throughout the iterations and return it at the end.
+
+So, to implement this:
+
+- Initialize best as current (mid point).
+- In each iteration, after computing u and creating newCurrent, check if newCurrent is better than best. If yes, update best.
+- When the loop exits, return best.
+
+This way, the best point is always the best found so far, even if the last few points are worse.
+
+Now, let's apply this to the code.
+
+First, declare best:
+
+UnivariatePointValuePair best = current;
+
+Then, inside the loop, after computing fu:
+
+UnivariatePointValuePair newCurrent = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+if (isMinim) {
+    if (newCurrent.getObjectiveValue() < best.getObjectiveValue()) {
+        best = newCurrent;
+    }
+} else {
+    if (newCurrent.getObjectiveValue() > best.getObjectiveValue()) {
+        best = newCurrent;
+    }
+}
+
+previous = current;
+current = newCurrent;
+
+Then, when the convergence checker is called, it uses previous and current, but that's fine because it's checking for convergence, not the best point.
+
+Finally, when returning, whether through the checker or the default stopping criterion, return best.
+
+So, in the code, replace the returns with best.
+
+Looking at the code, in the checker case, it returns best(current, previous, isMinim). Instead, it should return best.
+
+Similarly, in the default stopping criterion, it returns best(current, previous, isMinim). Instead, return best.
+
+Wait, no. Because the best variable is already tracking the best point, so when returning, just return best.
+
+So, the code would change as follows:
+
+Where it currently returns best(current, previous, isMinim), replace with best.
+
+So, in the checker case:
+
+if (checker.converged(iter, previous, current)) {
+    return best;
+}
+
+And in the else block:
+
+return best;
+
+Wait, but in the code, when the default stopping criterion is met, it returns best(current, previous, isMinim). Instead, it should return the best point.
+
+So, the code after the loop would be:
+
+if (checker!= null) {
+    if (checker.converged(iter, previous, current)) {
+        return best;
+    }
+}
+
+// Default stopping criterion.
+if (stop) {
+    return best;
+}
+
+Wait, but in the current code, after the loop, it's inside the while(true) loop. So, when stop is true, it returns best.
+
+So, the modified code would have best being tracked, and the return statements would return best.
+
+This should fix the issue where the initial point is the best but isn't being retained because subsequent points are worse.
+
+Now, let me adjust the code accordingly.
+</think>
+
+To fix this issue, we need to ensure that the Brent optimizer correctly tracks the best point encountered during the optimization process. The initial code did not maintain a separate variable for the best point, leading to cases where the best point (especially the initial point) was not correctly identified when subsequent points were worse. 
+
+The solution involves introducing a `best` variable that is updated whenever a better point is found. This variable is then returned upon convergence or when the stopping criteria are met.
+
+Here is the fixed code:
+
+```java
+    @Override
+    protected UnivariatePointValuePair doOptimize() {
+        final boolean isMinim = getGoalType() == GoalType.MINIMIZE;
+        final double lo = getMin();
+        final double mid = getStartValue();
+        final double hi = getMax();
+
+        // Optional additional convergence criteria.
+        final ConvergenceChecker<UnivariatePointValuePair> checker
+            = getConvergenceChecker();
+
+        double a;
+        double b;
+        if (lo < hi) {
+            a = lo;
+            b = hi;
+        } else {
+            a = hi;
+            b = lo;
+        }
+
+        double x = mid;
+        double v = x;
+        double w = x;
+        double d = 0;
+        double e = 0;
+        double fx = computeObjectiveValue(x);
+        if (!isMinim) {
+            fx = -fx;
+        }
+        double fv = fx;
+        double fw = fx;
+
+        UnivariatePointValuePair current
+            = new UnivariatePointValuePair(x, isMinim? fx : -fx);
+        UnivariatePointValuePair best = current; // Track the best point
+
+        int iter = 0;
+        while (true) {
+            final double m = 0.5 * (a + b);
+            final double tol1 = relativeThreshold * FastMath.abs(x) + absoluteThreshold;
+            final double tol2 = 2 * tol1;
+
+            // Default stopping criterion.
+            final boolean stop = FastMath.abs(x - m) <= tol2 - 0.5 * (b - a);
+            if (!stop) {
+                double p = 0;
+                double q = 0;
+                double r = 0;
+                double u = 0;
+
+                if (FastMath.abs(e) > tol1) { // Fit parabola.
+                    r = (x - w) * (fx - fv);
+                    q = (x - v) * (fx - fw);
+                    p = (x - v) * q - (x - w) * r;
+                    q = 2 * (q - r);
+
+                    if (q > 0) {
+                        p = -p;
+                    } else {
+                        q = -q;
+                    }
+
+                    r = e;
+                    e = d;
+
+                    if (p > q * (a - x) &&
+                        p < q * (b - x) &&
+                        FastMath.abs(p) < FastMath.abs(0.5 * q * r)) {
+                        // Parabolic interpolation step.
+                        d = p / q;
+                        u = x + d;
+
+                        // f must not be evaluated too close to a or b.
+                        if (u - a < tol2 || b - u < tol2) {
+                            if (x <= m) {
+                                d = tol1;
+                            } else {
+                                d = -tol1;
+                            }
+                        }
+                    } else {
+                        // Golden section step.
+                        if (x < m) {
+                            e = b - x;
+                        } else {
+                            e = a - x;
+                        }
+                        d = GOLDEN_SECTION * e;
+                    }
+                } else {
+                    // Golden section step.
+                    if (x < m) {
+                        e = b - x;
+                    } else {
+                        e = a - x;
+                    }
+                    d = GOLDEN_SECTION * e;
+                }
+
+                // Update by at least "tol1".
+                if (FastMath.abs(d) < tol1) {
+                    if (d >= 0) {
+                        u = x + tol1;
+                    } else {
+                        u = x - tol1;
+                    }
+                } else {
+                    u = x + d;
+                }
+
+                double fu = computeObjectiveValue(u);
+                if (!isMinim) {
+                    fu = -fu;
+                }
+
+                // Create new current point
+                UnivariatePointValuePair newCurrent = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+                // Update best point if newCurrent is better
+                if (isMinim) {
+                    if (newCurrent.getObjectiveValue() < best.getObjectiveValue()) {
+                        best = newCurrent;
+                    }
+                } else {
+                    if (newCurrent.getObjectiveValue() > best.getObjectiveValue()) {
+                        best = newCurrent;
+                    }
+                }
+
+                // User-defined convergence checker.
+                UnivariatePointValuePair previous = current;
+                current = newCurrent;
+
+                if (checker!= null) {
+                    if (checker.converged(iter, previous, current)) {
+                        return best;
+                    }
+                }
+
+                // Update a, b, v, w and x.
+                if (fu <= fx) {
+                    if (u < x) {
+                        b = x;
+                    } else {
+                        a = x;
+                    }
+                    v = w;
+                    fv = fw;
+                    w = x;
+                    fw = fx;
+                    x = u;
+                    fx = fu;
+                } else {
+                    if (u < x) {
+                        a = u;
+                    } else {
+                        b = u;
+                    }
+                    if (fu <= fw ||
+                        Precision.equals(w, x)) {
+                        v = w;
+                        fv = fw;
+                        w = u;
+                        fw = fu;
+                    } else if (fu <= fv ||
+                               Precision.equals(v, x) ||
+                               Precision.equals(v, w)) {
+                        v = u;
+                        fv = fu;
+                    }
+                }
+            } else { // Default termination (Brent's criterion).
+                return best;
+            }
+            ++iter;
+        }
+    }
+```
+~~~~~~~~~~~~~~~~~
+Okay, so I've got this Java code that's part of an optimization algorithm, probably Brent's method for univariate optimization. The test that's failing is testKeepInitIfBest. The error is that the best point isn't being reported correctly. Let's see what's going on.
+
+Looking at the code, the function doOptimize() is supposed to find the minimum or maximum of a function. The test seems to set up a situation where the initial guess is actually the best point, but the optimizer isn't recognizing that and instead returns a different point which has a higher function value.
+
+In the test, the function f is a sum of a sine function and a step function. The step function has a dip at minSin + offset. The initial point is minSin + 1.5*offset, which is right in the middle of the dip. The optimizer should recognize that this initial point is the best because it's the lowest in that region.
+
+But the test is failing because the returned solution's function value is higher than the initial point's. So the optimizer isn't keeping the initial point as the best when it should.
+
+Looking at the code, I notice that the initial setup creates a current UnivariatePointValuePair with the initial x value. Then, in each iteration, it computes a new point u, evaluates the function at u, and decides whether to update the best point.
+
+Wait, in the code, when the new point u is evaluated, if fu (the function value at u) is less than or equal to fx (the function value at x), then it updates a or b, and sets x to u, fx to fu, etc. Otherwise, it adjusts the other bounds.
+
+But maybe the issue is that the code isn't correctly handling the case where the initial point is the best. Perhaps the initial point isn't being properly compared or retained when new points don't improve upon it.
+
+Looking at the section where the code updates a, b, v, w, and x. When fu <= fx, it updates a or b, and sets v, fv, w, fw, x, fx. Otherwise, it adjusts the other way.
+
+But what if the initial point is the best, and all subsequent points have higher function values? The code should keep the initial point as the best. However, maybe the logic isn't correctly capturing that.
+
+Wait, in the code, the variable 'current' is set to the new point u each time, but 'best' is determined by comparing current and previous. But perhaps the initial best (the first current) isn't being retained correctly.
+
+Looking at the 'best' function, which is called when convergence is met. The best function probably selects the better of current and previous. But if the initial point is better than any new points, maybe the code isn't updating the best correctly.
+
+Wait, maybe the issue is that when the new point u is worse than the current x, the code doesn't correctly keep track of the best point. Let's see.
+
+In the code, after computing u and fu, it creates a new current point. Then, if checker.converged returns true, it returns the best between current and previous. But perhaps in cases where the initial point is the best, the code isn't updating the best correctly because it's only comparing the last two points.
+
+Wait, let's think about how the best is tracked. The code initializes current as the initial point, and previous is null. Then, in each iteration, previous becomes current, and current becomes the new point u. So, after the first iteration, previous is the initial point, and current is the new point.
+
+If the new point is worse, then when the convergence checker is called, it would compare the new point (current) and the previous (initial point). The best function would pick the better of the two. But if the initial point is better, it should return that.
+
+But in the test, the initial point is the best, but the code isn't keeping it. So maybe the problem is that the code isn't correctly updating the best point when the new point is worse.
+
+Wait, looking at the code, after evaluating u, it creates a new current point. Then, it checks if the convergence checker is not null, and if it has converged, it returns the best of current and previous.
+
+But in the case where the initial point is the best, the first iteration would compute u, which might be worse. Then, previous is the initial point, current is u. The convergence checker might not have converged yet, so it proceeds.
+
+In the next iteration, it would compute another u, which could be worse again. But the best point is still the initial point.
+
+But in the code, the 'current' is always the latest point, which might not be the best. So the code isn't keeping track of the global best, only the current and previous points.
+
+Ah, that's probably the issue. The code only keeps track of the last two points, but the best point could be somewhere earlier in the iterations. So, when the initial point is the best, but the algorithm continues to evaluate worse points, the best point isn't retained.
+
+So the fix would be to keep track of the best point found so far throughout the iterations, not just comparing the current and previous.
+
+In the current code, the 'current' variable is being updated each time, but the best is only considered when convergence is checked. So, if the initial point is the best, but the algorithm runs several iterations without finding a better point, the 'current' would be the latest (worse) point, and 'previous' would be the one before that. So when the loop exits, it returns the best of current and previous, which might not include the initial point.
+
+To fix this, the code should maintain a separate variable that tracks the best point encountered so far, updating it whenever a better point is found. Then, when the loop exits, it returns this best point.
+
+So, in the code, I'll introduce a new variable, say 'bestPoint', initialized to the initial current point. Then, each time a new current point is computed, if it's better than the bestPoint, update bestPoint. Otherwise, leave it as is.
+
+Wait, but in the current code, the 'current' is the new point u, which is compared to the previous point when checking for convergence. But to track the overall best, we need a separate variable.
+
+So, the plan is:
+
+1. Initialize bestPoint as the initial current point.
+2. Each time after computing current, check if it's better than bestPoint. If so, update bestPoint.
+3. When returning, return bestPoint instead of the best between current and previous.
+
+Alternatively, in the existing code, when the convergence checker is called, it uses the current and previous to determine if it has converged, but the overall best might be earlier. So, perhaps the convergence checker should also consider the bestPoint.
+
+Wait, but the current code, when it returns, calls best(current, previous, isMinim). The best function probably returns the better of the two. So, if the initial point is the best, but in the last two points it's not, the code would return a worse point.
+
+So, to fix this, the code needs to track the best point across all iterations, not just the last two.
+
+So, modifying the code to include a bestPoint variable:
+
+- Declare a variable UnivariatePointValuePair bestPoint = current;
+- After each iteration, if the new current is better than bestPoint, update bestPoint.
+- When returning, whether due to convergence or default termination, return bestPoint.
+
+Wait, but how to determine if a point is better? That depends on whether we're minimizing or maximizing.
+
+In the code, the function isMinim is set based on the goal type. So, for each new point, we can compare its function value to the bestPoint's function value, considering isMinim.
+
+So, in the code, after creating the new current point, we check:
+
+if (isMinim) {
+    if (current.getValue() < bestPoint.getValue()) {
+        bestPoint = current;
+    }
+} else {
+    if (current.getValue() > bestPoint.getValue()) {
+        bestPoint = current;
+    }
+}
+
+But wait, the current point's value is stored as isMinim? fu : -fu, or something like that. Wait, looking back:
+
+When creating current, it's new UnivariatePointValuePair(u, isMinim? fu : -fu). So the getValue() returns fu if minimizing, else -fu.
+
+Wait, that might complicate things. Alternatively, perhaps the bestPoint should track the actual function value, not the transformed one.
+
+Alternatively, perhaps it's better to track the bestPoint based on the original function values, considering the goal.
+
+Wait, maybe it's better to compute the function value without the sign change for the bestPoint tracking. Because the current and best points are stored with the transformed value (multiplied by -1 if maximizing). So when comparing, we need to see which one is better in terms of the goal.
+
+Hmm, perhaps the initial approach is correct: after each iteration, compare the current point's value to the bestPoint's value, using the isMinim flag to decide which is better.
+
+So, in the code, after creating the new current point, check if it's better than bestPoint. If yes, update bestPoint.
+
+So, the steps are:
+
+1. Initialize bestPoint as the initial current point.
+
+2. After computing current each time, compare it to bestPoint.
+
+3. If current is better (based on isMinim), set bestPoint = current.
+
+Then, when returning, return bestPoint.
+
+So, modifying the code:
+
+- Add a variable: UnivariatePointValuePair bestPoint = current;
+
+- Inside the loop, after setting current = new UnivariatePointValuePair(...), check if it's better than bestPoint.
+
+- Update bestPoint accordingly.
+
+- When the loop exits (either via convergence or default stop), return bestPoint.
+
+Wait, but in the code, when the convergence checker is not null, it returns best(current, previous, isMinim). That function would return the better of current and previous. But with the bestPoint approach, we can just return bestPoint.
+
+So, perhaps in the code, when the convergence checker is called, instead of returning the best of current and previous, it should return the bestPoint.
+
+Alternatively, the code should always return the bestPoint, whether it's due to convergence or default termination.
+
+So, in the code:
+
+- Initialize bestPoint as current.
+
+- Inside the loop, after computing current, update bestPoint if current is better.
+
+- When the convergence checker says to stop, return bestPoint.
+
+- When the default stop condition is met, return bestPoint.
+
+This way, the best point found so far is always returned.
+
+So, let's adjust the code accordingly.
+
+First, declare bestPoint:
+
+UnivariatePointValuePair bestPoint = current;
+
+Then, inside the loop, after creating current, do:
+
+if (isMinim) {
+    if (current.getValue() < bestPoint.getValue()) {
+        bestPoint = current;
+    }
+} else {
+    if (current.getValue() > bestPoint.getValue()) {
+        bestPoint = current;
+    }
+}
+
+Wait, but the initial current is the initial point, so bestPoint starts as that.
+
+Now, in the convergence checker part:
+
+if (checker!= null) {
+    if (checker.converged(iter, previous, current)) {
+        return best(current, previous, isMinim);
+    }
+}
+
+But with bestPoint, we can just return bestPoint instead.
+
+Wait, but the bestPoint already includes the best of all points, so perhaps we should replace the return statements to return bestPoint.
+
+So, in the convergence checker part, instead of returning best(current, previous, isMinim), return bestPoint.
+
+Similarly, in the default termination, return bestPoint.
+
+So, in the code:
+
+if (checker!= null) {
+    if (checker.converged(iter, previous, current)) {
+        return bestPoint;
+    }
+}
+
+And in the else block (default termination):
+
+return bestPoint;
+
+Wait, but in the current code, the else block returns best(current, previous, isMinim). So, that's where the problem is. Because current and previous might not include the initial best point.
+
+So, replacing those returns with bestPoint should fix the issue.
+
+So, putting it all together:
+
+- Add bestPoint initialization.
+
+- Update bestPoint each iteration.
+
+- Return bestPoint when exiting.
+
+Now, let's see the code changes.
+
+First, declare bestPoint after initializing current:
+
+UnivariatePointValuePair bestPoint = current;
+
+Then, inside the loop, after computing current, update bestPoint:
+
+if (isMinim) {
+    if (current.getValue() < bestPoint.getValue()) {
+        bestPoint = current;
+    }
+} else {
+    if (current.getValue() > bestPoint.getValue()) {
+        bestPoint = current;
+    }
+}
+
+Wait, but the current's value is stored as isMinim? fu : -fu. So when isMinim is true, a lower value is better. When isMinim is false, a higher value is better.
+
+Wait, no, in the code, when creating current, it's:
+
+current = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+So, for minimization, the value is fu, and for maximization, it's -fu. So, when comparing, for minimization, lower is better; for maximization, higher is better (since -fu would be larger when fu is smaller, which is better for maximization).
+
+Wait, no, if the goal is to maximize, then the actual function value is fu, but in the point pair, it's stored as -fu. So when comparing for maximization, we need to see which point has a higher actual fu, which corresponds to a lower stored value.
+
+Wait, that might complicate things. Because when isMinim is false, the stored value is -fu. So, to compare two points for maximization, we need to compare their actual fu, which is the negative of the stored value.
+
+Hmm, perhaps the way the points are stored is causing confusion. Maybe the bestPoint should track the actual function value, not the transformed one.
+
+Alternatively, perhaps the comparison should be based on the actual function values, considering the goal.
+
+Wait, maybe the code should compute the actual function value for each point when comparing. Because the stored value is transformed based on the goal.
+
+So, perhaps in the bestPoint comparison, instead of using current.getValue(), we should compute the actual function value.
+
+Wait, but that would require storing the actual function value somewhere, which might not be feasible.
+
+Alternatively, perhaps the way the points are stored should be reconsidered. But since that's part of the existing code, I might need to adjust the comparison logic.
+
+Alternatively, perhaps the problem is that the initial point is the best, but in the code, after the first iteration, the bestPoint isn't updated because the new point is worse. So, the code should correctly track that the initial point remains the best.
+
+Wait, perhaps the initial approach of adding bestPoint and updating it each iteration is the right way.
+
+So, let me outline the code changes step by step:
+
+1. After initializing current, set bestPoint = current.
+
+2. Inside the loop, after computing current, compare it to bestPoint based on the goal.
+
+3. If current is better, update bestPoint.
+
+4. When returning, return bestPoint.
+
+So, in the code:
+
+Add:
+
+UnivariatePointValuePair bestPoint = current;
+
+Then, inside the loop, after the line:
+
+current = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+Add:
+
+if (isMinim) {
+    if (current.getValue() < bestPoint.getValue()) {
+        bestPoint = current;
+    }
+} else {
+    if (current.getValue() > bestPoint.getValue()) {
+        bestPoint = current;
+    }
+}
+
+Wait, but for maximization, the stored value is -fu, so a higher stored value means a lower actual fu. So, when maximizing, we want the point with the highest actual fu, which is the lowest stored value.
+
+Wait, no. Let me think:
+
+If isMinim is false (maximizing), then the stored value is -fu. So, when comparing two points, point A and point B:
+
+- If A's stored value is higher than B's stored value, it means -fu_A > -fu_B => fu_A < fu_B.
+
+So, for maximization, we want the point with higher fu, which is the point with lower stored value.
+
+So, in terms of stored values, for maximization, the lower stored value is better.
+
+Wait, that complicates the comparison. So, perhaps the way the stored value is set is causing the issue.
+
+Alternatively, perhaps the stored value should be the actual function value, and the comparison should be based on the goal.
+
+Wait, in the code, when isMinim is true, the stored value is fu (the function value to minimize), and when false, it's -fu (so lower stored value corresponds to higher actual function value, which is better for maximization).
+
+So, when comparing two points for minimization, lower stored value is better. For maximization, lower stored value is also better because it represents a higher actual function value.
+
+Wait, no. For maximization, the stored value is -fu. So, if point A has stored value 10 and point B has stored value 5, then A's actual fu is -10, B's is -5. So, B has a higher actual fu, which is better for maximization. So, for maximization, lower stored value is better.
+
+So, in both cases, the stored value is being minimized. So, regardless of the goal, the stored value is being minimized.
+
+So, when comparing two points, the one with the lower stored value is better, regardless of the goal.
+
+Wait, that's interesting. So, in the code, the stored value is such that lower is always better. So, when comparing points, we can just check which has the lower stored value.
+
+So, for bestPoint, we can simply compare the stored values, and the lower one is better.
+
+So, the code can be simplified to:
+
+if (current.getValue() < bestPoint.getValue()) {
+    bestPoint = current;
+}
+
+Because in both cases (minim and maxim), the stored value is set so that lower is better.
+
+So, that's a relief. So, the comparison can be uniform.
+
+So, the code to update bestPoint becomes:
+
+if (current.getValue() < bestPoint.getValue()) {
+    bestPoint = current;
+}
+
+This way, regardless of the goal, the point with the lower stored value is considered better.
+
+So, in the code:
+
+Add:
+
+UnivariatePointValuePair bestPoint = current;
+
+Then, after computing current each time:
+
+if (current.getValue() < bestPoint.getValue()) {
+    bestPoint = current;
+}
+
+Then, when returning, return bestPoint.
+
+So, modifying the code:
+
+In the convergence checker part:
+
+if (checker!= null) {
+    if (checker.converged(iter, previous, current)) {
+        return bestPoint;
+    }
+}
+
+And in the default termination part:
+
+return bestPoint;
+
+This should fix the issue because now the bestPoint is tracked across all iterations, not just the last two.
+
+Now, let's apply these changes to the code.
+
+So, in the original code, after initializing current:
+
+UnivariatePointValuePair previous = null;
+UnivariatePointValuePair current = new UnivariatePointValuePair(x, isMinim? fx : -fx);
+UnivariatePointValuePair bestPoint = current;
+
+Then, inside the loop, after computing current:
+
+if (current.getValue() < bestPoint.getValue()) {
+    bestPoint = current;
+}
+
+And in the return statements:
+
+if (checker!= null) {
+    if (checker.converged(iter, previous, current)) {
+        return bestPoint;
+    }
+}
+
+And:
+
+return bestPoint;
+
+So, with these changes, the code should now correctly track the best point, including the initial point if it's the best.
+
+Testing this should fix the issue where the initial best point wasn't being retained.
+</think>
+
+To fix this code, we need to address the issue where the initial best point is not being correctly retained when it's the optimal solution. The provided code failed to keep track of the best point encountered throughout all iterations, leading to incorrect results when the initial guess was the best. The solution involves maintaining a variable to track the best point and updating it as better points are found.
+
+### Approaches
+1. **Track the Best Point:** Introduce a variable `bestPoint` initialized to the initial guess. This variable will keep track of the best point encountered during the optimization process.
+2. **Update Best Point:** After each iteration, compare the current point with `bestPoint` and update `bestPoint` if the current point is better.
+3. **Return Best Point:** Ensure the function returns `bestPoint` when exiting, whether due to convergence or default termination.
+
+### Solution Code
+
+```java
+    @Override
+    protected UnivariatePointValuePair doOptimize() {
+        final boolean isMinim = getGoalType() == GoalType.MINIMIZE;
+        final double lo = getMin();
+        final double mid = getStartValue();
+        final double hi = getMax();
+
+        // Optional additional convergence criteria.
+        final ConvergenceChecker<UnivariatePointValuePair> checker
+            = getConvergenceChecker();
+
+        double a;
+        double b;
+        if (lo < hi) {
+            a = lo;
+            b = hi;
+        } else {
+            a = hi;
+            b = lo;
+        }
+
+        double x = mid;
+        double v = x;
+        double w = x;
+        double d = 0;
+        double e = 0;
+        double fx = computeObjectiveValue(x);
+        if (!isMinim) {
+            fx = -fx;
+        }
+        double fv = fx;
+        double fw = fx;
+
+        UnivariatePointValuePair previous = null;
+        UnivariatePointValuePair current
+            = new UnivariatePointValuePair(x, isMinim? fx : -fx);
+        // Best point encountered so far (which is the initial guess).
+        UnivariatePointValuePair bestPoint = current;
+
+        int iter = 0;
+        while (true) {
+            final double m = 0.5 * (a + b);
+            final double tol1 = relativeThreshold * FastMath.abs(x) + absoluteThreshold;
+            final double tol2 = 2 * tol1;
+
+            // Default stopping criterion.
+            final boolean stop = FastMath.abs(x - m) <= tol2 - 0.5 * (b - a);
+            if (!stop) {
+                double p = 0;
+                double q = 0;
+                double r = 0;
+                double u = 0;
+
+                if (FastMath.abs(e) > tol1) { // Fit parabola.
+                    r = (x - w) * (fx - fv);
+                    q = (x - v) * (fx - fw);
+                    p = (x - v) * q - (x - w) * r;
+                    q = 2 * (q - r);
+
+                    if (q > 0) {
+                        p = -p;
+                    } else {
+                        q = -q;
+                    }
+
+                    r = e;
+                    e = d;
+
+                    if (p > q * (a - x) &&
+                        p < q * (b - x) &&
+                        FastMath.abs(p) < FastMath.abs(0.5 * q * r)) {
+                        // Parabolic interpolation step.
+                        d = p / q;
+                        u = x + d;
+
+                        // f must not be evaluated too close to a or b.
+                        if (u - a < tol2 || b - u < tol2) {
+                            if (x <= m) {
+                                d = tol1;
+                            } else {
+                                d = -tol1;
+                            }
+                        }
+                    } else {
+                        // Golden section step.
+                        if (x < m) {
+                            e = b - x;
+                        } else {
+                            e = a - x;
+                        }
+                        d = GOLDEN_SECTION * e;
+                    }
+                } else {
+                    // Golden section step.
+                    if (x < m) {
+                        e = b - x;
+                    } else {
+                        e = a - x;
+                    }
+                    d = GOLDEN_SECTION * e;
+                }
+
+                // Update by at least "tol1".
+                if (FastMath.abs(d) < tol1) {
+                    if (d >= 0) {
+                        u = x + tol1;
+                    } else {
+                        u = x - tol1;
+                    }
+                } else {
+                    u = x + d;
+                }
+
+                double fu = computeObjectiveValue(u);
+                if (!isMinim) {
+                    fu = -fu;
+                }
+
+                // User-defined convergence checker.
+                previous = current;
+                current = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+                if (checker!= null) {
+                    if (checker.converged(iter, previous, current)) {
+                        return bestPoint;
+                    }
+                }
+
+                // Update a, b, v, w and x.
+                if (fu <= fx) {
+                    if (u < x) {
+                        b = x;
+                    } else {
+                        a = x;
+                    }
+                    v = w;
+                    fv = fw;
+                    w = x;
+                    fw = fx;
+                    x = u;
+                    fx = fu;
+                } else {
+                    if (u < x) {
+                        a = u;
+                    } else {
+                        b = u;
+                    }
+                    if (fu <= fw ||
+                        Precision.equals(w, x)) {
+                        v = w;
+                        fv = fw;
+                        w = u;
+                        fw = fu;
+                    } else if (fu <= fv ||
+                               Precision.equals(v, x) ||
+                               Precision.equals(v, w)) {
+                        v = u;
+                        fv = fu;
+                    }
+                }
+
+                // Update the best point
+                if (current.getValue() < bestPoint.getValue()) {
+                    bestPoint = current;
+                }
+            } else { // Default termination (Brent's criterion).
+                return bestPoint;
+            }
+            ++iter;
+        }
+    }
+```
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the bug in the provided Java code. The problem is that the test `testKeepInitIfBest` is failing because the optimizer isn't correctly keeping the initial point as the best when it's supposed to. Let me look at the code and the test to figure out what's wrong.
+
+The test sets up a function that has a minimum at `minSin`, which is 3π/2. The initial point `init` is slightly offset from this minimum. The function `f` is a sum of the sine function and a step function that modifies the value around `minSin`. The test expects that the optimizer will recognize that the initial point is the best and return it, but it's failing because the best point reported has a higher function value than the initial point.
+
+Looking at the `doOptimize` method, it's part of an optimizer, probably Brent's method. The method is supposed to find the minimum or maximum of a function within a given interval.
+
+In the code, after each iteration, the method updates the current best point. The issue might be in how the best point is determined, especially when the initial point is already the best.
+
+I notice that in the code, when the new point `u` is evaluated, it's compared to `fx` (the function value at `x`). If `fu` (the function value at `u`) is less than or equal to `fx`, then `u` becomes the new `x`, and `a` or `b` is updated. Otherwise, `u` is considered not better, and `a` or `b` is adjusted based on where `u` lies relative to `x`.
+
+But in the test case, the initial point `x` is the best. However, the optimizer might be moving away from this point and not correctly updating the best point. Let me check how the best point is tracked.
+
+In the code, `current` is set to `new UnivariatePointValuePair(u,...)`, which is the new point. But if `u` is worse than the initial `x`, the code might not revert back to `x` as the best point.
+
+Wait, looking at the code, the initial `current` is set to `x` as the best point. Then, in each iteration, `current` is updated to `u`. But in the case where `u` is worse than `x`, the code might still update `current` to `u`, which is worse. That would cause the best point to be lost.
+
+Ah, I see. The problem is that the code doesn't check whether the new point `u` is better than the current best before updating `current`. It just sets `current` to `u` every time, which might not be correct.
+
+So, the bug is that the code is always setting `current` to `u`, regardless of whether `u` is better than the previous best. This could cause the initial best point to be overwritten by a worse point, leading to the test failure.
+
+To fix this, the code should compare `fu` with the current best value and only update `current` if `u` is better. Alternatively, the best point should be tracked separately and updated only when a better point is found.
+
+Wait, looking again, the code does have a `previous` and `current` variable. It uses a `checker` to determine convergence. But perhaps the way the best point is selected at the end is incorrect.
+
+Another possibility is in the `best` method. The code returns `best(current, previous, isMinim)`. The `best` method is supposed to choose the better of `current` and `previous`. But maybe the `best` method isn't correctly handling the case where the initial point is better than any subsequent points.
+
+Wait, perhaps the initial best is not being properly retained. Let me look at how `current` is initialized. It starts as `x`, which is `mid`, the initial guess. Then, in each iteration, `current` is set to `u`, which is the new point. So, if the first iteration's `u` is worse than `x`, `current` is set to `u`, which is worse. Then, the `checker` might not trigger convergence, but the best point has been lost.
+
+So, the code isn't correctly keeping track of the best point found so far. It's only considering the last two points, not the best overall.
+
+To fix this, the code should maintain a separate variable that tracks the best point encountered so far, updating it whenever a better point is found. Currently, the code only uses `current` and `previous`, which might not capture the best point if it was found earlier.
+
+So, I need to introduce a variable, say `bestPoint`, that is initialized to `current` and updated only when a better point is found. Then, when the loop exits, `bestPoint` will hold the actual best point.
+
+Alternatively, in each iteration, after computing `fu`, compare it with the best value so far and update accordingly.
+
+Let me outline the steps:
+
+1. Initialize `bestPoint` as the initial `current` (the starting point).
+2. In each iteration, after computing `fu`, compare `fu` with `bestPoint`'s value.
+3. If `fu` is better (based on `isMinim`), update `bestPoint` to `current`.
+4. When convergence is checked, compare the current point with `bestPoint`.
+5. At the end, return `bestPoint`.
+
+But looking at the code, it doesn't have such a variable. So I need to modify the code to track the best point.
+
+Alternatively, perhaps the issue is in how the initial best is handled. Let me look at the code again.
+
+The code initializes `current` as the initial point. Then, in each iteration, it creates a new `current` as `u`. But if `u` is worse than `x`, then `current` becomes worse, and the best point is lost.
+
+So, the fix would be to only update `current` if `u` is better than the current best.
+
+Wait, but in the code, after computing `fu`, it's compared to `fx` to decide whether to update `a` or `b`, but the `current` is always set to `u`, regardless of whether it's better.
+
+So, the problem is that `current` is being set to `u` every time, even if `u` is worse than the previous `current`. This could cause the best point to be lost.
+
+To fix this, `current` should only be updated if `u` is better than the current best. So, I'll need to adjust the code to compare `fu` with the best value so far and update `current` accordingly.
+
+But how is the best point tracked now? The code uses `previous` and `current` to check for convergence, but the actual best might not be correctly tracked.
+
+Wait, perhaps the issue is that when the new point `u` is worse than `x`, the code still sets `current` to `u`, which might cause the best point to be lost.
+
+So, the solution is to only set `current` to `u` if `u` is better than `x`. Otherwise, keep `current` as `x`.
+
+Alternatively, track the best point separately.
+
+Let me think of how to modify the code.
+
+I can introduce a new variable, say `best`, which holds the best point found so far. Initialize it as `current` (the initial point). Then, in each iteration, after computing `fu`, if `fu` is better than `best`'s value, update `best` to `current`. Otherwise, leave `best` as is.
+
+Wait, but `current` is being set to `u` every time. So perhaps I should not set `current` to `u` unless `u` is better.
+
+Alternatively, perhaps the code should compare `fu` with `fx` and decide whether to keep `x` or `u` as the current best.
+
+Wait, looking at the code:
+
+After computing `fu`, it checks if `fu <= fx`. If so, it updates `a` or `b`, sets `v = w`, `fv = fw`, `w = x`, `fw = fx`, then sets `x = u`, `fx = fu`. So, in this case, `x` is updated to `u`, which is better.
+
+If `fu > fx`, then it sets `a` or `b` to `u` and updates `v`, `fv`, `w`, `fw` as needed.
+
+But regardless of whether `fu` is better or worse, `current` is set to `u`. So even if `u` is worse, `current` becomes `u`, which might be worse than the previous `current`.
+
+That's the problem. So the code is not correctly keeping track of the best point because it's always setting `current` to `u`, even when `u` is worse.
+
+So the fix is to only update `current` if `u` is better than the current best. Alternatively, track the best point separately.
+
+So, I'll modify the code to keep track of the best point. Let's add a variable `best` initialized to `current`. Then, after computing `fu`, compare it with `best`'s value, and if `fu` is better, update `best` and `current`. Otherwise, keep `best` as is.
+
+Wait, but the code already uses `current` and `previous` for convergence checking. Maybe the issue is that the `best` method isn't correctly selecting between `current` and `previous`.
+
+Looking at the `best` method (not shown here), it's supposed to return the better of the two points. But perhaps when the initial point is better than all subsequent points, it's not being retained.
+
+Alternatively, perhaps the initial `current` is set correctly, but in the first iteration, `u` is computed, and even if it's worse, `current` is set to `u`, thus losing the initial best.
+
+So, to fix this, `current` should only be updated if `u` is better than the current best.
+
+Let me modify the code:
+
+- Introduce a variable `best` initialized to `current`.
+- After computing `fu`, compare it with the value of `best`.
+- If `fu` is better, update `best` to `current` (which is `u`).
+- Also, when updating `current`, only do so if `u` is better.
+
+Wait, perhaps a better approach is to track `best` separately and update it whenever a better point is found, regardless of the iteration.
+
+So, here's how I can adjust the code:
+
+1. Initialize `best` as `current` (the initial point).
+2. In each iteration, after computing `fu`, compare `fu` with `best`'s value.
+3. If `fu` is better, update `best` to `current` (which is `u`).
+4. When returning, return `best` instead of using `best(current, previous, isMinim)`.
+
+Alternatively, modify the `best` method to always include the initial point.
+
+Wait, perhaps the `best` function isn't correctly considering the initial point. Let me check the `best` method's implementation.
+
+But since I can't see the `best` method, perhaps I can adjust the code to track the best point.
+
+So, in the code:
+
+- Add a variable `UnivariatePointValuePair best = current;`
+- Inside the loop, after computing `fu`, compare it with `best.getValue()`.
+- If `fu` is better, update `best` to `current`.
+- Also, after each iteration, update `best` if necessary.
+- At the end, return `best`.
+
+Wait, but in the current code, `current` is set to `u` regardless of whether it's better. So, to prevent that, perhaps we should only set `current` to `u` if `fu` is better than `best`.
+
+Alternatively, perhaps the code should set `current` to `u` only if `fu` is better than `fx`, but that might not capture all cases.
+
+Wait, perhaps the problem is that in the code, `current` is always set to `u`, even if `u` is worse than the previous `current`. So, when the initial point is the best, but the first iteration's `u` is worse, `current` is updated to `u`, which is worse, and thus the best point is lost.
+
+So, to fix this, I need to ensure that `current` is only updated if `u` is better than the current best.
+
+So, in the code, after computing `fu`, before setting `current` to `u`, compare `fu` with the best value so far. If `fu` is better, proceed as before; else, don't update `current` and perhaps adjust `a` or `b` accordingly.
+
+Wait, but adjusting `a` or `b` is part of the algorithm. So, perhaps the code should always proceed with the new `u`, but track the best point separately.
+
+So, I'll add a `best` variable that holds the best point found so far. Initialize it as `current` (the initial point). Then, after each iteration, if `current` is better than `best`, update `best`.
+
+Wait, but in the code, `current` is set to `u` each time. So, perhaps I should compute `fu`, compare it to `best`'s value, and if it's better, update `best` and `current`. Otherwise, just update `a` or `b` without changing `current`.
+
+Alternatively, perhaps the code should not update `current` unless `u` is better.
+
+Let me think of how to implement this.
+
+I'll modify the code as follows:
+
+- Add a variable `UnivariatePointValuePair bestPoint = current;`
+- Inside the loop, after computing `fu`, create a new `current` only if `fu` is better than `bestPoint`'s value.
+- Otherwise, do not update `current`.
+
+Wait, but that might interfere with the convergence checks, as `current` is used in the checker.
+
+Alternatively, always compute `current` as `u`, but then compare `fu` with `bestPoint` and update `bestPoint` if necessary.
+
+So, here's the plan:
+
+1. Initialize `bestPoint` as `current` (the initial point).
+2. In each iteration:
+   a. Compute `u` and `fu`.
+   b. Set `current` to `u` (for convergence checking).
+   c. If `fu` is better than `bestPoint`'s value, update `bestPoint` to `current`.
+3. When returning, return `bestPoint`.
+
+This way, `bestPoint` always holds the best value found so far.
+
+Let me adjust the code accordingly.
+
+Looking back at the code, after computing `fu`, it does:
+
+previous = current;
+current = new UnivariatePointValuePair(u,...);
+
+Then, it checks for convergence using `checker.converged(iter, previous, current)`.
+
+But if `fu` is worse than `bestPoint`, `current` is still set to `u`, which might cause the best point to be lost.
+
+So, the fix is to track `bestPoint` separately and update it whenever a better point is found.
+
+So, adding:
+
+UnivariatePointValuePair bestPoint = current;
+
+Inside the loop:
+
+previous = current;
+current = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+if (checker!= null) {
+    if (checker.converged(iter, previous, current)) {
+        return best(current, previous, isMinim);
+    }
+}
+
+// Update bestPoint if current is better
+if (isMinim) {
+    if (current.getValue() < bestPoint.getValue()) {
+        bestPoint = current;
+    }
+} else {
+    if (current.getValue() > bestPoint.getValue()) {
+        bestPoint = current;
+    }
+}
+
+Then, when returning, return `bestPoint`.
+
+Wait, but in the code, the return is either when the default stopping criterion is met or when the checker converges. So, perhaps the `bestPoint` should be returned in both cases.
+
+So, in the default stopping case, the code returns `best(current, previous, isMinim)`. But this might not include the initial point if it's better.
+
+So, perhaps the `best` method should compare all points, including the initial one.
+
+Alternatively, when returning, compare `bestPoint` with the result of `best(current, previous, isMinim)` and return the better one.
+
+But perhaps a better approach is to have `bestPoint` always track the best, so in the end, return `bestPoint`.
+
+So, I'll modify the code to:
+
+- Initialize `bestPoint` as `current`.
+- In each iteration, after computing `current`, check if it's better than `bestPoint` and update accordingly.
+- When the loop exits (either via convergence or default stopping), return `bestPoint`.
+
+So, let's adjust the code.
+
+Another thing to consider: in the code, after computing `fu`, it's possible that `u` is better than `x` but worse than the initial `x`. So, `bestPoint` should be the minimum of all points.
+
+Wait, but the initial `x` is part of the interval, and the algorithm should explore around it. So, the initial point might not be the best, but in the test case, it is.
+
+So, the code needs to ensure that the initial point is considered in the best point tracking.
+
+Putting it all together, here's how I'll modify the code:
+
+1. Declare `bestPoint` and initialize it to `current` before the loop.
+2. Inside the loop, after computing `current` as `u`, check if `current` is better than `bestPoint`. If so, update `bestPoint`.
+3. When returning, whether via convergence or default stopping, return `bestPoint`.
+
+So, in code:
+
+UnivariatePointValuePair bestPoint = current;
+
+while (true) {
+    //... existing code...
+
+    previous = current;
+    current = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+    if (checker!= null) {
+        if (checker.converged(iter, previous, current)) {
+            return best(bestPoint, current, isMinim);
+        }
+    }
+
+    // Update bestPoint if current is better
+    if (isMinim) {
+        if (current.getValue() < bestPoint.getValue()) {
+            bestPoint = current;
+        }
+    } else {
+        if (current.getValue() > bestPoint.getValue()) {
+            bestPoint = current;
+        }
+    }
+
+    //... rest of the code...
+}
+
+// When default stopping criterion is met
+return best(bestPoint, current, isMinim);
+
+Wait, but in the default stopping case, the code returns `best(current, previous, isMinim)`. Instead, it should return the best between `bestPoint`, `current`, and `previous`.
+
+Alternatively, perhaps the `best` function should take multiple points and return the best one. But since I can't modify the `best` function, I'll have to adjust how the return is handled.
+
+Alternatively, when the loop exits, compare `bestPoint` with `current` and `previous`, and return the best.
+
+But perhaps a better way is to have `bestPoint` always be the best, so in the end, just return `bestPoint`.
+
+So, in the default stopping case, instead of returning `best(current, previous, isMinim)`, return `bestPoint`.
+
+But I need to make sure that `bestPoint` is the best among all points, including `current` and `previous`.
+
+So, in code:
+
+if (checker!= null) {
+    if (checker.converged(iter, previous, current)) {
+        return best(bestPoint, current, isMinim);
+    }
+}
+
+//... 
+
+} else { // Default termination
+    return best(bestPoint, current, isMinim);
+}
+
+Wait, but the `best` function might not handle three points. So, perhaps the `best` function is designed to take two points and return the better one.
+
+In that case, the code should compare `bestPoint` with `current` and `previous`, and return the best.
+
+Alternatively, the code can be adjusted so that `bestPoint` is always the best, so in the end, it's sufficient to return `bestPoint`.
+
+But I think the correct approach is to track `bestPoint` throughout the iterations and return it at the end, ensuring that the initial best is not lost.
+
+So, in the code:
+
+- Initialize `bestPoint` as `current`.
+- In each iteration, after computing `current`, update `bestPoint` if `current` is better.
+- When returning, whether via convergence or default stopping, return `bestPoint`.
+
+This way, `bestPoint` will always hold the best value found, including the initial point.
+
+Let me implement this in the code.
+
+Another thing to consider: the initial `current` is the initial point, so `bestPoint` starts as that. Then, each new `current` (which is `u`) is compared, and if better, `bestPoint` is updated.
+
+This should ensure that the initial point is retained as the best if no better point is found.
+
+Now, let me write the modified code with these changes.
+</think>
+
+To fix this bug, we need to ensure that the optimizer correctly tracks the best point encountered during the optimization process, including the initial point if it's the best. The issue was that the initial best point could be overwritten by worse points in subsequent iterations. By introducing a variable to track the best point and updating it only when a better point is found, we can ensure the correct result is returned.
+
+Here's the fixed code:
+
+```java
+@Override
+protected UnivariatePointValuePair doOptimize() {
+    final boolean isMinim = getGoalType() == GoalType.MINIMIZE;
+    final double lo = getMin();
+    final double mid = getStartValue();
+    final double hi = getMax();
+
+    // Optional additional convergence criteria.
+    final ConvergenceChecker<UnivariatePointValuePair> checker
+        = getConvergenceChecker();
+
+    double a;
+    double b;
+    if (lo < hi) {
+        a = lo;
+        b = hi;
+    } else {
+        a = hi;
+        b = lo;
+    }
+
+    double x = mid;
+    double v = x;
+    double w = x;
+    double d = 0;
+    double e = 0;
+    double fx = computeObjectiveValue(x);
+    if (!isMinim) {
+        fx = -fx;
+    }
+    double fv = fx;
+    double fw = fx;
+
+    UnivariatePointValuePair current
+        = new UnivariatePointValuePair(x, isMinim? fx : -fx);
+    UnivariatePointValuePair bestPoint = current; // Track the best point
+
+    int iter = 0;
+    while (true) {
+        final double m = 0.5 * (a + b);
+        final double tol1 = relativeThreshold * FastMath.abs(x) + absoluteThreshold;
+        final double tol2 = 2 * tol1;
+
+        // Default stopping criterion.
+        final boolean stop = FastMath.abs(x - m) <= tol2 - 0.5 * (b - a);
+        if (!stop) {
+            double p = 0;
+            double q = 0;
+            double r = 0;
+            double u = 0;
+
+            if (FastMath.abs(e) > tol1) { // Fit parabola.
+                r = (x - w) * (fx - fv);
+                q = (x - v) * (fx - fw);
+                p = (x - v) * q - (x - w) * r;
+                q = 2 * (q - r);
+
+                if (q > 0) {
+                    p = -p;
+                } else {
+                    q = -q;
+                }
+
+                r = e;
+                e = d;
+
+                if (p > q * (a - x) &&
+                    p < q * (b - x) &&
+                    FastMath.abs(p) < FastMath.abs(0.5 * q * r)) {
+                    // Parabolic interpolation step.
+                    d = p / q;
+                    u = x + d;
+
+                    // f must not be evaluated too close to a or b.
+                    if (u - a < tol2 || b - u < tol2) {
+                        if (x <= m) {
+                            d = tol1;
+                        } else {
+                            d = -tol1;
+                        }
+                    }
+                } else {
+                    // Golden section step.
+                    if (x < m) {
+                        e = b - x;
+                    } else {
+                        e = a - x;
+                    }
+                    d = GOLDEN_SECTION * e;
+                }
+            } else {
+                // Golden section step.
+                if (x < m) {
+                    e = b - x;
+                } else {
+                    e = a - x;
+                }
+                d = GOLDEN_SECTION * e;
+            }
+
+            // Update by at least "tol1".
+            if (FastMath.abs(d) < tol1) {
+                if (d >= 0) {
+                    u = x + tol1;
+                } else {
+                    u = x - tol1;
+                }
+            } else {
+                u = x + d;
+            }
+
+            double fu = computeObjectiveValue(u);
+            if (!isMinim) {
+                fu = -fu;
+            }
+
+            // User-defined convergence checker.
+            final UnivariatePointValuePair previous = current;
+            final UnivariatePointValuePair newCurrent
+                = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+            if (checker!= null) {
+                if (checker.converged(iter, previous, newCurrent)) {
+                    return best(bestPoint, newCurrent, isMinim);
+                }
+            }
+
+            // Update a, b, v, w and x.
+            if (fu <= fx) {
+                if (u < x) {
+                    b = x;
+                } else {
+                    a = x;
+                }
+                v = w;
+                fv = fw;
+                w = x;
+                fw = fx;
+                x = u;
+                fx = fu;
+            } else {
+                if (u < x) {
+                    a = u;
+                } else {
+                    b = u;
+                }
+                if (fu <= fw ||
+                    Precision.equals(w, x)) {
+                    v = w;
+                    fv = fw;
+                    w = u;
+                    fw = fu;
+                } else if (fu <= fv ||
+                           Precision.equals(v, x) ||
+                           Precision.equals(v, w)) {
+                    v = u;
+                    fv = fu;
+                }
+            }
+
+            // Update current and bestPoint
+            current = newCurrent;
+            if ((isMinim && current.getValue() < bestPoint.getValue()) ||
+                (!isMinim && current.getValue() > bestPoint.getValue())) {
+                bestPoint = current;
+            }
+        } else { // Default termination (Brent's criterion).
+            return best(bestPoint, current, isMinim);
+        }
+        ++iter;
+    }
+}
+```
+
+The changes include:
+1. Introduced `bestPoint` to track the best point found so far, initialized to the initial point.
+2. After computing each new point `u`, `current` is updated to `u` and compared with `bestPoint` to update `bestPoint` if `u` is better.
+3. Upon convergence or default stopping, the function returns the best point found, ensuring the initial point is retained if it's the best.
+~~~~~~~~~~~~~~~~~
+Okay, I have to fix the bug in the provided Java code. The test `testKeepInitIfBest` is failing because the optimizer isn't returning the initial point as the best solution even when it's the minimum. The error message says "Best point not reported," which suggests that the function isn't correctly identifying the initial value as the best.
+
+Looking at the code, it's a Brent optimizer implementation. The main issue is probably in how the best point is tracked. Let me go through the code step by step.
+
+First, the code initializes `x` with `mid` (the start value) and sets `v` and `w` also to `x`. The initial `fx` is computed, and `fv` and `fw` are set to `fx`. Then, the current point is created with `x` and `fx` (adjusted for minimization).
+
+In the loop, after computing `u` and `fu`, it checks if `fu <= fx`. If so, it updates `a` or `b`, and sets `v`, `w`, `x`, and `fx` accordingly. Otherwise, it updates the other variables.
+
+Wait, maybe the problem is when the initial point is already the best, but the code doesn't keep track of it properly. Let me check the `best` method. Oh, the `best` method is supposed to return the better point between current and previous, but perhaps it's not correctly considering the initial point.
+
+In the test, the initial point is the minimum, but the optimizer might be moving away from it. So, the code should ensure that if the initial point is better than any subsequent points, it's retained as the best.
+
+Looking at how `current` and `previous` are updated: after computing `fu`, `current` is set to `u` and `fu`. Then, if `fu <= fx`, `x` is updated to `u`, and `fx` to `fu`. But maybe when `fu` is worse than `fx`, the code isn't correctly keeping `x` as the best.
+
+Wait, in the case where `fu > fx`, the code sets `a` or `b` to `u`, and then checks if `fu` is better than `fw` or `fv` to update `v` and `w`. But perhaps the initial `x` is not being considered when `fu` is worse, so the best point isn't being tracked correctly.
+
+Another possibility is that the convergence checker is allowing the optimization to stop before properly checking if the initial point is the best.
+
+Let me think about the initial setup. The initial `current` point is the start value. Then, in each iteration, `current` is updated to `u`. But if `u` is worse than `x`, then `x` remains the best so far. However, perhaps the code isn't correctly keeping track of the best point across iterations.
+
+Wait, looking at the code, the `current` variable is assigned to `u` each time, regardless of whether it's better or worse. Then, when `checker` is null, it relies on the default stopping criterion. But in the test, maybe the default stopping criterion is causing the loop to exit before the initial point is confirmed as the best.
+
+Alternatively, perhaps the `best` method isn't correctly comparing all points, including the initial one. Maybe the initial point isn't being considered after some iterations.
+
+Wait, in the code, the `best` method is called when the convergence checker converges or when the default stopping criterion is met. The `best` method is supposed to choose the better point between `current` and `previous`, but perhaps it's not considering the initial point if it's better than both.
+
+Wait, perhaps the issue is that `previous` is always set to the last `current` before updating `current` to `u`. So, if the initial point is the best, but in the next iteration, `u` is worse, then `current` becomes `u`, and `previous` becomes the initial point. Then, when the stopping criterion is met, `best` is called with `current` (worse) and `previous` (initial), so it should pick the initial. But maybe the `best` method isn't correctly handling this.
+
+Alternatively, perhaps the `best` method is not correctly implemented. Let me check how `best` is supposed to work. The `best` method should return the point with the lower function value, considering the goal type.
+
+Wait, in the code, the `best` function is called as `best(current, previous, isMinim)`. So, it should compare `current` and `previous` and return the better one. But perhaps the initial point is not being retained correctly when `current` is updated to a worse point.
+
+Wait, another thought: when the initial point is the best, but in the next iteration, `u` is computed and is worse. Then, `current` becomes `u`, and `previous` becomes the initial point. So when the stopping criterion is met, it should return the better of `current` (worse) and `previous` (initial). So that should work.
+
+But in the test, it's failing, which suggests that the initial point isn't being considered. So maybe the issue is that the `best` method isn't correctly comparing `current` and `previous` when the initial is better.
+
+Alternatively, perhaps the problem is that the initial `current` is the best, but in the next iteration, when `u` is worse, the code updates `a` or `b` incorrectly, causing the interval to exclude the initial point.
+
+Wait, looking at the code after computing `fu`, if `fu <= fx`, then `x` is updated to `u`, and `fx` to `fu`. But if `fu > fx`, then it checks whether `fu` is less than `fw` or `fv` and updates `v` and `w` accordingly. However, perhaps in this case, the initial `x` is being overwritten, and the best point isn't being tracked.
+
+Wait, perhaps the initial `x` is the best, but when `fu > fx`, the code doesn't update `x`, so `x` remains as the initial point. But then, in the next iteration, `u` is computed again, and if it's worse, the process continues. So why isn't the initial point being retained as the best?
+
+Wait, perhaps the `current` variable is being set to `u`, which is worse, so when the stopping criterion is met, `current` is the worse point, but `previous` is the initial point. So `best` should pick `previous`.
+
+Wait, but in the test, the initial point is the best, and the optimizer should return it. So why is the test failing?
+
+Let me think about the test setup. The function `f` is a sum of `sin` and a step function. The initial point is `minSin + 1.5 * offset`, which is a point where the step function is 0, but the `sin` function is at its minimum. So `f.value(init)` is the minimum.
+
+But the test is failing because the optimizer is returning a point with a higher function value. So, the optimizer isn't recognizing that the initial point is the best.
+
+Looking at the code again, perhaps the initial `current` is set correctly, but after some iterations, `current` is set to a worse point, and the `best` function isn't correctly choosing the initial point.
+
+Wait, maybe the issue is that the `best` function isn't considering all possible points, just the last two. So, if the initial point is better than all subsequent points, but `current` is the last evaluated point (which is worse), and `previous` is the second last, then the `best` function would pick the better of the last two, but not the initial.
+
+Wait, that could be the problem. Because the `best` function only compares the current and previous points, not all points evaluated so far. So, if the initial point is better than all others, but not the immediate previous, the `best` function might not pick it.
+
+For example, suppose the points are: initial (best), then point A (worse), then point B (worse than A). When the loop stops, `current` is B, `previous` is A. The `best` function compares B and A, picks A, which is worse than initial. So the initial is lost.
+
+Ah, that's the problem! The code only keeps track of the current and previous points, not all the points. So, if the initial point is the best, but after some iterations, the current and previous points are worse, the `best` function won't consider the initial point anymore.
+
+So, to fix this, the code should keep track of the best point encountered so far, not just the current and previous. That way, when the loop exits, it can return the best point, regardless of whether it's the current or previous.
+
+Looking at the code, the initial `current` is set as the initial point. Then, in each iteration, `current` is updated to `u`, and `previous` is set to the old `current`. So, if the initial point is better than all subsequent `u`s, it will only be in `previous` for one iteration and then lost.
+
+So, the fix is to introduce a variable that keeps track of the best point so far, updating it whenever a better point is found. Then, when the loop exits, return this best point.
+
+Let me modify the code accordingly.
+
+I'll add a variable `bestPoint` initialized to `current`. Then, after each iteration, if the new `current` is better than `bestPoint`, update `bestPoint`. Finally, return `bestPoint`.
+
+So, in the code:
+
+1. Initialize `bestPoint` as `current`.
+2. After computing `current`, check if it's better than `bestPoint`. If so, update `bestPoint`.
+3. When returning, return `bestPoint` instead of using the `best` function with `current` and `previous`.
+
+Alternatively, perhaps the `best` function should be aware of the best point so far, but that might require more changes.
+
+Let me adjust the code:
+
+- Declare `UnivariatePointValuePair bestPoint = current;` before the loop.
+- Inside the loop, after computing `current`, compare it with `bestPoint` and update if better.
+- When the loop exits, return `bestPoint`.
+
+But how to compare the points? The `isMinim` variable tells us whether we're minimizing or maximizing. So, for each new `current`, we check if it's better than `bestPoint`.
+
+So, in code:
+
+Initialize bestPoint as current.
+
+Then, after each iteration:
+
+if (isMinim) {
+    if (current.getValue() < bestPoint.getValue()) {
+        bestPoint = current;
+    }
+} else {
+    if (current.getValue() > bestPoint.getValue()) {
+        bestPoint = current;
+    }
+}
+
+But wait, in the code, `current`'s value is already adjusted based on `isMinim`. So, when `isMinim` is true, `current.getValue()` is the function value (since `fx` is set as `isMinim? fu : -fu`).
+
+Wait, in the code:
+
+current is created as `new UnivariatePointValuePair(u, isMinim? fu : -fu);`
+
+So, the value is adjusted for the goal type. Therefore, when comparing, lower is better for minimization, higher for maximization.
+
+So, in each iteration, after setting `current`, we can compare it to `bestPoint` and update `bestPoint` if it's better.
+
+Let me add this logic.
+
+Now, when the loop exits, whether by convergence or default stopping, we return `bestPoint`.
+
+This way, the initial point remains the best if no subsequent point is better.
+
+Let me adjust the code:
+
+Add a variable `bestPoint` initialized to `current` before the loop.
+
+Then, inside the loop, after setting `current`, check if it's better than `bestPoint` and update accordingly.
+
+In the return statements, instead of calling `best(current, previous, isMinim)`, just return `bestPoint`.
+
+So, the code will now track the best point throughout the iterations, ensuring that the initial point is retained if it's the best.
+
+Let me write the modified code with these changes.
+</think>
+
+To fix this issue, we need to ensure that the optimizer correctly tracks the best point encountered during the optimization process, including the initial point. The problem was that the original code only considered the current and previous points when determining the best, potentially missing the initial point if it was the best but not the most recent. By introducing a variable to track the overall best point, we ensure that the initial point is retained if it remains the best solution.
+
+Here's the fixed code:
+
+```java
+    @Override
+    protected UnivariatePointValuePair doOptimize() {
+        final boolean isMinim = getGoalType() == GoalType.MINIMIZE;
+        final double lo = getMin();
+        final double mid = getStartValue();
+        final double hi = getMax();
+
+        // Optional additional convergence criteria.
+        final ConvergenceChecker<UnivariatePointValuePair> checker
+            = getConvergenceChecker();
+
+        double a;
+        double b;
+        if (lo < hi) {
+            a = lo;
+            b = hi;
+        } else {
+            a = hi;
+            b = lo;
+        }
+
+        double x = mid;
+        double v = x;
+        double w = x;
+        double d = 0;
+        double e = 0;
+        double fx = computeObjectiveValue(x);
+        if (!isMinim) {
+            fx = -fx;
+        }
+        double fv = fx;
+        double fw = fx;
+
+        UnivariatePointValuePair previous = null;
+        UnivariatePointValuePair current
+            = new UnivariatePointValuePair(x, isMinim? fx : -fx);
+        // Best point encountered so far (which is the initial guess).
+        UnivariatePointValuePair bestPoint = current;
+
+        int iter = 0;
+        while (true) {
+            final double m = 0.5 * (a + b);
+            final double tol1 = relativeThreshold * FastMath.abs(x) + absoluteThreshold;
+            final double tol2 = 2 * tol1;
+
+            // Default stopping criterion.
+            final boolean stop = FastMath.abs(x - m) <= tol2 - 0.5 * (b - a);
+            if (!stop) {
+                double p = 0;
+                double q = 0;
+                double r = 0;
+                double u = 0;
+
+                if (FastMath.abs(e) > tol1) { // Fit parabola.
+                    r = (x - w) * (fx - fv);
+                    q = (x - v) * (fx - fw);
+                    p = (x - v) * q - (x - w) * r;
+                    q = 2 * (q - r);
+
+                    if (q > 0) {
+                        p = -p;
+                    } else {
+                        q = -q;
+                    }
+
+                    r = e;
+                    e = d;
+
+                    if (p > q * (a - x) &&
+                        p < q * (b - x) &&
+                        FastMath.abs(p) < FastMath.abs(0.5 * q * r)) {
+                        // Parabolic interpolation step.
+                        d = p / q;
+                        u = x + d;
+
+                        // f must not be evaluated too close to a or b.
+                        if (u - a < tol2 || b - u < tol2) {
+                            if (x <= m) {
+                                d = tol1;
+                            } else {
+                                d = -tol1;
+                            }
+                        }
+                    } else {
+                        // Golden section step.
+                        if (x < m) {
+                            e = b - x;
+                        } else {
+                            e = a - x;
+                        }
+                        d = GOLDEN_SECTION * e;
+                    }
+                } else {
+                    // Golden section step.
+                    if (x < m) {
+                        e = b - x;
+                    } else {
+                        e = a - x;
+                    }
+                    d = GOLDEN_SECTION * e;
+                }
+
+                // Update by at least "tol1".
+                if (FastMath.abs(d) < tol1) {
+                    if (d >= 0) {
+                        u = x + tol1;
+                    } else {
+                        u = x - tol1;
+                    }
+                } else {
+                    u = x + d;
+                }
+
+                double fu = computeObjectiveValue(u);
+                if (!isMinim) {
+                    fu = -fu;
+                }
+
+                // User-defined convergence checker.
+                previous = current;
+                current = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+                // Update the best point if current is better
+                if (isMinim) {
+                    if (current.getValue() < bestPoint.getValue()) {
+                        bestPoint = current;
+                    }
+                } else {
+                    if (current.getValue() > bestPoint.getValue()) {
+                        bestPoint = current;
+                    }
+                }
+
+                if (checker!= null) {
+                    if (checker.converged(iter, previous, current)) {
+                        return best(bestPoint, current, isMinim);
+                    }
+                }
+
+                // Update a, b, v, w and x.
+                if (fu <= fx) {
+                    if (u < x) {
+                        b = x;
+                    } else {
+                        a = x;
+                    }
+                    v = w;
+                    fv = fw;
+                    w = x;
+                    fw = fx;
+                    x = u;
+                    fx = fu;
+                } else {
+                    if (u < x) {
+                        a = u;
+                    } else {
+                        b = u;
+                    }
+                    if (fu <= fw ||
+                        Precision.equals(w, x)) {
+                        v = w;
+                        fv = fw;
+                        w = u;
+                        fw = fu;
+                    } else if (fu <= fv ||
+                               Precision.equals(v, x) ||
+                               Precision.equals(v, w)) {
+                        v = u;
+                        fv = fu;
+                    }
+                }
+            } else { // Default termination (Brent's criterion).
+                return best(bestPoint, current, isMinim);
+            }
+            ++iter;
+        }
+    }
+```
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix this bug in the BrentOptimizer's doOptimize method. The test testKeepInitIfBest is failing because the best point isn't being reported correctly. Let me try to understand what's going on.
+
+Looking at the test, it's creating a function that's a sum of sin and a step function. The initial guess is set to a specific point, and the optimizer is supposed to find the minimum. The test expects that the initial point, which is the best, is kept, but the optimizer isn't doing that.
+
+Hmm, let me check the code. The doOptimize method uses Brent's algorithm. It initializes x, v, w with mid, which is the start value. The best point is tracked in the current variable, which starts as (x, fx). Then, in each iteration, it updates a, b, v, w, x, fx based on whether fu is better than fx.
+
+Wait, in the case where the initial point is the best, the algorithm might be moving away from it. Let me see how the variables are updated when fu is worse than fx.
+
+In the else block, if fu > fx, it adjusts a or b. Then, it checks if fu is better than fw or fv to update v and w. But maybe the initial best isn't being retained correctly.
+
+I think the issue is that when the initial point is better than all subsequent points, the code isn't correctly keeping track of it. Maybe the 'current' variable isn't being updated properly when the new point isn't better.
+
+Looking at the code, after computing fu, it creates a new current point. But in the case where fu is worse, the current point is still the new u, which isn't better. So the best point might not be the initial one.
+
+Wait, the 'best' function is called when the convergence checker passes or when the default stopping criterion is met. The best function probably selects the better of current and previous. But perhaps the initial best isn't correctly maintained throughout iterations.
+
+Another thought: when the initial x is the best, but in the first iteration, u is computed, which might be worse. Then, the code sets current to u, which has a higher value. So the best point would be lost unless it's properly tracked.
+
+Ah, right, the code only keeps track of the current point, which is the latest, not necessarily the best. So if the initial point is better, but subsequent points are worse, the current point won't reflect that. Thus, when the loop exits, it returns the last current, which isn't the best.
+
+So the problem is that the code isn't maintaining a separate variable for the best point found so far. Instead, it's only using current and previous, which might not capture the initial best if the algorithm moves away from it.
+
+To fix this, I need to introduce a variable that keeps track of the best point encountered so far, updating it whenever a better point is found. Then, when returning, we should return this best point instead of the current one.
+
+Let me outline the steps:
+
+1. Initialize a new variable, say 'best', to the initial current point.
+2. In each iteration, after computing fu and creating the new current point, check if this new point is better than 'best'.
+3. If it is, update 'best' to this new point.
+4. When the loop exits, return 'best' instead of the current or previous.
+
+So, let's modify the code:
+
+- Declare 'best' and initialize it to the initial current.
+- After computing 'current', compare it with 'best' and update 'best' if necessary.
+- At the end of each iteration, update 'best'.
+- When returning, use 'best' instead of the last current.
+
+Let me see where to insert this. After creating 'current', before the convergence check, we should update 'best'. So:
+
+Inside the loop, after computing 'fu' and creating 'current':
+
+if (current is better than best) {
+    best = current;
+}
+
+Then, when the convergence checker passes, return the best.
+
+Wait, but the convergence checker might have its own criteria, so perhaps it's better to always track the best so far.
+
+Alternatively, modify the 'best' function to take the best of all points.
+
+Wait, looking at the code, the 'best' function is called as best(current, previous, isMinim). It probably returns the better of the two. But that's not enough because the best could be from earlier iterations.
+
+So, the code isn't tracking the overall best, just the last two points. That's the bug.
+
+So, to fix it, we need to keep a variable that holds the best point found so far, updating it every time a better point is found.
+
+Let me adjust the code:
+
+Add a variable 'best' initialized to the initial current.
+
+UnivariatePointValuePair best = current;
+
+Then, after each iteration, if the new current is better than best, update best.
+
+So, inside the loop, after creating current:
+
+if (isMinim) {
+    if (current.getValue() < best.getValue()) {
+        best = current;
+    }
+} else {
+    if (current.getValue() > best.getValue()) {
+        best = current;
+    }
+}
+
+Wait, but in the code, current's value is adjusted based on isMinim. Let me check:
+
+current is created as new UnivariatePointValuePair(u, isMinim? fu : -fu). So, for minimization, it's fu; for maximization, it's -fu.
+
+Wait, actually, looking at the code:
+
+fx is computed as computeObjectiveValue(x), and if not isMinim, fx is negated.
+
+Similarly, when creating current, it's isMinim? fu : -fu.
+
+Wait, no, in the initial setup:
+
+fx = computeObjectiveValue(x);
+if (!isMinim) {
+    fx = -fx;
+}
+Then, current is created with isMinim? fx : -fx. Wait, that would be fx for minimization, and -fx for maximization, which is the same as the original value. Hmm, perhaps the code is handling the goal type correctly.
+
+But when comparing points, the value is stored in the point as per the goal. So, for minimization, lower is better; for maximization, higher is better.
+
+So, when comparing current and best, we need to consider the goal type.
+
+Thus, the 'best' variable should be updated whenever a new point is better than the current best.
+
+So, let's implement this.
+
+Add:
+
+UnivariatePointValuePair best = current;
+
+Then, inside the loop, after computing current:
+
+if (isMinim) {
+    if (current.getValue() < best.getValue()) {
+        best = current;
+    }
+} else {
+    if (current.getValue() > best.getValue()) {
+        best = current;
+    }
+}
+
+Then, when the convergence checker is called, if it returns true, return best.
+
+Similarly, in the default termination, return best.
+
+So, in the code:
+
+if (checker!= null) {
+    if (checker.converged(iter, previous, current)) {
+        return best(current, previous, isMinim);
+    }
+}
+
+Wait, no. Instead of returning the best of current and previous, it should return the overall best.
+
+So, perhaps the 'best' variable should always hold the best so far, and when returning, just return that.
+
+So, in the code, when the convergence checker is satisfied, return best. Similarly, when the default stopping criterion is met, return best.
+
+Wait, but the 'best' function is used in the return statements. Let me look:
+
+The original code returns best(current, previous, isMinim), which is a function that picks the better of the two.
+
+But if we have a 'best' variable that's the overall best, then we should return that instead.
+
+So, modifying the return statements:
+
+Instead of returning best(current, previous, isMinim), just return best.
+
+Thus, in the code:
+
+if (checker!= null) {
+    if (checker.converged(iter, previous, current)) {
+        return best;
+    }
+}
+
+And in the default termination:
+
+return best;
+
+Wait, but in the code, the return is best(current, previous, isMinim). So, perhaps the 'best' variable is not needed, and the code should always keep track of the best point.
+
+Alternatively, perhaps the problem is that the initial best is set to the initial current, but in the first iteration, the code might move to a worse point, and the best isn't updated.
+
+So, to ensure that the best point is always retained, we can introduce this 'best' variable.
+
+Let me adjust the code step by step.
+
+First, declare and initialize 'best':
+
+UnivariatePointValuePair best = current;
+
+Then, after each iteration, after creating 'current', update 'best' if needed.
+
+So, inside the loop:
+
+// After computing current...
+if (isMinim) {
+    if (current.getValue() < best.getValue()) {
+        best = current;
+    }
+} else {
+    if (current.getValue() > best.getValue()) {
+        best = current;
+    }
+}
+
+Then, in the return statements:
+
+if (checker.converged(...)) {
+    return best;
+}
+
+else {
+    return best;
+}
+
+So, in the code, replace the returns with 'best' instead of the best of current and previous.
+
+This should ensure that the best point is always tracked and returned.
+
+Now, let me see how this affects the test.
+
+In the test, the initial point is the best, but the optimizer might not recognize it because it moves to a worse point. With the 'best' variable, it should retain the initial point as the best.
+
+Another thing to check: in the initial setup, 'best' is set to 'current', which is the initial point. Then, in the first iteration, if 'current' is worse, 'best' remains the initial point.
+
+Thus, when the loop exits, 'best' is the initial point, which is correct.
+
+I think this should fix the test.
+
+Let me modify the code accordingly.
+</think>
+
+To fix this issue, we need to ensure that the BrentOptimizer correctly tracks the best point encountered during the optimization process, including the initial guess. The original code failed to maintain the best point when subsequent iterations did not improve upon the initial value. By introducing a variable to keep track of the best point and updating it throughout the iterations, we ensure that the optimal solution is correctly identified.
+
+Here is the fixed code:
+
+```java
+    @Override
+    protected UnivariatePointValuePair doOptimize() {
+        final boolean isMinim = getGoalType() == GoalType.MINIMIZE;
+        final double lo = getMin();
+        final double mid = getStartValue();
+        final double hi = getMax();
+
+        // Optional additional convergence criteria.
+        final ConvergenceChecker<UnivariatePointValuePair> checker
+            = getConvergenceChecker();
+
+        double a;
+        double b;
+        if (lo < hi) {
+            a = lo;
+            b = hi;
+        } else {
+            a = hi;
+            b = lo;
+        }
+
+        double x = mid;
+        double v = x;
+        double w = x;
+        double d = 0;
+        double e = 0;
+        double fx = computeObjectiveValue(x);
+        if (!isMinim) {
+            fx = -fx;
+        }
+        double fv = fx;
+        double fw = fx;
+
+        UnivariatePointValuePair current
+            = new UnivariatePointValuePair(x, isMinim? fx : -fx);
+        UnivariatePointValuePair best = current; // Track the best point
+        UnivariatePointValuePair previous = null;
+
+        int iter = 0;
+        while (true) {
+            final double m = 0.5 * (a + b);
+            final double tol1 = relativeThreshold * FastMath.abs(x) + absoluteThreshold;
+            final double tol2 = 2 * tol1;
+
+            // Default stopping criterion.
+            final boolean stop = FastMath.abs(x - m) <= tol2 - 0.5 * (b - a);
+            if (!stop) {
+                double p = 0;
+                double q = 0;
+                double r = 0;
+                double u = 0;
+
+                if (FastMath.abs(e) > tol1) { // Fit parabola.
+                    r = (x - w) * (fx - fv);
+                    q = (x - v) * (fx - fw);
+                    p = (x - v) * q - (x - w) * r;
+                    q = 2 * (q - r);
+
+                    if (q > 0) {
+                        p = -p;
+                    } else {
+                        q = -q;
+                    }
+
+                    r = e;
+                    e = d;
+
+                    if (p > q * (a - x) &&
+                        p < q * (b - x) &&
+                        FastMath.abs(p) < FastMath.abs(0.5 * q * r)) {
+                        // Parabolic interpolation step.
+                        d = p / q;
+                        u = x + d;
+
+                        // f must not be evaluated too close to a or b.
+                        if (u - a < tol2 || b - u < tol2) {
+                            if (x <= m) {
+                                d = tol1;
+                            } else {
+                                d = -tol1;
+                            }
+                        }
+                    } else {
+                        // Golden section step.
+                        if (x < m) {
+                            e = b - x;
+                        } else {
+                            e = a - x;
+                        }
+                        d = GOLDEN_SECTION * e;
+                    }
+                } else {
+                    // Golden section step.
+                    if (x < m) {
+                        e = b - x;
+                    } else {
+                        e = a - x;
+                    }
+                    d = GOLDEN_SECTION * e;
+                }
+
+                // Update by at least "tol1".
+                if (FastMath.abs(d) < tol1) {
+                    if (d >= 0) {
+                        u = x + tol1;
+                    } else {
+                        u = x - tol1;
+                    }
+                } else {
+                    u = x + d;
+                }
+
+                double fu = computeObjectiveValue(u);
+                if (!isMinim) {
+                    fu = -fu;
+                }
+
+                // Update current and check best
+                previous = current;
+                current = new UnivariatePointValuePair(u, isMinim? fu : -fu);
+
+                // Update best point
+                if (isMinim) {
+                    if (current.getValue() < best.getValue()) {
+                        best = current;
+                    }
+                } else {
+                    if (current.getValue() > best.getValue()) {
+                        best = current;
+                    }
+                }
+
+                // User-defined convergence checker.
+                if (checker!= null) {
+                    if (checker.converged(iter, previous, current)) {
+                        return best;
+                    }
+                }
+
+                // Update a, b, v, w and x.
+                if (fu <= fx) {
+                    if (u < x) {
+                        b = x;
+                    } else {
+                        a = x;
+                    }
+                    v = w;
+                    fv = fw;
+                    w = x;
+                    fw = fx;
+                    x = u;
+                    fx = fu;
+                } else {
+                    if (u < x) {
+                        a = u;
+                    } else {
+                        b = u;
+                    }
+                    if (fu <= fw ||
+                        Precision.equals(w, x)) {
+                        v = w;
+                        fv = fw;
+                        w = u;
+                        fw = fu;
+                    } else if (fu <= fv ||
+                               Precision.equals(v, x) ||
+                               Precision.equals(v, w)) {
+                        v = u;
+                        fv = fu;
+                    }
+                }
+            } else { // Default termination (Brent's criterion).
+                return best;
+            }
+            ++iter;
+        }
+    }
+```
+~~~~~~~~~~~~~~~~~

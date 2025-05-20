@@ -11,14 +11,21 @@ def load_parser():
         nargs="+")
 
     parser.add_argument(
+        "--problem", 
+        choices=["code-gen", "program-repair"],
+        default="code-gen",
+        help="Which set to evaluate")
+    
+    parser.add_argument(
         "--all-lang", 
-        default=True,
+        action="store_true",
         help="Flag to evaluate all languages.")
     
     parser.add_argument(
         "--split", 
         action="store_true",
-        help="Flag to split dataset.")    
+        help="Flag to split dataset.")  
+      
     parser.add_argument(
         "--k-fold", 
         action="store_true",
@@ -26,10 +33,10 @@ def load_parser():
         help="Use k-fold in IGHB method")   
         
     parser.add_argument(
-        "--use-scc", 
-        action="store_true",
-        default=True,
-        help="Flag to use information generated with scc.")       
+        "--grouping-style", 
+        choices=["simple", "scc", "categories"],
+        default="simple",
+        help="Choose ways of grouping the samples.")       
 
     parser.add_argument(
         "--save-table", 

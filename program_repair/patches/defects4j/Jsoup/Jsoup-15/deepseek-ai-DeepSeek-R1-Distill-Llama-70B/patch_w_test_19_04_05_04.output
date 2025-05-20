@@ -1,0 +1,3141 @@
+
+####################
+Response
+####################
+Okay, so I have this Java function that's part of a parser, and it's not passing some tests. The test that's failing is handlesDataOnlyTags. Let me look at what's going on.
+
+The test is checking that data inside certain tags like <style> and <script> is handled correctly. In the first part, it parses "<style>font-family: bold</style>" and expects the data to be "font-family: bold" and the text to be empty. That seems to work, but the second part is failing.
+
+In the second part, the test has a string with <p>Hello</p> followed by a script tag containing some JavaScript, and then another <p>There</p>. The expected text is "Hello There", and the data should be the script content. But the test is failing because the text includes some of the script content.
+
+Looking at the error message: expected "Hello There" but got "Hello ); i++ There". So it seems that the parser is including part of the script's content in the text, which it shouldn't.
+
+Now, looking at the process function, I need to find where it's handling the script tags. In the code, when processing a StartTag, there's a condition that checks if the name is in a list that includes "base", "basefont", etc., and "script" isn't in that list. Wait, no, looking at the code:
+
+In the StartTag case, there's an else if for names in "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "style", "title". So script isn't there. That means when the parser encounters a <script> tag, it's falling through to other cases.
+
+Wait, maybe the issue is that the parser isn't handling the script tag correctly, so it's not treating it as a data-only tag. Data-only tags should have their contents parsed as raw text, not as HTML.
+
+Looking at the code, I see that for <style> and <script>, the parser should transition to a state where it captures the data without parsing. In the current code, when processing a StartTag, if the name is "style", it returns tb.process(t, InHead), which might not be handling the data correctly.
+
+Wait, in the StartTag case, for "style", it's processed in InHead mode, but perhaps it's not transitioning to a state that captures the data. Similarly, for "script", it's not being handled, so the parser is treating the content as regular text, leading to the script's content being included in the document's text.
+
+I think the problem is that the parser isn't recognizing "script" as a data-only tag and thus isn't handling it properly. So when it encounters <script>, it should switch to a mode where it captures everything until </script> as data, without parsing HTML.
+
+Looking at the code, in the StartTag case, I don't see a condition for "script". So perhaps I need to add "script" to the list of tags that are processed in InHead, or handle it in a way that transitions to a raw text state.
+
+Wait, in the code, the else if condition includes "style" but not "script". So I should add "script" to that list. Let me check the code again.
+
+In the StartTag case, the else if checks if the name is in a list that includes "base", "basefont", etc., and "style" is there. So for "style", it returns tb.process(t, InHead). But for "script", it's not in that list, so it's falling through.
+
+So to fix this, I should add "script" to that list. That way, when a <script> tag is encountered, it's processed in InHead mode, which I assume handles the data correctly.
+
+Alternatively, perhaps the InHead mode isn't the right place, but looking at the code, for "style", it's processed in InHead, which probably transitions to a state that captures the data.
+
+So the fix would be to add "script" to the list in the else if condition. Let me see where that is.
+
+Looking at the code:
+
+else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "style", "title")) {
+    return tb.process(t, InHead);
+}
+
+So I need to add "script" to this list. That should make the parser treat <script> as a data-only tag and process it correctly.
+
+Let me update that line to include "script":
+
+else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "script", "style", "title")) {
+
+This way, when a <script> tag is encountered, it's processed in InHead mode, which should handle the data without parsing HTML.
+
+Testing this change should fix the issue where the script's content is being included in the text. Now, when the parser sees <script>, it will process it as a data-only tag, and the content will be stored correctly without affecting the document's text.
+
+I think that's the main issue. Let me make that change in the code.
+</think>
+
+To fix this issue, we need to ensure that the `<script>` tag is treated as a data-only tag, so its content is not parsed as HTML but stored as raw data.
+
+**Problem Analysis:**
+The bug occurs because the `<script>` tag isn't recognized as a data-only tag, causing its content to be included in the document's text. The parser should handle `<script>` similarly to `<style>`, which is already processed in `InHead` mode to capture its content correctly.
+
+**Solution:**
+Add `"script"` to the list of tags processed in `InHead` mode. This ensures that the content within `<script>` tags is treated as raw data.
+
+Here is the fixed code:
+
+```java
+        boolean process(Token t, TreeBuilder tb) {
+            switch (t.type) {
+                case Character: {
+                    Token.Character c = t.asCharacter();
+                    if (c.getData().equals(nullString)) {
+                        // todo confirm that check
+                        tb.error(this);
+                        return false;
+                    } else if (isWhitespace(c)) {
+                        tb.reconstructFormattingElements();
+                        tb.insert(c);
+                    } else {
+                        tb.reconstructFormattingElements();
+                        tb.insert(c);
+                        tb.framesetOk(false);
+                    }
+                    break;
+                }
+                case Comment: {
+                    tb.insert(t.asComment());
+                    break;
+                }
+                case Doctype: {
+                    tb.error(this);
+                    return false;
+                }
+                case StartTag:
+                    Token.StartTag startTag = t.asStartTag();
+                    String name = startTag.name();
+                    if (name.equals("html")) {
+                        tb.error(this);
+                        // merge attributes onto real html
+                        Element html = tb.getStack().getFirst();
+                        for (Attribute attribute : startTag.getAttributes()) {
+                            if (!html.hasAttr(attribute.getKey()))
+                                html.attributes().put(attribute);
+                        }
+                    } else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "script", "style", "title")) {
+                        return tb.process(t, InHead);
+                    } else if (name.equals("body")) {
+                        tb.error(this);
+                        LinkedList<Element> stack = tb.getStack();
+                        if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                            // only in fragment case
+                            return false; // ignore
+                        } else {
+                            tb.framesetOk(false);
+                            Element body = stack.get(1);
+                            for (Attribute attribute : startTag.getAttributes()) {
+                                if (!body.hasAttr(attribute.getKey()))
+                                    body.attributes().put(attribute);
+                            }
+                        }
+                    } else if (name.equals("frameset")) {
+                        tb.error(this);
+                        LinkedList<Element> stack = tb.getStack();
+                        if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                            // only in fragment case
+                            return false; // ignore
+                        } else if (!tb.framesetOk()) {
+                            return false; // ignore frameset
+                        } else {
+                            Element second = stack.get(1);
+                            if (second.parent()!= null)
+                                second.remove();
+                            // pop up to html element
+                            while (stack.size() > 1)
+                                stack.removeLast();
+                            tb.insert(startTag);
+                            tb.transition(InFrameset);
+                        }
+                    } else if (StringUtil.in(name,
+                            "address", "article", "aside", "blockquote", "center", "details", "dir", "div", "dl",
+                            "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "menu", "nav", "ol",
+                            "p", "section", "summary", "ul")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                    } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        if (StringUtil.in(tb.currentElement().nodeName(), "h1", "h2", "h3", "h4", "h5", "h6")) {
+                            tb.error(this);
+                            tb.pop();
+                        }
+                        tb.insert(startTag);
+                    } else if (StringUtil.in(name, "pre", "listing")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                        // todo: ignore LF if next token
+                        tb.framesetOk(false);
+                    } else if (name.equals("form")) {
+                        if (tb.getFormElement()!= null) {
+                            tb.error(this);
+                            return false;
+                        }
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        Element form = tb.insert(startTag);
+                        tb.setFormElement(form);
+                    } else if (name.equals("li")) {
+                        tb.framesetOk(false);
+                        LinkedList<Element> stack = tb.getStack();
+                        for (int i = stack.size() - 1; i > 0; i--) {
+                            Element el = stack.get(i);
+                            if (el.nodeName().equals("li")) {
+                                tb.process(new Token.EndTag("li"));
+                                break;
+                            }
+                            if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                                break;
+                        }
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                    } else if (StringUtil.in(name, "dd", "dt")) {
+                        tb.framesetOk(false);
+                        LinkedList<Element> stack = tb.getStack();
+                        for (int i = stack.size() - 1; i > 0; i--) {
+                            Element el = stack.get(i);
+                            if (StringUtil.in(el.nodeName(), "dd", "dt")) {
+                                tb.process(new Token.EndTag(el.nodeName()));
+                                break;
+                            }
+                            if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                                break;
+                        }
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                    } else if (name.equals("plaintext")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                        tb.tokeniser.transition(TokeniserState.PLAINTEXT); // once in, never gets out
+                    } else if (name.equals("button")) {
+                        if (tb.inButtonScope("button")) {
+                            // close and reprocess
+                            tb.error(this);
+                            tb.process(new Token.EndTag("button"));
+                            tb.process(startTag);
+                        } else {
+                            tb.reconstructFormattingElements();
+                            tb.insert(startTag);
+                            tb.framesetOk(false);
+                        }
+                    } else if (name.equals("a")) {
+                        if (tb.getActiveFormattingElement("a")!= null) {
+                            tb.error(this);
+                            tb.process(new Token.EndTag("a"));
+
+                            // still on stack?
+                            Element remainingA = tb.getFromStack("a");
+                            if (remainingA!= null) {
+                                tb.removeFromActiveFormattingElements(remainingA);
+                                tb.removeFromStack(remainingA);
+                            }
+                        }
+                        tb.reconstructFormattingElements();
+                        Element a = tb.insert(startTag);
+                        tb.pushActiveFormattingElements(a);
+                    } else if (StringUtil.in(name,
+                            "b", "big", "code", "em", "font", "i", "s", "small", "strike", "strong", "tt", "u")) {
+                        tb.reconstructFormattingElements();
+                        Element el = tb.insert(startTag);
+                        tb.pushActiveFormattingElements(el);
+                    } else if (name.equals("nobr")) {
+                        tb.reconstructFormattingElements();
+                        if (tb.inScope("nobr")) {
+                            tb.error(this);
+                            tb.process(new Token.EndTag("nobr"));
+                            tb.reconstructFormattingElements();
+                        }
+                        Element el = tb.insert(startTag);
+                        tb.pushActiveFormattingElements(el);
+                    } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                        tb.reconstructFormattingElements();
+                        tb.insert(startTag);
+                        tb.insertMarkerToFormattingElements();
+                        tb.framesetOk(false);
+                    } else if (name.equals("table")) {
+                        if (tb.getDocument().quirksMode()!= Document.QuirksMode.quirks && tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                        tb.framesetOk(false);
+                        tb.transition(InTable);
+                    } else if (StringUtil.in(name, "area", "br", "embed", "img", "keygen", "wbr")) {
+                        tb.reconstructFormattingElements();
+                        tb.insertEmpty(startTag);
+                        tb.framesetOk(false);
+                    } else if (name.equals("input")) {
+                        tb.reconstructFormattingElements();
+                        Element el = tb.insertEmpty(startTag);
+                        if (!el.attr("type").equalsIgnoreCase("hidden"))
+                            tb.framesetOk(false);
+                    } else if (StringUtil.in(name, "param", "source", "track")) {
+                        tb.insertEmpty(startTag);
+                    } else if (name.equals("hr")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insertEmpty(startTag);
+                        tb.framesetOk(false);
+                    } else if (name.equals("image")) {
+                        // we're not supposed to ask.
+                        startTag.name("img");
+                        return tb.process(startTag);
+                    } else if (name.equals("isindex")) {
+                        // how much do we care about the early 90s?
+                        tb.error(this);
+                        if (tb.getFormElement()!= null)
+                            return false;
+
+                        tb.tokeniser.acknowledgeSelfClosingFlag();
+                        tb.process(new Token.StartTag("form"));
+                        if (startTag.attributes.hasKey("action")) {
+                            Element form = tb.getFormElement();
+                            form.attr("action", startTag.attributes.get("action"));
+                        }
+                        tb.process(new Token.StartTag("hr"));
+                        tb.process(new Token.StartTag("label"));
+                        // hope you like english.
+                        String prompt = startTag.attributes.hasKey("prompt")?
+                                startTag.attributes.get("prompt") :
+                                "This is a searchable index. Enter search keywords: ";
+
+                        tb.process(new Token.Character(prompt));
+
+                        // input
+                        Attributes inputAttribs = new Attributes();
+                        for (Attribute attr : startTag.attributes) {
+                            if (!StringUtil.in(attr.getKey(), "name", "action", "prompt"))
+                                inputAttribs.put(attr);
+                        }
+                        inputAttribs.put("name", "isindex");
+                        tb.process(new Token.StartTag("input", inputAttribs));
+                        tb.process(new Token.EndTag("label"));
+                        tb.process(new Token.StartTag("hr"));
+                        tb.process(new Token.EndTag("form"));
+                    } else if (name.equals("textarea")) {
+                        tb.insert(startTag);
+                        // todo: If the next token is a U+000A LINE FEED (LF) character token, then ignore that token and move on to the next one. (Newlines at the start of textarea elements are ignored as an authoring convenience.)
+                        tb.tokeniser.transition(TokeniserState.Rcdata);
+                        tb.markInsertionMode();
+                        tb.framesetOk(false);
+                        tb.transition(Text);
+                    } else if (name.equals("xmp")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.reconstructFormattingElements();
+                        tb.framesetOk(false);
+                        handleRawtext(startTag, tb);
+                    } else if (name.equals("iframe")) {
+                        tb.framesetOk(false);
+                        handleRawtext(startTag, tb);
+                    } else if (name.equals("noembed")) {
+                        // also handle noscript if script enabled
+                        handleRawtext(startTag, tb);
+                    } else if (name.equals("select")) {
+                        tb.reconstructFormattingElements();
+                        tb.insert(startTag);
+                        tb.framesetOk(false);
+
+                        TreeBuilderState state = tb.state();
+                        if (state.equals(InTable) || state.equals(InCaption) || state.equals(InTableBody) || state.equals(InRow) || state.equals(InCell))
+                            tb.transition(InSelectInTable);
+                        else
+                            tb.transition(InSelect);
+                    } else if (StringUtil.in("optgroup", "option")) {
+                        if (tb.currentElement().nodeName().equals("option"))
+                            tb.process(new Token.EndTag("option"));
+                        tb.reconstructFormattingElements();
+                        tb.insert(startTag);
+                    } else if (StringUtil.in("rp", "rt")) {
+                        if (tb.inScope("ruby")) {
+                            tb.generateImpliedEndTags();
+                            if (!tb.currentElement().nodeName().equals("ruby")) {
+                                tb.error(this);
+                                tb.popStackToBefore("ruby"); // i.e. close up to but not include name
+                            }
+                            tb.insert(startTag);
+                        }
+                    } else if (name.equals("math")) {
+                        tb.reconstructFormattingElements();
+                        // todo: handle A start tag whose tag name is "math" (i.e. foreign, mathml)
+                        tb.insert(startTag);
+                        tb.tokeniser.acknowledgeSelfClosingFlag();
+                    } else if (name.equals("svg")) {
+                        tb.reconstructFormattingElements();
+                        // todo: handle A start tag whose tag name is "svg" (xlink, svg)
+                        tb.insert(startTag);
+                        tb.tokeniser.acknowledgeSelfClosingFlag();
+                    } else if (StringUtil.in(name,
+                            "caption", "col", "colgroup", "frame", "head", "tbody", "td", "tfoot", "th", "thead", "tr")) {
+                        tb.error(this);
+                        return false;
+                    } else {
+                        tb.reconstructFormattingElements();
+                        tb.insert(startTag);
+                    }
+                    break;
+
+                case EndTag:
+                    Token.EndTag endTag = t.asEndTag();
+                    name = endTag.name();
+                    if (name.equals("body")) {
+                        if (!tb.inScope("body")) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            // todo: error if stack contains something not dd, dt, li, optgroup, option, p, rp, rt, tbody, td, tfoot, th, thead, tr, body, html
+                            tb.transition(AfterBody);
+                        }
+                    } else if (name.equals("html")) {
+                        boolean notIgnored = tb.process(new Token.EndTag("body"));
+                        if (notIgnored)
+                            return tb.process(endTag);
+                    } else if (StringUtil.in(name,
+                            "address", "article", "aside", "blockquote", "button", "center", "details", "dir", "div",
+                            "dl", "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "listing", "menu",
+                            "nav", "ol", "pre", "section", "summary", "ul")) {
+                        // todo: refactor these lookups
+                        if (!tb.inScope(name)) {
+                            // nothing to close
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags();
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                        }
+                    } else if (name.equals("form")) {
+                        Element currentForm = tb.getFormElement();
+                        tb.setFormElement(null);
+                        if (currentForm == null ||!tb.inScope(name)) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags();
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            // remove currentForm from stack. will shift anything under up.
+                            tb.removeFromStack(currentForm);
+                        }
+                    } else if (name.equals("p")) {
+                        if (!tb.inButtonScope(name)) {
+                            tb.error(this);
+                            tb.process(new Token.StartTag(name)); // if no p to close, creates an empty <p></p>
+                            return tb.process(endTag);
+                        } else {
+                            tb.generateImpliedEndTags(name);
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                        }
+                    } else if (name.equals("li")) {
+                        if (!tb.inListItemScope(name)) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags(name);
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                        }
+                    } else if (StringUtil.in(name, "dd", "dt")) {
+                        if (!tb.inScope(name)) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags(name);
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                        }
+                    } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                        if (!tb.inScope(new String[]{"h1", "h2", "h3", "h4", "h5", "h6"})) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags(name);
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose("h1", "h2", "h3", "h4", "h5", "h6");
+                        }
+                    } else if (name.equals("sarcasm")) {
+                        // *sigh*
+                        return anyOtherEndTag(t, tb);
+                    } else if (StringUtil.in(name,
+                            "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u")) {
+                        // Adoption Agency Algorithm.
+                        OUTER:
+                        for (int i = 0; i < 8; i++) {
+                            Element formatEl = tb.getActiveFormattingElement(name);
+                            if (formatEl == null)
+                                return anyOtherEndTag(t, tb);
+                            else if (!tb.onStack(formatEl)) {
+                                tb.error(this);
+                                tb.removeFromActiveFormattingElements(formatEl);
+                                return true;
+                            } else if (!tb.inScope(formatEl.nodeName())) {
+                                tb.error(this);
+                                return false;
+                            } else if (tb.currentElement()!= formatEl)
+                                tb.error(this);
+
+                            Element furthestBlock = null;
+                            Element commonAncestor = null;
+                            boolean seenFormattingElement = false;
+                            LinkedList<Element> stack = tb.getStack();
+                            for (int si = 0; si < stack.size(); si++) {
+                                Element el = stack.get(si);
+                                if (el == formatEl) {
+                                    commonAncestor = stack.get(si - 1);
+                                    seenFormattingElement = true;
+                                } else if (seenFormattingElement && tb.isSpecial(el)) {
+                                    furthestBlock = el;
+                                    break;
+                                }
+                            }
+                            if (furthestBlock == null) {
+                                tb.popStackToClose(formatEl.nodeName());
+                                tb.removeFromActiveFormattingElements(formatEl);
+                                return true;
+                            }
+
+                            // todo: Let a bookmark note the position of the formatting element in the list of active formatting elements relative to the elements on either side of it in the list.
+                            // does that mean: int pos of format el in list?
+                            Element node = furthestBlock;
+                            Element lastNode = furthestBlock;
+                            INNER:
+                            for (int j = 0; j < 3; j++) {
+                                if (tb.onStack(node))
+                                    node = tb.aboveOnStack(node);
+                                if (!tb.isInActiveFormattingElements(node)) { // note no bookmark check
+                                    tb.removeFromStack(node);
+                                    continue INNER;
+                                } else if (node == formatEl)
+                                    break INNER;
+
+                                Element replacement = new Element(Tag.valueOf(node.nodeName()), tb.getBaseUri());
+                                tb.replaceActiveFormattingElement(node, replacement);
+                                tb.replaceOnStack(node, replacement);
+                                node = replacement;
+
+                                if (lastNode == furthestBlock) {
+                                    // todo: move the aforementioned bookmark to be immediately after the new node in the list of active formatting elements.
+                                    // not getting how this bookmark both straddles the element above, but is inbetween here...
+                                }
+                                if (lastNode.parent()!= null)
+                                    lastNode.remove();
+                                node.appendChild(lastNode);
+
+                                lastNode = node;
+                            }
+
+                            if (StringUtil.in(commonAncestor.nodeName(), "table", "tbody", "tfoot", "thead", "tr")) {
+                                if (lastNode.parent()!= null)
+                                    lastNode.remove();
+                                tb.insertInFosterParent(lastNode);
+                            } else {
+                                if (lastNode.parent()!= null)
+                                    lastNode.remove();
+                                commonAncestor.appendChild(lastNode);
+                            }
+
+                            Element adopter = new Element(Tag.valueOf(name), tb.getBaseUri());
+                            Node[] childNodes = furthestBlock.childNodes().toArray(new Node[furthestBlock.childNodes().size()]);
+                            for (Node childNode : childNodes) {
+                                adopter.appendChild(childNode); // append will reparent. thus the clone to avvoid concurrent mod.
+                            }
+                            furthestBlock.appendChild(adopter);
+                            tb.removeFromActiveFormattingElements(formatEl);
+                            // todo: insert the new element into the list of active formatting elements at the position of the aforementioned bookmark.
+                            tb.removeFromStack(formatEl);
+                            tb.insertOnStackAfter(furthestBlock, adopter);
+                        }
+                    } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                        if (!tb.inScope("name")) {
+                            if (!tb.inScope(name)) {
+                                tb.error(this);
+                                return false;
+                            }
+                            tb.generateImpliedEndTags();
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                            tb.clearFormattingElementsToLastMarker();
+                        }
+                    } else if (name.equals("br")) {
+                        tb.error(this);
+                        tb.process(new Token.StartTag("br"));
+                        return false;
+                    } else {
+                        return anyOtherEndTag(t, tb);
+                    }
+
+                    break;
+                case EOF:
+                    // todo: error if stack contains something not dd, dt, li, p, tbody, td, tfoot, th, thead, tr, body, html
+                    // stop parsing
+                    break;
+            }
+            return true;
+        }
+```
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the buggy Java function. Let's start by understanding the problem.
+
+The test `handlesDataOnlyTags` is failing. The error message shows that when parsing a string with `<script>` tags, the parser is including some of the script content in the text output. Specifically, it's including `'); i++;` which it shouldn't.
+
+Looking at the test, the input is:
+```html
+<p>Hello</p><script>obj.insert('<a rel="none" />');\ni++;</script><p>There</p>
+```
+The expected output is "Hello There", but the actual output includes some script content. So the parser isn't handling script tags correctly, causing their content to leak into the text.
+
+Now, looking at the provided `process` function. I notice that in the `StartTag` case, when the tag name is in a certain list including "script", it calls `tb.process(t, InHead)`. But I'm not sure how that affects the parsing.
+
+Wait, in the code, for `StartTag`, there's a condition:
+```java
+else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "style", "title")) {
+    return tb.process(t, InHead);
+}
+```
+So when the tag is "style" or "script", it processes it in `InHead` mode. But does that properly handle the content inside these tags?
+
+Wait, the problem is that the content inside `<script>` is being treated as text and included in the document's text. So the parser isn't ignoring the content of script tags.
+
+I think the issue is that the `process` function isn't correctly transitioning to a state where it ignores the content of certain tags like `<script>`. In HTML parsing, scripts and styles are considered "data only" tags, meaning their content should not be parsed as HTML but treated as raw text.
+
+Looking at the code, when processing a `StartTag` of "style" or "script", it's handled by `tb.process(t, InHead)`. But perhaps this isn't enough. Maybe the function needs to switch to a different insertion mode when inside these tags.
+
+Wait, in the function, after handling the start tag, it's possible that the content inside is being processed as normal text. So when the parser encounters the `<script>` tag, it should switch to a mode where it doesn't process any HTML until the closing `</script>` tag.
+
+I remember that in HTML5 parsing, certain tags like `<script>` and `<style>` cause the parser to switch to a "raw text" mode where the content is not parsed. So, perhaps the `process` function isn't correctly handling this state transition.
+
+Looking at the code, when processing a `StartTag` for "style" or "script", it's using `InHead` mode. But maybe it should transition to a different mode, like `InScript` or `InStyle`, where the content is handled as raw text.
+
+Wait, looking at the code again, I see that for the `StartTag` of "plaintext", it transitions the tokeniser to `TokeniserState.PLAINTEXT`. Maybe a similar approach is needed for "script" and "style".
+
+Alternatively, perhaps the function isn't handling the end tags correctly. For example, when it encounters an `</script>` tag, it should exit the raw text mode.
+
+But in the current code, the `EndTag` handling for "script" doesn't seem to do anything special. It's probably treated as a regular tag, which is incorrect.
+
+So, the plan is to modify the `process` function to correctly handle the content within `<script>` and `<style>` tags by treating them as raw text and not parsing any HTML within them.
+
+How can I adjust the code? Let's think about the states. When a `<script>` or `<style>` tag is encountered, the parser should switch to a mode where it captures the content until the corresponding `</script>` or `</style>` tag, without processing any nested HTML tags.
+
+In the current code, perhaps the `InHead` mode isn't sufficient. Maybe when processing these tags, the function should transition to a state like `InScript` or `InStyle`, and in that state, the content is added as text without parsing.
+
+Looking at the function, in the `StartTag` case, after handling "style" and others, it returns `tb.process(t, InHead)`. Maybe this isn't the right approach. Instead, for "script" and "style", it should transition to a different state.
+
+Wait, in the original code, after processing the start tag, the function might not be changing the insertion mode correctly. So when inside a script, subsequent characters are being processed as normal, leading to the content being parsed.
+
+I think the fix is to, when encountering a `<script>` or `<style>` start tag, switch the tokeniser state to one that treats the content as raw text. For example, when processing a `<script>` start tag, the tokeniser should be in a state where it doesn't parse HTML tags but just captures text until the closing `</script>`.
+
+Looking at the code, I see that for "plaintext" tags, it does `tb.tokeniser.transition(TokeniserState.PLAINTEXT);`. Maybe I should do something similar for "script" and "style".
+
+So, in the `StartTag` case, when the name is "script" or "style", after inserting the tag, I should transition the tokeniser to a state that captures raw text.
+
+But wait, in the current code, when the start tag is processed, it's handled by `tb.process(t, InHead)`. That might not be the correct approach. Instead, perhaps I should handle "script" and "style" separately.
+
+So, I'll add a new condition in the `StartTag` case for "script" and "style". When these tags are encountered, after inserting the start tag, the tokeniser's state should be changed to `TokeniserState.RAWTEXT` or similar, so that the content is treated as plain text.
+
+But looking at the existing code, I see that for "textarea", it transitions to `TokeniserState.Rcdata`. Maybe for "script" and "style", it should transition to a raw text state.
+
+So, I'll modify the code to check if the tag is "script" or "style" and then transition the tokeniser appropriately.
+
+Let me find where in the code I can make this change. In the `StartTag` case, after the initial checks, there's a condition for "base", "basefont", etc., which includes "style" but not "script". Wait, in the provided code, the condition is:
+
+```java
+else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "style", "title")) {
+    return tb.process(t, InHead);
+}
+```
+
+So "style" is included here. But "script" isn't. That's a problem because "script" should be treated similarly.
+
+So, perhaps I should add "script" to this list, so that both "style" and "script" are processed in `InHead` mode. But wait, does that solve the problem? Or is the issue that the content inside isn't being treated as raw text.
+
+Wait, perhaps the `InHead` mode isn't handling the content correctly. Maybe the function should, upon encountering "script" or "style" start tags, transition to a state where the content is treated as raw text.
+
+Alternatively, perhaps the `process` function isn't correctly handling the content inside these tags because it's not in the right parsing state.
+
+Wait, looking at the code, when processing a `StartTag`, after handling, it returns `tb.process(t, InHead)`. But perhaps this isn't the right approach. Instead, for "script" and "style", the function should transition the insertion mode to `InScript` or `InStyle`, and in those modes, the content is treated as raw text.
+
+But I don't see such states in the provided code. So, perhaps the function isn't handling these states correctly.
+
+Alternatively, perhaps the problem is that when the `EndTag` for "script" is processed, it's not correctly popping the state, leading to subsequent text being treated as part of the script.
+
+Wait, looking at the `EndTag` handling, for "script", it's not in any of the conditions except the last `else` clause, which calls `anyOtherEndTag(t, tb)`. So, perhaps the function isn't properly handling the closing of "script" tags, causing the parser to remain in a state where it's capturing text.
+
+But I'm not sure. Alternatively, perhaps the issue is that the content inside the script tag is being parsed as HTML, which it shouldn't.
+
+Another approach is to look at how other tags like "textarea" are handled. For "textarea", the function transitions to `TokeniserState.Rcdata` and sets the insertion mode to `Text`. This causes the content to be treated as raw, without parsing HTML.
+
+So, perhaps for "script" and "style", the function should do the same: transition to `Rcdata` and set the insertion mode to `Text`.
+
+Wait, in the code, for "textarea", it does:
+```java
+tb.tokeniser.transition(TokeniserState.Rcdata);
+tb.markInsertionMode();
+tb.framesetOk(false);
+tb.transition(Text);
+```
+So, maybe I should handle "script" and "style" similarly.
+
+So, I'll add a new condition in the `StartTag` case for "script" and "style". When these tags are encountered, after inserting the start tag, the tokeniser state is set to `Rcdata`, and the insertion mode is set to `Text`.
+
+But wait, in the provided code, the "style" tag is already handled in the `InHead` condition. So perhaps I should modify that condition to include "script" and then, after processing, set the tokeniser state.
+
+Alternatively, perhaps I should create a separate condition for "script" and "style" to handle their specific processing.
+
+Let me think about the steps:
+
+1. When a `<script>` or `<style>` start tag is encountered, insert the tag.
+2. Transition the tokeniser to a state that treats the content as raw text (e.g., `Rcdata`).
+3. Set the insertion mode to `Text` so that the content is added as text nodes.
+4. When the corresponding `</script>` or `</style>` end tag is encountered, transition back to the appropriate state.
+
+So, in the code, I'll add a new `else if` condition in the `StartTag` case to handle "script" and "style".
+
+Looking at the code structure, after handling "html", "body", etc., I can add:
+
+```java
+else if (name.equals("script") || name.equals("style")) {
+    if (tb.inButtonScope("p")) {
+        tb.process(new Token.EndTag("p"));
+    }
+    tb.insert(startTag);
+    tb.tokeniser.transition(TokeniserState.Rcdata);
+    tb.markInsertionMode();
+    tb.framesetOk(false);
+    tb.transition(Text);
+}
+```
+
+Wait, but for "style", it's already handled in the earlier condition. So I need to make sure that both "script" and "style" are covered.
+
+Alternatively, perhaps I should modify the existing condition to include "script" and then handle the transition.
+
+So, I'll adjust the condition to include "script":
+
+```java
+else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "style", "title", "script")) {
+    return tb.process(t, InHead);
+}
+```
+
+But that might not be sufficient. Because after processing the start tag, the content isn't being treated as raw text.
+
+So, perhaps instead, I should handle "script" and "style" in a separate condition where I can transition the tokeniser state.
+
+Let me restructure the code:
+
+In the `StartTag` case, after the initial checks, I'll add a new condition:
+
+```java
+else if (name.equals("script") || name.equals("style")) {
+    if (tb.inButtonScope("p")) {
+        tb.process(new Token.EndTag("p"));
+    }
+    tb.insert(startTag);
+    tb.tokeniser.transition(TokeniserState.Rcdata);
+    tb.markInsertionMode();
+    tb.framesetOk(false);
+    tb.transition(Text);
+}
+```
+
+This way, when a `<script>` or `<style>` tag is encountered, the parser will start capturing the content as raw text.
+
+Now, for the `EndTag` case, I need to ensure that when `</script>` or `</style>` is encountered, the parser transitions back to the correct state.
+
+Looking at the `EndTag` handling, I don't see specific cases for "script" or "style". So, perhaps I should add a condition there.
+
+In the `EndTag` case, I'll add:
+
+```java
+else if (name.equals("script") || name.equals("style")) {
+    if (!tb.inScope(name)) {
+        tb.error(this);
+        return false;
+    } else {
+        tb.generateImpliedEndTags();
+        if (!tb.currentElement().nodeName().equals(name))
+            tb.error(this);
+        tb.popStackToClose(name);
+        tb.tokeniser.transition(TokeniserState.HTML);
+        tb.transition(InHead); // or appropriate mode
+    }
+}
+```
+
+But I'm not sure about the transition mode after closing. It might depend on the context.
+
+Alternatively, perhaps after closing the tag, the parser should return to the previous state, which might be `InHead` or another mode.
+
+But this might complicate things. Alternatively, perhaps the `transition(Text)` is sufficient because once the end tag is processed, the parser automatically exits the `Text` mode.
+
+Wait, in the `EndTag` processing, when the tag is closed, the insertion mode might automatically change. So perhaps the main issue is ensuring that the content inside is treated as raw text, which is handled by the `StartTag` processing.
+
+So, to summarize, the main fix is to add handling for "script" and "style" in the `StartTag` case, transitioning the tokeniser to `Rcdata` and setting the insertion mode to `Text`.
+
+So, in the code, I'll add the new condition for "script" and "style" in the `StartTag` case.
+
+Let me check the original code again. The existing condition for "style" is in the `InHead` processing. So perhaps I should remove "style" from that condition and handle it in the new condition along with "script".
+
+So, the original condition is:
+
+```java
+else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "style", "title")) {
+    return tb.process(t, InHead);
+}
+```
+
+I'll remove "style" from this list and handle it in the new condition.
+
+So, the updated condition becomes:
+
+```java
+else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "title")) {
+    return tb.process(t, InHead);
+}
+```
+
+And then add the new condition for "script" and "style".
+
+Putting it all together, the modified `StartTag` case will have:
+
+1. Handle "html" and other specific tags.
+2. Then, handle "script" and "style" by transitioning to raw text mode.
+3. Then, handle other tags as before.
+
+I think this should fix the issue where the content inside `<script>` is being parsed as HTML, causing the test to fail.
+
+Now, I'll write the fixed code with these changes.
+</think>
+
+To fix the issue where `<script>` and `<style>` tags' content was being incorrectly parsed, we need to ensure that these tags are treated as raw text. This involves transitioning the tokeniser to a raw text state when encountering their start tags and handling their end tags appropriately.
+
+Here's the fixed code:
+
+```java
+boolean process(Token t, TreeBuilder tb) {
+    switch (t.type) {
+        case Character: {
+            Token.Character c = t.asCharacter();
+            if (c.getData().equals(nullString)) {
+                // todo confirm that check
+                tb.error(this);
+                return false;
+            } else if (isWhitespace(c)) {
+                tb.reconstructFormattingElements();
+                tb.insert(c);
+            } else {
+                tb.reconstructFormattingElements();
+                tb.insert(c);
+                tb.framesetOk(false);
+            }
+            break;
+        }
+        case Comment: {
+            tb.insert(t.asComment());
+            break;
+        }
+        case Doctype: {
+            tb.error(this);
+            return false;
+        }
+        case StartTag:
+            Token.StartTag startTag = t.asStartTag();
+            String name = startTag.name();
+            if (name.equals("html")) {
+                tb.error(this);
+                // merge attributes onto real html
+                Element html = tb.getStack().getFirst();
+                for (Attribute attribute : startTag.getAttributes()) {
+                    if (!html.hasAttr(attribute.getKey()))
+                        html.attributes().put(attribute);
+                }
+            } else if (name.equals("body")) {
+                tb.error(this);
+                LinkedList<Element> stack = tb.getStack();
+                if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                    // only in fragment case
+                    return false; // ignore
+                } else {
+                    tb.framesetOk(false);
+                    Element body = stack.get(1);
+                    for (Attribute attribute : startTag.getAttributes()) {
+                        if (!body.hasAttr(attribute.getKey()))
+                            body.attributes().put(attribute);
+                    }
+                }
+            } else if (name.equals("frameset")) {
+                tb.error(this);
+                LinkedList<Element> stack = tb.getStack();
+                if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                    // only in fragment case
+                    return false; // ignore
+                } else if (!tb.framesetOk()) {
+                    return false; // ignore frameset
+                } else {
+                    Element second = stack.get(1);
+                    if (second.parent()!= null)
+                        second.remove();
+                    // pop up to html element
+                    while (stack.size() > 1)
+                        stack.removeLast();
+                    tb.insert(startTag);
+                    tb.transition(InFrameset);
+                }
+            } else if (StringUtil.in(name,
+                    "address", "article", "aside", "blockquote", "center", "details", "dir", "div", "dl",
+                    "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "menu", "nav", "ol",
+                    "p", "section", "summary", "ul")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+            } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                if (StringUtil.in(tb.currentElement().nodeName(), "h1", "h2", "h3", "h4", "h5", "h6")) {
+                    tb.error(this);
+                    tb.pop();
+                }
+                tb.insert(startTag);
+            } else if (StringUtil.in(name, "pre", "listing")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                // todo: ignore LF if next token
+                tb.framesetOk(false);
+            } else if (name.equals("form")) {
+                if (tb.getFormElement()!= null) {
+                    tb.error(this);
+                    return false;
+                }
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                Element form = tb.insert(startTag);
+                tb.setFormElement(form);
+            } else if (name.equals("li")) {
+                tb.framesetOk(false);
+                LinkedList<Element> stack = tb.getStack();
+                for (int i = stack.size() - 1; i > 0; i--) {
+                    Element el = stack.get(i);
+                    if (el.nodeName().equals("li")) {
+                        tb.process(new Token.EndTag("li"));
+                        break;
+                    }
+                    if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                        break;
+                }
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+            } else if (StringUtil.in(name, "dd", "dt")) {
+                tb.framesetOk(false);
+                LinkedList<Element> stack = tb.getStack();
+                for (int i = stack.size() - 1; i > 0; i--) {
+                    Element el = stack.get(i);
+                    if (StringUtil.in(el.nodeName(), "dd", "dt")) {
+                        tb.process(new Token.EndTag(el.nodeName()));
+                        break;
+                    }
+                    if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                        break;
+                }
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+            } else if (name.equals("plaintext")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                tb.tokeniser.transition(TokeniserState.PLAINTEXT); // once in, never gets out
+            } else if (name.equals("button")) {
+                if (tb.inButtonScope("button")) {
+                    // close and reprocess
+                    tb.error(this);
+                    tb.process(new Token.EndTag("button"));
+                    tb.process(startTag);
+                } else {
+                    tb.reconstructFormattingElements();
+                    tb.insert(startTag);
+                    tb.framesetOk(false);
+                }
+            } else if (name.equals("a")) {
+                if (tb.getActiveFormattingElement("a")!= null) {
+                    tb.error(this);
+                    tb.process(new Token.EndTag("a"));
+
+                    // still on stack?
+                    Element remainingA = tb.getFromStack("a");
+                    if (remainingA!= null) {
+                        tb.removeFromActiveFormattingElements(remainingA);
+                        tb.removeFromStack(remainingA);
+                    }
+                }
+                tb.reconstructFormattingElements();
+                Element a = tb.insert(startTag);
+                tb.pushActiveFormattingElements(a);
+            } else if (StringUtil.in(name,
+                    "b", "big", "code", "em", "font", "i", "s", "small", "strike", "strong", "tt", "u")) {
+                tb.reconstructFormattingElements();
+                Element el = tb.insert(startTag);
+                tb.pushActiveFormattingElements(el);
+            } else if (name.equals("nobr")) {
+                tb.reconstructFormattingElements();
+                if (tb.inScope("nobr")) {
+                    tb.error(this);
+                    tb.process(new Token.EndTag("nobr"));
+                    tb.reconstructFormattingElements();
+                }
+                Element el = tb.insert(startTag);
+                tb.pushActiveFormattingElements(el);
+            } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+                tb.insertMarkerToFormattingElements();
+                tb.framesetOk(false);
+            } else if (name.equals("table")) {
+                if (tb.getDocument().quirksMode()!= Document.QuirksMode.quirks && tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                tb.framesetOk(false);
+                tb.transition(InTable);
+            } else if (StringUtil.in(name, "area", "br", "embed", "img", "keygen", "wbr")) {
+                tb.reconstructFormattingElements();
+                tb.insertEmpty(startTag);
+                tb.framesetOk(false);
+            } else if (name.equals("input")) {
+                tb.reconstructFormattingElements();
+                Element el = tb.insertEmpty(startTag);
+                if (!el.attr("type").equalsIgnoreCase("hidden"))
+                    tb.framesetOk(false);
+            } else if (StringUtil.in(name, "param", "source", "track")) {
+                tb.insertEmpty(startTag);
+            } else if (name.equals("hr")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insertEmpty(startTag);
+                tb.framesetOk(false);
+            } else if (name.equals("image")) {
+                // we're not supposed to ask.
+                startTag.name("img");
+                return tb.process(startTag);
+            } else if (name.equals("isindex")) {
+                // how much do we care about the early 90s?
+                tb.error(this);
+                if (tb.getFormElement()!= null)
+                    return false;
+
+                tb.tokeniser.acknowledgeSelfClosingFlag();
+                tb.process(new Token.StartTag("form"));
+                if (startTag.attributes.hasKey("action")) {
+                    Element form = tb.getFormElement();
+                    form.attr("action", startTag.attributes.get("action"));
+                }
+                tb.process(new Token.StartTag("hr"));
+                tb.process(new Token.StartTag("label"));
+                // hope you like english.
+                String prompt = startTag.attributes.hasKey("prompt")?
+                        startTag.attributes.get("prompt") :
+                        "This is a searchable index. Enter search keywords: ";
+
+                tb.process(new Token.Character(prompt));
+
+                // input
+                Attributes inputAttribs = new Attributes();
+                for (Attribute attr : startTag.attributes) {
+                    if (!StringUtil.in(attr.getKey(), "name", "action", "prompt"))
+                        inputAttribs.put(attr);
+                }
+                inputAttribs.put("name", "isindex");
+                tb.process(new Token.StartTag("input", inputAttribs));
+                tb.process(new Token.EndTag("label"));
+                tb.process(new Token.StartTag("hr"));
+                tb.process(new Token.EndTag("form"));
+            } else if (name.equals("textarea")) {
+                tb.insert(startTag);
+                // todo: If the next token is a U+000A LINE FEED (LF) character token, then ignore that token and move on to the next one. (Newlines at the start of textarea elements are ignored as an authoring convenience.)
+                tb.tokeniser.transition(TokeniserState.Rcdata);
+                tb.markInsertionMode();
+                tb.framesetOk(false);
+                tb.transition(Text);
+            } else if (name.equals("xmp")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.reconstructFormattingElements();
+                tb.framesetOk(false);
+                handleRawtext(startTag, tb);
+            } else if (name.equals("iframe")) {
+                tb.framesetOk(false);
+                handleRawtext(startTag, tb);
+            } else if (name.equals("noembed")) {
+                // also handle noscript if script enabled
+                handleRawtext(startTag, tb);
+            } else if (name.equals("select")) {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+                tb.framesetOk(false);
+
+                TreeBuilderState state = tb.state();
+                if (state.equals(InTable) || state.equals(InCaption) || state.equals(InTableBody) || state.equals(InRow) || state.equals(InCell))
+                    tb.transition(InSelectInTable);
+                else
+                    tb.transition(InSelect);
+            } else if (StringUtil.in("optgroup", "option")) {
+                if (tb.currentElement().nodeName().equals("option"))
+                    tb.process(new Token.EndTag("option"));
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+            } else if (StringUtil.in("rp", "rt")) {
+                if (tb.inScope("ruby")) {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals("ruby")) {
+                        tb.error(this);
+                        tb.popStackToBefore("ruby"); // i.e. close up to but not include name
+                    }
+                    tb.insert(startTag);
+                }
+            } else if (name.equals("math")) {
+                tb.reconstructFormattingElements();
+                // todo: handle A start tag whose tag name is "math" (i.e. foreign, mathml)
+                tb.insert(startTag);
+                tb.tokeniser.acknowledgeSelfClosingFlag();
+            } else if (name.equals("svg")) {
+                tb.reconstructFormattingElements();
+                // todo: handle A start tag whose tag name is "svg" (xlink, svg)
+                tb.insert(startTag);
+                tb.tokeniser.acknowledgeSelfClosingFlag();
+            } else if (StringUtil.in(name,
+                    "caption", "col", "colgroup", "frame", "head", "tbody", "td", "tfoot", "th", "thead", "tr")) {
+                tb.error(this);
+                return false;
+            } else if (name.equals("script") || name.equals("style")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                tb.tokeniser.transition(TokeniserState.Rcdata);
+                tb.markInsertionMode();
+                tb.framesetOk(false);
+                tb.transition(Text);
+            } else {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+            }
+            break;
+
+        case EndTag:
+            Token.EndTag endTag = t.asEndTag();
+            name = endTag.name();
+            if (name.equals("body")) {
+                if (!tb.inScope("body")) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    // todo: error if stack contains something not dd, dt, li, optgroup, option, p, rp, rt, tbody, td, tfoot, th, thead, tr, body, html
+                    tb.transition(AfterBody);
+                }
+            } else if (name.equals("html")) {
+                boolean notIgnored = tb.process(new Token.EndTag("body"));
+                if (notIgnored)
+                    return tb.process(endTag);
+            } else if (StringUtil.in(name,
+                    "address", "article", "aside", "blockquote", "button", "center", "details", "dir", "div",
+                    "dl", "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "listing", "menu",
+                    "nav", "ol", "pre", "section", "summary", "ul")) {
+                // todo: refactor these lookups
+                if (!tb.inScope(name)) {
+                    // nothing to close
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (name.equals("form")) {
+                Element currentForm = tb.getFormElement();
+                tb.setFormElement(null);
+                if (currentForm == null ||!tb.inScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    // remove currentForm from stack. will shift anything under up.
+                    tb.removeFromStack(currentForm);
+                }
+            } else if (name.equals("p")) {
+                if (!tb.inButtonScope(name)) {
+                    tb.error(this);
+                    tb.process(new Token.StartTag(name)); // if no p to close, creates an empty <p></p>
+                    return tb.process(endTag);
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (name.equals("li")) {
+                if (!tb.inListItemScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (StringUtil.in(name, "dd", "dt")) {
+                if (!tb.inScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                if (!tb.inScope(new String[]{"h1", "h2", "h3", "h4", "h5", "h6"})) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose("h1", "h2", "h3", "h4", "h5", "h6");
+                }
+            } else if (name.equals("sarcasm")) {
+                // *sigh*
+                return anyOtherEndTag(t, tb);
+            } else if (StringUtil.in(name,
+                    "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u")) {
+                // Adoption Agency Algorithm.
+                OUTER:
+                for (int i = 0; i < 8; i++) {
+                    Element formatEl = tb.getActiveFormattingElement(name);
+                    if (formatEl == null)
+                        return anyOtherEndTag(t, tb);
+                    else if (!tb.onStack(formatEl)) {
+                        tb.error(this);
+                        tb.removeFromActiveFormattingElements(formatEl);
+                        return true;
+                    } else if (!tb.inScope(formatEl.nodeName())) {
+                        tb.error(this);
+                        return false;
+                    } else if (tb.currentElement()!= formatEl)
+                        tb.error(this);
+
+                    Element furthestBlock = null;
+                    Element commonAncestor = null;
+                    boolean seenFormattingElement = false;
+                    LinkedList<Element> stack = tb.getStack();
+                    for (int si = 0; si < stack.size(); si++) {
+                        Element el = stack.get(si);
+                        if (el == formatEl) {
+                            commonAncestor = stack.get(si - 1);
+                            seenFormattingElement = true;
+                        } else if (seenFormattingElement && tb.isSpecial(el)) {
+                            furthestBlock = el;
+                            break;
+                        }
+                    }
+                    if (furthestBlock == null) {
+                        tb.popStackToClose(formatEl.nodeName());
+                        tb.removeFromActiveFormattingElements(formatEl);
+                        return true;
+                    }
+
+                    // todo: Let a bookmark note the position of the formatting element in the list of active formatting elements relative to the elements on either side of it in the list.
+                    // does that mean: int pos of format el in list?
+                    Element node = furthestBlock;
+                    Element lastNode = furthestBlock;
+                    INNER:
+                    for (int j = 0; j < 3; j++) {
+                        if (tb.onStack(node))
+                            node = tb.aboveOnStack(node);
+                        if (!tb.isInActiveFormattingElements(node)) { // note no bookmark check
+                            tb.removeFromStack(node);
+                            continue INNER;
+                        } else if (node == formatEl)
+                            break INNER;
+
+                        Element replacement = new Element(Tag.valueOf(node.nodeName()), tb.getBaseUri());
+                        tb.replaceActiveFormattingElement(node, replacement);
+                        tb.replaceOnStack(node, replacement);
+                        node = replacement;
+
+                        if (lastNode == furthestBlock) {
+                            // todo: move the aforementioned bookmark to be immediately after the new node in the list of active formatting elements.
+                            // not getting how this bookmark both straddles the element above, but is inbetween here...
+                        }
+                        if (lastNode.parent()!= null)
+                            lastNode.remove();
+                        node.appendChild(lastNode);
+
+                        lastNode = node;
+                    }
+
+                    if (StringUtil.in(commonAncestor.nodeName(), "table", "tbody", "tfoot", "thead", "tr")) {
+                        if (lastNode.parent()!= null)
+                            lastNode.remove();
+                        tb.insertInFosterParent(lastNode);
+                    } else {
+                        if (lastNode.parent()!= null)
+                            lastNode.remove();
+                        commonAncestor.appendChild(lastNode);
+                    }
+
+                    Element adopter = new Element(Tag.valueOf(name), tb.getBaseUri());
+                    Node[] childNodes = furthestBlock.childNodes().toArray(new Node[furthestBlock.childNodes().size()]);
+                    for (Node childNode : childNodes) {
+                        adopter.appendChild(childNode); // append will reparent. thus the clone to avvoid concurrent mod.
+                    }
+                    furthestBlock.appendChild(adopter);
+                    tb.removeFromActiveFormattingElements(formatEl);
+                    // todo: insert the new element into the list of active formatting elements at the position of the aforementioned bookmark.
+                    tb.removeFromStack(formatEl);
+                    tb.insertOnStackAfter(furthestBlock, adopter);
+                }
+            } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                if (!tb.inScope("name")) {
+                    if (!tb.inScope(name)) {
+                        tb.error(this);
+                        return false;
+                    }
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                    tb.clearFormattingElementsToLastMarker();
+                }
+            } else if (name.equals("br")) {
+                tb.error(this);
+                tb.process(new Token.StartTag("br"));
+                return false;
+            } else if (name.equals("script") || name.equals("style")) {
+                if (!tb.inScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                    tb.tokeniser.transition(TokeniserState.HTML);
+                }
+            } else {
+                return anyOtherEndTag(t, tb);
+            }
+
+            break;
+        case EOF:
+            // todo: error if stack contains something not dd, dt, li, p, tbody, td, tfoot, th, thead, tr, body, html
+            // stop parsing
+            break;
+    }
+    return true;
+}
+```
+
+This fix ensures that `<script>` and `<style>` tags are processed correctly by transitioning the tokeniser to a raw text state, preventing their content from being parsed as HTML.
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the bug in the provided Java function. The function is part of a parser, probably for HTML or similar markup, and it's failing a specific test related to data-only tags like <style> and <script>.
+
+Looking at the test case, the problem is that when parsing something like "<style>font-family: bold</style>", the data inside the style tag is not being correctly captured. The test expects the data to be "font-family: bold" and the text to be empty, but it's failing. Another part of the test involves a script tag where the data includes some JavaScript, and the parser is incorrectly including part of the script in the text.
+
+So, I need to figure out why the parser isn't handling these data-only tags properly. Data-only tags are those where the content is not parsed as HTML but is just treated as text data. Examples include <style>, <script>, <pre>, etc.
+
+Looking at the process function, I see that when handling a StartTag, there's a big switch case. I need to check how the function handles the start tags for these data-only elements.
+
+In the current code, I notice that for "style" and "script" tags, the function returns tb.process(t, InHead). But wait, that might not be handling the content correctly. When the parser encounters a <style> tag, it should switch to a mode where it captures the data until the closing </style> tag, without parsing any HTML within.
+
+I think the issue is that the current code isn't properly transitioning into a state that captures the raw data for these tags. Instead, it's processing them as regular tags, which causes the inner content to be parsed as HTML or text nodes incorrectly.
+
+Looking at the code, when the StartTag is "style" or "script", it calls tb.process(t, InHead). But perhaps this isn't the right approach. Instead, for these tags, the parser should switch to a mode where it captures all subsequent characters as data until the closing tag.
+
+I recall that in HTML parsing, certain tags like <style>, <script>, <xmp>, etc., require the parser to enter a "raw text" mode. In this mode, the content is not parsed for tags but is taken as literal text.
+
+So, in the process function, when encountering a StartTag for "style", "script", etc., the function should handle them by calling a method that sets the appropriate state to capture raw text. Looking at the existing code, I see that for "xmp" and "iframe" tags, it calls handleRawtext(startTag, tb). Maybe I should do the same for "style" and "script".
+
+Wait, let me check. The current code for StartTag has a case for "style" and others where it returns tb.process(t, InHead). That might not be sufficient. Instead, it should probably handle these tags by inserting them and then switching to a raw text mode.
+
+So, I should modify the code so that when the StartTag is "style" or "script", it inserts the tag and then transitions to a state that captures the data. The handleRawtext function is used for tags like xmp, so perhaps we should use that.
+
+Looking at the code, in the case for "xmp", it does:
+
+tb.reconstructFormattingElements();
+tb.framesetOk(false);
+handleRawtext(startTag, tb);
+
+So, maybe I should add similar handling for "style" and "script".
+
+Wait, in the current code, the StartTag case for "style" is handled in the else if clause where it returns tb.process(t, InHead). That's probably incorrect because it's not handling the raw data.
+
+I think the fix is to add a new else if clause for "style" and "script" where we insert the tag, reconstruct formatting elements, set framesetOk to false, and then call handleRawtext.
+
+So, I'll add an else if condition checking if the name is "style" or "script". Then, within that block, I'll perform the necessary steps to handle the raw text.
+
+Additionally, I should check if the code already handles the end tags correctly for these cases. For example, when encountering </style> or </script>, the parser should exit the raw text mode.
+
+Another thing to consider is whether the handleRawtext function is correctly implemented. It should set the insertion mode to text, so that subsequent characters are treated as data.
+
+So, to summarize, the steps I need to take are:
+
+1. In the StartTag case, add an else if condition to check if the tag name is "style" or "script".
+2. Within that block, reconstruct formatting elements, set framesetOk to false, and call handleRawtext on the startTag.
+3. Ensure that the handleRawtext function correctly transitions the parser to a state where it captures raw text until the closing tag.
+
+By making these changes, the parser should correctly handle the data within <style> and <script> tags, fixing the test cases where the data is not being captured properly.
+
+I'll modify the code accordingly, adding the new else if clause and the necessary method calls.
+</think>
+
+To fix this issue, we need to ensure that the parser correctly handles data-only tags such as `<style>` and `<script>` by treating their contents as raw text. The current implementation does not properly transition into a raw text parsing mode for these tags, leading to incorrect data capture.
+
+Here is the fixed version of the function with the necessary modifications:
+
+```java
+boolean process(Token t, TreeBuilder tb) {
+    switch (t.type) {
+        case Character: {
+            Token.Character c = t.asCharacter();
+            if (c.getData().equals(nullString)) {
+                tb.error(this);
+                return false;
+            } else if (isWhitespace(c)) {
+                tb.reconstructFormattingElements();
+                tb.insert(c);
+            } else {
+                tb.reconstructFormattingElements();
+                tb.insert(c);
+                tb.framesetOk(false);
+            }
+            break;
+        }
+        case Comment: {
+            tb.insert(t.asComment());
+            break;
+        }
+        case Doctype: {
+            tb.error(this);
+            return false;
+        }
+        case StartTag:
+            Token.StartTag startTag = t.asStartTag();
+            String name = startTag.name();
+            if (name.equals("html")) {
+                tb.error(this);
+                Element html = tb.getStack().getFirst();
+                for (Attribute attribute : startTag.getAttributes()) {
+                    if (!html.hasAttr(attribute.getKey()))
+                        html.attributes().put(attribute);
+                }
+            } else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "style", "title")) {
+                return tb.process(t, InHead);
+            } else if (name.equals("body")) {
+                tb.error(this);
+                LinkedList<Element> stack = tb.getStack();
+                if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                    return false;
+                } else {
+                    tb.framesetOk(false);
+                    Element body = stack.get(1);
+                    for (Attribute attribute : startTag.getAttributes()) {
+                        if (!body.hasAttr(attribute.getKey()))
+                            body.attributes().put(attribute);
+                    }
+                }
+            } else if (name.equals("frameset")) {
+                tb.error(this);
+                LinkedList<Element> stack = tb.getStack();
+                if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                    return false;
+                } else if (!tb.framesetOk()) {
+                    return false;
+                } else {
+                    Element second = stack.get(1);
+                    if (second.parent()!= null)
+                        second.remove();
+                    while (stack.size() > 1)
+                        stack.removeLast();
+                    tb.insert(startTag);
+                    tb.transition(InFrameset);
+                }
+            } else if (StringUtil.in(name,
+                    "address", "article", "aside", "blockquote", "center", "details", "dir", "div", "dl",
+                    "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "menu", "nav", "ol",
+                    "p", "section", "summary", "ul")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+            } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                if (StringUtil.in(tb.currentElement().nodeName(), "h1", "h2", "h3", "h4", "h5", "h6")) {
+                    tb.error(this);
+                    tb.pop();
+                }
+                tb.insert(startTag);
+            } else if (StringUtil.in(name, "pre", "listing")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                tb.framesetOk(false);
+            } else if (name.equals("form")) {
+                if (tb.getFormElement()!= null) {
+                    tb.error(this);
+                    return false;
+                }
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                Element form = tb.insert(startTag);
+                tb.setFormElement(form);
+            } else if (name.equals("li")) {
+                tb.framesetOk(false);
+                LinkedList<Element> stack = tb.getStack();
+                for (int i = stack.size() - 1; i > 0; i--) {
+                    Element el = stack.get(i);
+                    if (el.nodeName().equals("li")) {
+                        tb.process(new Token.EndTag("li"));
+                        break;
+                    }
+                    if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                        break;
+                }
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+            } else if (StringUtil.in(name, "dd", "dt")) {
+                tb.framesetOk(false);
+                LinkedList<Element> stack = tb.getStack();
+                for (int i = stack.size() - 1; i > 0; i--) {
+                    Element el = stack.get(i);
+                    if (StringUtil.in(el.nodeName(), "dd", "dt")) {
+                        tb.process(new Token.EndTag(el.nodeName()));
+                        break;
+                    }
+                    if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                        break;
+                }
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+            } else if (name.equals("plaintext")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                tb.tokeniser.transition(TokeniserState.PLAINTEXT);
+            } else if (name.equals("button")) {
+                if (tb.inButtonScope("button")) {
+                    tb.error(this);
+                    tb.process(new Token.EndTag("button"));
+                    tb.process(startTag);
+                } else {
+                    tb.reconstructFormattingElements();
+                    tb.insert(startTag);
+                    tb.framesetOk(false);
+                }
+            } else if (name.equals("a")) {
+                if (tb.getActiveFormattingElement("a")!= null) {
+                    tb.error(this);
+                    tb.process(new Token.EndTag("a"));
+                    Element remainingA = tb.getFromStack("a");
+                    if (remainingA!= null) {
+                        tb.removeFromActiveFormattingElements(remainingA);
+                        tb.removeFromStack(remainingA);
+                    }
+                }
+                tb.reconstructFormattingElements();
+                Element a = tb.insert(startTag);
+                tb.pushActiveFormattingElements(a);
+            } else if (StringUtil.in(name,
+                    "b", "big", "code", "em", "font", "i", "s", "small", "strike", "strong", "tt", "u")) {
+                tb.reconstructFormattingElements();
+                Element el = tb.insert(startTag);
+                tb.pushActiveFormattingElements(el);
+            } else if (name.equals("nobr")) {
+                tb.reconstructFormattingElements();
+                if (tb.inScope("nobr")) {
+                    tb.error(this);
+                    tb.process(new Token.EndTag("nobr"));
+                    tb.reconstructFormattingElements();
+                }
+                Element el = tb.insert(startTag);
+                tb.pushActiveFormattingElements(el);
+            } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+                tb.insertMarkerToFormattingElements();
+                tb.framesetOk(false);
+            } else if (name.equals("table")) {
+                if (tb.getDocument().quirksMode()!= Document.QuirksMode.quirks && tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                tb.framesetOk(false);
+                tb.transition(InTable);
+            } else if (StringUtil.in(name, "area", "br", "embed", "img", "keygen", "wbr")) {
+                tb.reconstructFormattingElements();
+                tb.insertEmpty(startTag);
+                tb.framesetOk(false);
+            } else if (name.equals("input")) {
+                tb.reconstructFormattingElements();
+                Element el = tb.insertEmpty(startTag);
+                if (!el.attr("type").equalsIgnoreCase("hidden"))
+                    tb.framesetOk(false);
+            } else if (StringUtil.in(name, "param", "source", "track")) {
+                tb.insertEmpty(startTag);
+            } else if (name.equals("hr")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insertEmpty(startTag);
+                tb.framesetOk(false);
+            } else if (name.equals("image")) {
+                startTag.name("img");
+                return tb.process(startTag);
+            } else if (name.equals("isindex")) {
+                tb.error(this);
+                if (tb.getFormElement()!= null)
+                    return false;
+                tb.tokeniser.acknowledgeSelfClosingFlag();
+                tb.process(new Token.StartTag("form"));
+                if (startTag.attributes.hasKey("action")) {
+                    Element form = tb.getFormElement();
+                    form.attr("action", startTag.attributes.get("action"));
+                }
+                tb.process(new Token.StartTag("hr"));
+                tb.process(new Token.StartTag("label"));
+                String prompt = startTag.attributes.hasKey("prompt")?
+                        startTag.attributes.get("prompt") :
+                        "This is a searchable index. Enter search keywords: ";
+                tb.process(new Token.Character(prompt));
+                Attributes inputAttribs = new Attributes();
+                for (Attribute attr : startTag.attributes) {
+                    if (!StringUtil.in(attr.getKey(), "name", "action", "prompt"))
+                        inputAttribs.put(attr);
+                }
+                inputAttribs.put("name", "isindex");
+                tb.process(new Token.StartTag("input", inputAttribs));
+                tb.process(new Token.EndTag("label"));
+                tb.process(new Token.StartTag("hr"));
+                tb.process(new Token.EndTag("form"));
+            } else if (name.equals("textarea")) {
+                tb.insert(startTag);
+                tb.tokeniser.transition(TokeniserState.Rcdata);
+                tb.markInsertionMode();
+                tb.framesetOk(false);
+                tb.transition(Text);
+            } else if (name.equals("xmp")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.reconstructFormattingElements();
+                tb.framesetOk(false);
+                handleRawtext(startTag, tb);
+            } else if (name.equals("iframe")) {
+                tb.framesetOk(false);
+                handleRawtext(startTag, tb);
+            } else if (name.equals("noembed")) {
+                handleRawtext(startTag, tb);
+            } else if (name.equals("select")) {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+                tb.framesetOk(false);
+                TreeBuilderState state = tb.state();
+                if (state.equals(InTable) || state.equals(InCaption) || state.equals(InTableBody) || state.equals(InRow) || state.equals(InCell))
+                    tb.transition(InSelectInTable);
+                else
+                    tb.transition(InSelect);
+            } else if (StringUtil.in("optgroup", "option")) {
+                if (tb.currentElement().nodeName().equals("option"))
+                    tb.process(new Token.EndTag("option"));
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+            } else if (StringUtil.in("rp", "rt")) {
+                if (tb.inScope("ruby")) {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals("ruby")) {
+                        tb.error(this);
+                        tb.popStackToBefore("ruby");
+                    }
+                    tb.insert(startTag);
+                }
+            } else if (name.equals("math")) {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+                tb.tokeniser.acknowledgeSelfClosingFlag();
+            } else if (name.equals("svg")) {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+                tb.tokeniser.acknowledgeSelfClosingFlag();
+            } else if (StringUtil.in(name,
+                    "caption", "col", "colgroup", "frame", "head", "tbody", "td", "tfoot", "th", "thead", "tr")) {
+                tb.error(this);
+                return false;
+            } else if (StringUtil.in(name, "style", "script")) {
+                tb.reconstructFormattingElements();
+                tb.framesetOk(false);
+                handleRawtext(startTag, tb);
+            } else {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+            }
+            break;
+
+        case EndTag:
+            Token.EndTag endTag = t.asEndTag();
+            name = endTag.name();
+            if (name.equals("body")) {
+                if (!tb.inScope("body")) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.transition(AfterBody);
+                }
+            } else if (name.equals("html")) {
+                boolean notIgnored = tb.process(new Token.EndTag("body"));
+                if (notIgnored)
+                    return tb.process(endTag);
+            } else if (StringUtil.in(name,
+                    "address", "article", "aside", "blockquote", "button", "center", "details", "dir", "div",
+                    "dl", "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "listing", "menu",
+                    "nav", "ol", "pre", "section", "summary", "ul")) {
+                if (!tb.inScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (name.equals("form")) {
+                Element currentForm = tb.getFormElement();
+                tb.setFormElement(null);
+                if (currentForm == null ||!tb.inScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.removeFromStack(currentForm);
+                }
+            } else if (name.equals("p")) {
+                if (!tb.inButtonScope(name)) {
+                    tb.error(this);
+                    tb.process(new Token.StartTag(name));
+                    return tb.process(endTag);
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (name.equals("li")) {
+                if (!tb.inListItemScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (StringUtil.in(name, "dd", "dt")) {
+                if (!tb.inScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                if (!tb.inScope(new String[]{"h1", "h2", "h3", "h4", "h5", "h6"})) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose("h1", "h2", "h3", "h4", "h5", "h6");
+                }
+            } else if (name.equals("sarcasm")) {
+                return anyOtherEndTag(t, tb);
+            } else if (StringUtil.in(name,
+                    "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u")) {
+                OUTER:
+                for (int i = 0; i < 8; i++) {
+                    Element formatEl = tb.getActiveFormattingElement(name);
+                    if (formatEl == null)
+                        return anyOtherEndTag(t, tb);
+                    else if (!tb.onStack(formatEl)) {
+                        tb.error(this);
+                        tb.removeFromActiveFormattingElements(formatEl);
+                        return true;
+                    } else if (!tb.inScope(formatEl.nodeName())) {
+                        tb.error(this);
+                        return false;
+                    } else if (tb.currentElement()!= formatEl)
+                        tb.error(this);
+
+                    Element furthestBlock = null;
+                    Element commonAncestor = null;
+                    boolean seenFormattingElement = false;
+                    LinkedList<Element> stack = tb.getStack();
+                    for (int si = 0; si < stack.size(); si++) {
+                        Element el = stack.get(si);
+                        if (el == formatEl) {
+                            commonAncestor = stack.get(si - 1);
+                            seenFormattingElement = true;
+                        } else if (seenFormattingElement && tb.isSpecial(el)) {
+                            furthestBlock = el;
+                            break;
+                        }
+                    }
+                    if (furthestBlock == null) {
+                        tb.popStackToClose(formatEl.nodeName());
+                        tb.removeFromActiveFormattingElements(formatEl);
+                        return true;
+                    }
+
+                    Element node = furthestBlock;
+                    Element lastNode = furthestBlock;
+                    INNER:
+                    for (int j = 0; j < 3; j++) {
+                        if (tb.onStack(node))
+                            node = tb.aboveOnStack(node);
+                        if (!tb.isInActiveFormattingElements(node)) {
+                            tb.removeFromStack(node);
+                            continue INNER;
+                        } else if (node == formatEl)
+                            break INNER;
+
+                        Element replacement = new Element(Tag.valueOf(node.nodeName()), tb.getBaseUri());
+                        tb.replaceActiveFormattingElement(node, replacement);
+                        tb.replaceOnStack(node, replacement);
+                        node = replacement;
+
+                        if (lastNode == furthestBlock) {
+                        }
+                        if (lastNode.parent()!= null)
+                            lastNode.remove();
+                        node.appendChild(lastNode);
+
+                        lastNode = node;
+                    }
+
+                    if (StringUtil.in(commonAncestor.nodeName(), "table", "tbody", "tfoot", "thead", "tr")) {
+                        if (lastNode.parent()!= null)
+                            lastNode.remove();
+                        tb.insertInFosterParent(lastNode);
+                    } else {
+                        if (lastNode.parent()!= null)
+                            lastNode.remove();
+                        commonAncestor.appendChild(lastNode);
+                    }
+
+                    Element adopter = new Element(Tag.valueOf(name), tb.getBaseUri());
+                    Node[] childNodes = furthestBlock.childNodes().toArray(new Node[furthestBlock.childNodes().size()]);
+                    for (Node childNode : childNodes) {
+                        adopter.appendChild(childNode);
+                    }
+                    furthestBlock.appendChild(adopter);
+                    tb.removeFromActiveFormattingElements(formatEl);
+                    tb.removeFromStack(formatEl);
+                    tb.insertOnStackAfter(furthestBlock, adopter);
+                }
+            } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                if (!tb.inScope("name")) {
+                    if (!tb.inScope(name)) {
+                        tb.error(this);
+                        return false;
+                    }
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                    tb.clearFormattingElementsToLastMarker();
+                }
+            } else if (name.equals("br")) {
+                tb.error(this);
+                tb.process(new Token.StartTag("br"));
+                return false;
+            } else {
+                return anyOtherEndTag(t, tb);
+            }
+
+            break;
+        case EOF:
+            break;
+    }
+    return true;
+}
+```
+
+The key change is the addition of an else if clause that checks for "style" and "script" tags, ensuring they are handled by calling `handleRawtext()`, which properly captures their content as raw text. This should fix the test cases where data-only tags were not being parsed correctly.
+~~~~~~~~~~~~~~~~~
+Okay, so I need to fix this bug in the Java code. The problem is that the test `handlesDataOnlyTags` is failing. Let me see what's going on.
+
+Looking at the test, it's parsing some HTML that includes `<style>` and `<script>` tags. The issue is that the parsed data isn't what's expected. For the style tag, the data should be "font-family: bold", and the text should be empty. Similarly, for the script tag, the data should be the content inside, and the text of the document should be "Hello There".
+
+The error message shows that the actual text includes some of the script content, which it shouldn't. So, it seems like the parser isn't handling script and style tags correctly, causing their contents to leak into the text of the document.
+
+Now, looking at the provided code, it's a `process` method in a parser. The method handles different token types, like Character, Comment, Doctype, StartTag, EndTag, and EOF.
+
+I notice that in the `StartTag` case, there's a condition checking if the name is in a list that includes "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "style", "title". If so, it returns `tb.process(t, InHead)`. Wait, but for "style" and "script", this should mean that their contents are treated as data, not text.
+
+But maybe the problem is that when processing the contents of these tags, the parser isn't properly switching to a mode where it captures the data without adding it to the text. Alternatively, perhaps the `InHead` mode isn't handling the data correctly.
+
+Wait, in the test, the style tag is correctly handled, but the script tag isn't. Or maybe both are problematic. Let me check the code again.
+
+In the `StartTag` case, when the name is in that list, it calls `tb.process(t, InHead)`. So, for "style" and "script", it's processed in the `InHead` state. But what does `InHead` do?
+
+I think that in `InHead` mode, the parser should collect the data inside the tag as the tag's data, not as text. So, perhaps the issue is that when the end tag is processed, it's not correctly capturing the data.
+
+Alternatively, maybe the problem is that when the parser encounters a `<script>` tag, it's not properly handling the content, causing it to be treated as text instead of script data.
+
+Wait, looking at the test, the script tag's content is being included in the document's text, which it shouldn't. So, the parser is not correctly ignoring the script content.
+
+In the `process` method, when a `StartTag` is encountered, for "style" and "script", it's processed in `InHead`. But perhaps the `InHead` state isn't correctly transitioning to a state where the content is treated as data.
+
+Wait, perhaps the issue is that the `process` method isn't handling the `InHead` state correctly, or that when the end tag is processed, it's not properly finalizing the data.
+
+Alternatively, maybe the problem is in how the data is being collected. For example, when in `InHead`, the characters should be added to the current element's data, not to the text.
+
+Looking at the code, when processing a `Character` token, it checks if it's whitespace and handles formatting elements. But perhaps in the `InHead` state, the characters should be treated differently.
+
+Wait, perhaps the `InHead` state isn't being handled in the `process` method correctly. Let me check where `InHead` is used.
+
+In the `StartTag` case, when the name is in that list, it returns `tb.process(t, InHead)`. So, the `process` method is called again with the same token but with a different state.
+
+Wait, but the `process` method's first parameter is the token, and the second is the tree builder. So, when processing the start tag, it might be changing the state, but perhaps the handling of the content inside the tag isn't correct.
+
+Alternatively, maybe the issue is that the `EndTag` processing for "style" and "script" isn't correctly finalizing the data.
+
+Wait, in the `EndTag` case, when the name is "style" or "script", it's not being handled specifically. So, perhaps the code is treating them like regular tags, causing their content to be added to the text.
+
+So, to fix this, I need to ensure that when a "style" or "script" end tag is processed, it correctly captures the data and doesn't add it to the document's text.
+
+Looking at the code, in the `EndTag` case, there's no specific handling for "style" or "script". So, perhaps these should be treated similarly to other tags that contain data, like "title" or "textarea".
+
+Wait, in the `StartTag` case, "textarea" is handled by inserting the start tag and transitioning to `Text` mode. Maybe "style" and "script" should transition to a similar mode where their content is captured as data.
+
+Alternatively, perhaps the problem is that when in `InHead` mode, the processing of characters isn't being directed to the correct place.
+
+Wait, perhaps the `InHead` state should cause the tree builder to collect characters as data for the current element, rather than adding them to the text.
+
+So, maybe in the `process` method, when the state is `InHead`, the `Character` tokens should be appended to the current element's data, not inserted as text.
+
+But looking at the `Character` case in the code, it doesn't check the current state. It just handles formatting elements and inserts the character. So, perhaps the state needs to influence how characters are processed.
+
+Alternatively, perhaps the `InHead` state isn't being set correctly when processing the start tag, so the subsequent characters are treated as normal text.
+
+Wait, in the `StartTag` case for "style" etc., it calls `tb.process(t, InHead)`. So, the state is changed to `InHead`, and the processing continues.
+
+But when in `InHead`, the next tokens (like characters) should be treated as part of the head element's data.
+
+So, perhaps in the `Character` case, if the current state is `InHead`, the characters should be added to the current element's data instead of being inserted as text.
+
+Alternatively, perhaps the `InHead` state isn't properly handled in the tree builder, so the characters are still being added to the text.
+
+So, the fix would involve modifying the `Character` case to check if the current state is `InHead` (or similar), and if so, append the character data to the current element's data instead of inserting it as text.
+
+Alternatively, perhaps the `InHead` state should transition to a state where characters are captured as data.
+
+Wait, another approach: in the `StartTag` case for "style" and "script", perhaps the code should transition to a state where the content is treated as raw text, similar to `textarea`.
+
+Looking at the code, when processing a `StartTag` for "textarea", it transitions to `Text` mode. So, perhaps "style" and "script" should do the same.
+
+So, in the `StartTag` case, when the name is in the list including "style", the code should transition to `Text` mode, so that the content is treated as data.
+
+Wait, in the current code, for "style", it returns `tb.process(t, InHead)`. Maybe instead, it should handle it like "textarea", transitioning to `Text` mode.
+
+So, perhaps the fix is to change the handling of "style" and "script" in the `StartTag` case to transition to `Text` mode, so that their content is captured correctly.
+
+Alternatively, perhaps the `InHead` mode isn't sufficient, and a different mode is needed for capturing raw text.
+
+Wait, looking at the code, when processing a `StartTag` for "textarea", it calls `tb.tokeniser.transition(TokeniserState.Rcdata)` and `tb.markInsertionMode()`, then transitions to `Text` mode.
+
+So, perhaps for "style" and "script", similar handling is needed.
+
+So, in the `StartTag` case, when the name is "style" or "script", the code should:
+
+- Insert the start tag
+- Transition the tokeniser to `Rcdata` or appropriate state
+- Mark insertion mode
+- Transition to `Text` mode
+
+This way, the content inside these tags is treated as raw text and assigned to the element's data, not added to the document's text.
+
+So, in the code, I need to find where the "style" is handled and adjust it.
+
+Looking back, in the `StartTag` case, the code checks if the name is in a list that includes "style". It then returns `tb.process(t, InHead)`. But perhaps this isn't correctly handling the content.
+
+So, perhaps the fix is to change this part of the code to handle "style" and "script" more like "textarea", transitioning to `Text` mode.
+
+So, modifying the code:
+
+In the `StartTag` case, when the name is "style" or "script", we should:
+
+- Insert the start tag
+- Transition the tokeniser state
+- Mark insertion mode
+- Transition to `Text` mode
+
+So, the code would look something like:
+
+else if (name.equals("style") || name.equals("script")) {
+    tb.insert(startTag);
+    tb.tokeniser.transition(TokeniserState.Rcdata);
+    tb.markInsertionMode();
+    tb.transition(Text);
+}
+
+But wait, in the current code, the handling for "style" is in the `StringUtil.in(name,...)` check, which includes "style" and others. So, perhaps I need to extract "style" and "script" from that list and handle them separately.
+
+Alternatively, perhaps the entire list should be split, handling some tags differently.
+
+But perhaps a better approach is to check if the name is "style" or "script" and handle them like "textarea".
+
+So, modifying the code:
+
+In the `StartTag` case:
+
+else if (name.equals("style") || name.equals("script")) {
+    tb.insert(startTag);
+    tb.tokeniser.transition(TokeniserState.Rcdata);
+    tb.markInsertionMode();
+    tb.transition(Text);
+} else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "title")) {
+    return tb.process(t, InHead);
+}
+
+Wait, but the original code includes "style" in the `StringUtil.in` check. So, moving "style" and "script" to a separate condition would be necessary.
+
+Alternatively, perhaps the `StringUtil.in` list should be split into two parts: one for tags that should transition to `InHead` and others that should transition to `Text`.
+
+But perhaps for now, to fix the issue, I can handle "style" and "script" separately.
+
+So, the plan is:
+
+1. In the `StartTag` case, check if the name is "style" or "script".
+2. If so, insert the start tag, transition the tokeniser to Rcdata, mark insertion mode, and transition to Text mode.
+3. Otherwise, proceed with the existing handling for other tags like "base", "link", etc.
+
+This should ensure that the content inside `<style>` and `<script>` tags is treated as raw text and assigned to the element's data, preventing it from being included in the document's text.
+
+Testing this change should fix the failing test, as the script's content won't be part of the document's text anymore.
+
+So, the modified code would adjust the `StartTag` case to handle "style" and "script" correctly.
+</think>
+
+To fix this issue, we need to ensure that `<style>` and `<script>` tags are handled correctly, so their contents are treated as data and not included in the document's text. 
+
+The problem arises because the current code processes these tags in `InHead` mode, which doesn't correctly capture their content as data. Instead, we should transition to `Text` mode when encountering these tags, similar to how `<textarea>` is handled.
+
+Here is the fixed code:
+
+```java
+boolean process(Token t, TreeBuilder tb) {
+    switch (t.type) {
+        case Character: {
+            Token.Character c = t.asCharacter();
+            if (c.getData().equals(nullString)) {
+                // todo confirm that check
+                tb.error(this);
+                return false;
+            } else if (isWhitespace(c)) {
+                tb.reconstructFormattingElements();
+                tb.insert(c);
+            } else {
+                tb.reconstructFormattingElements();
+                tb.insert(c);
+                tb.framesetOk(false);
+            }
+            break;
+        }
+        case Comment: {
+            tb.insert(t.asComment());
+            break;
+        }
+        case Doctype: {
+            tb.error(this);
+            return false;
+        }
+        case StartTag:
+            Token.StartTag startTag = t.asStartTag();
+            String name = startTag.name();
+            if (name.equals("html")) {
+                tb.error(this);
+                // merge attributes onto real html
+                Element html = tb.getStack().getFirst();
+                for (Attribute attribute : startTag.getAttributes()) {
+                    if (!html.hasAttr(attribute.getKey()))
+                        html.attributes().put(attribute);
+                }
+            } else if (name.equals("style") || name.equals("script")) {
+                tb.insert(startTag);
+                tb.tokeniser.transition(TokeniserState.Rcdata);
+                tb.markInsertionMode();
+                tb.transition(Text);
+            } else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "title")) {
+                return tb.process(t, InHead);
+            } else if (name.equals("body")) {
+                tb.error(this);
+                LinkedList<Element> stack = tb.getStack();
+                if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                    // only in fragment case
+                    return false; // ignore
+                } else {
+                    tb.framesetOk(false);
+                    Element body = stack.get(1);
+                    for (Attribute attribute : startTag.getAttributes()) {
+                        if (!body.hasAttr(attribute.getKey()))
+                            body.attributes().put(attribute);
+                    }
+                }
+            } else if (name.equals("frameset")) {
+                tb.error(this);
+                LinkedList<Element> stack = tb.getStack();
+                if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                    // only in fragment case
+                    return false; // ignore
+                } else if (!tb.framesetOk()) {
+                    return false; // ignore frameset
+                } else {
+                    Element second = stack.get(1);
+                    if (second.parent()!= null)
+                        second.remove();
+                    // pop up to html element
+                    while (stack.size() > 1)
+                        stack.removeLast();
+                    tb.insert(startTag);
+                    tb.transition(InFrameset);
+                }
+            } else if (StringUtil.in(name,
+                    "address", "article", "aside", "blockquote", "center", "details", "dir", "div", "dl",
+                    "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "menu", "nav", "ol",
+                    "p", "section", "summary", "ul")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+            } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                if (StringUtil.in(tb.currentElement().nodeName(), "h1", "h2", "h3", "h4", "h5", "h6")) {
+                    tb.error(this);
+                    tb.pop();
+                }
+                tb.insert(startTag);
+            } else if (StringUtil.in(name, "pre", "listing")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                // todo: ignore LF if next token
+                tb.framesetOk(false);
+            } else if (name.equals("form")) {
+                if (tb.getFormElement()!= null) {
+                    tb.error(this);
+                    return false;
+                }
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                Element form = tb.insert(startTag);
+                tb.setFormElement(form);
+            } else if (name.equals("li")) {
+                tb.framesetOk(false);
+                LinkedList<Element> stack = tb.getStack();
+                for (int i = stack.size() - 1; i > 0; i--) {
+                    Element el = stack.get(i);
+                    if (el.nodeName().equals("li")) {
+                        tb.process(new Token.EndTag("li"));
+                        break;
+                    }
+                    if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                        break;
+                }
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+            } else if (StringUtil.in(name, "dd", "dt")) {
+                tb.framesetOk(false);
+                LinkedList<Element> stack = tb.getStack();
+                for (int i = stack.size() - 1; i > 0; i--) {
+                    Element el = stack.get(i);
+                    if (StringUtil.in(el.nodeName(), "dd", "dt")) {
+                        tb.process(new Token.EndTag(el.nodeName()));
+                        break;
+                    }
+                    if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                        break;
+                }
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+            } else if (name.equals("plaintext")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                tb.tokeniser.transition(TokeniserState.PLAINTEXT); // once in, never gets out
+            } else if (name.equals("button")) {
+                if (tb.inButtonScope("button")) {
+                    // close and reprocess
+                    tb.error(this);
+                    tb.process(new Token.EndTag("button"));
+                    tb.process(startTag);
+                } else {
+                    tb.reconstructFormattingElements();
+                    tb.insert(startTag);
+                    tb.framesetOk(false);
+                }
+            } else if (name.equals("a")) {
+                if (tb.getActiveFormattingElement("a")!= null) {
+                    tb.error(this);
+                    tb.process(new Token.EndTag("a"));
+
+                    // still on stack?
+                    Element remainingA = tb.getFromStack("a");
+                    if (remainingA!= null) {
+                        tb.removeFromActiveFormattingElements(remainingA);
+                        tb.removeFromStack(remainingA);
+                    }
+                }
+                tb.reconstructFormattingElements();
+                Element a = tb.insert(startTag);
+                tb.pushActiveFormattingElements(a);
+            } else if (StringUtil.in(name,
+                    "b", "big", "code", "em", "font", "i", "s", "small", "strike", "strong", "tt", "u")) {
+                tb.reconstructFormattingElements();
+                Element el = tb.insert(startTag);
+                tb.pushActiveFormattingElements(el);
+            } else if (name.equals("nobr")) {
+                tb.reconstructFormattingElements();
+                if (tb.inScope("nobr")) {
+                    tb.error(this);
+                    tb.process(new Token.EndTag("nobr"));
+                    tb.reconstructFormattingElements();
+                }
+                Element el = tb.insert(startTag);
+                tb.pushActiveFormattingElements(el);
+            } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+                tb.insertMarkerToFormattingElements();
+                tb.framesetOk(false);
+            } else if (name.equals("table")) {
+                if (tb.getDocument().quirksMode()!= Document.QuirksMode.quirks && tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insert(startTag);
+                tb.framesetOk(false);
+                tb.transition(InTable);
+            } else if (StringUtil.in(name, "area", "br", "embed", "img", "keygen", "wbr")) {
+                tb.reconstructFormattingElements();
+                tb.insertEmpty(startTag);
+                tb.framesetOk(false);
+            } else if (name.equals("input")) {
+                tb.reconstructFormattingElements();
+                Element el = tb.insertEmpty(startTag);
+                if (!el.attr("type").equalsIgnoreCase("hidden"))
+                    tb.framesetOk(false);
+            } else if (StringUtil.in(name, "param", "source", "track")) {
+                tb.insertEmpty(startTag);
+            } else if (name.equals("hr")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.insertEmpty(startTag);
+                tb.framesetOk(false);
+            } else if (name.equals("image")) {
+                // we're not supposed to ask.
+                startTag.name("img");
+                return tb.process(startTag);
+            } else if (name.equals("isindex")) {
+                // how much do we care about the early 90s?
+                tb.error(this);
+                if (tb.getFormElement()!= null)
+                    return false;
+
+                tb.tokeniser.acknowledgeSelfClosingFlag();
+                tb.process(new Token.StartTag("form"));
+                if (startTag.attributes.hasKey("action")) {
+                    Element form = tb.getFormElement();
+                    form.attr("action", startTag.attributes.get("action"));
+                }
+                tb.process(new Token.StartTag("hr"));
+                tb.process(new Token.StartTag("label"));
+                // hope you like english.
+                String prompt = startTag.attributes.hasKey("prompt")?
+                        startTag.attributes.get("prompt") :
+                        "This is a searchable index. Enter search keywords: ";
+
+                tb.process(new Token.Character(prompt));
+
+                // input
+                Attributes inputAttribs = new Attributes();
+                for (Attribute attr : startTag.attributes) {
+                    if (!StringUtil.in(attr.getKey(), "name", "action", "prompt"))
+                        inputAttribs.put(attr);
+                }
+                inputAttribs.put("name", "isindex");
+                tb.process(new Token.StartTag("input", inputAttribs));
+                tb.process(new Token.EndTag("label"));
+                tb.process(new Token.StartTag("hr"));
+                tb.process(new Token.EndTag("form"));
+            } else if (name.equals("textarea")) {
+                tb.insert(startTag);
+                // todo: If the next token is a U+000A LINE FEED (LF) character token, then ignore that token and move on to the next one. (Newlines at the start of textarea elements are ignored as an authoring convenience.)
+                tb.tokeniser.transition(TokeniserState.Rcdata);
+                tb.markInsertionMode();
+                tb.framesetOk(false);
+                tb.transition(Text);
+            } else if (name.equals("xmp")) {
+                if (tb.inButtonScope("p")) {
+                    tb.process(new Token.EndTag("p"));
+                }
+                tb.reconstructFormattingElements();
+                tb.framesetOk(false);
+                handleRawtext(startTag, tb);
+            } else if (name.equals("iframe")) {
+                tb.framesetOk(false);
+                handleRawtext(startTag, tb);
+            } else if (name.equals("noembed")) {
+                // also handle noscript if script enabled
+                handleRawtext(startTag, tb);
+            } else if (name.equals("select")) {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+                tb.framesetOk(false);
+
+                TreeBuilderState state = tb.state();
+                if (state.equals(InTable) || state.equals(InCaption) || state.equals(InTableBody) || state.equals(InRow) || state.equals(InCell))
+                    tb.transition(InSelectInTable);
+                else
+                    tb.transition(InSelect);
+            } else if (StringUtil.in("optgroup", "option")) {
+                if (tb.currentElement().nodeName().equals("option"))
+                    tb.process(new Token.EndTag("option"));
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+            } else if (StringUtil.in("rp", "rt")) {
+                if (tb.inScope("ruby")) {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals("ruby")) {
+                        tb.error(this);
+                        tb.popStackToBefore("ruby"); // i.e. close up to but not include name
+                    }
+                    tb.insert(startTag);
+                }
+            } else if (name.equals("math")) {
+                tb.reconstructFormattingElements();
+                // todo: handle A start tag whose tag name is "math" (i.e. foreign, mathml)
+                tb.insert(startTag);
+                tb.tokeniser.acknowledgeSelfClosingFlag();
+            } else if (name.equals("svg")) {
+                tb.reconstructFormattingElements();
+                // todo: handle A start tag whose tag name is "svg" (xlink, svg)
+                tb.insert(startTag);
+                tb.tokeniser.acknowledgeSelfClosingFlag();
+            } else if (StringUtil.in(name,
+                    "caption", "col", "colgroup", "frame", "head", "tbody", "td", "tfoot", "th", "thead", "tr")) {
+                tb.error(this);
+                return false;
+            } else {
+                tb.reconstructFormattingElements();
+                tb.insert(startTag);
+            }
+            break;
+
+        case EndTag:
+            Token.EndTag endTag = t.asEndTag();
+            name = endTag.name();
+            if (name.equals("body")) {
+                if (!tb.inScope("body")) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    // todo: error if stack contains something not dd, dt, li, optgroup, option, p, rp, rt, tbody, td, tfoot, th, thead, tr, body, html
+                    tb.transition(AfterBody);
+                }
+            } else if (name.equals("html")) {
+                boolean notIgnored = tb.process(new Token.EndTag("body"));
+                if (notIgnored)
+                    return tb.process(endTag);
+            } else if (StringUtil.in(name,
+                    "address", "article", "aside", "blockquote", "button", "center", "details", "dir", "div",
+                    "dl", "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "listing", "menu",
+                    "nav", "ol", "pre", "section", "summary", "ul")) {
+                // todo: refactor these lookups
+                if (!tb.inScope(name)) {
+                    // nothing to close
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (name.equals("form")) {
+                Element currentForm = tb.getFormElement();
+                tb.setFormElement(null);
+                if (currentForm == null ||!tb.inScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    // remove currentForm from stack. will shift anything under up.
+                    tb.removeFromStack(currentForm);
+                }
+            } else if (name.equals("p")) {
+                if (!tb.inButtonScope(name)) {
+                    tb.error(this);
+                    tb.process(new Token.StartTag(name)); // if no p to close, creates an empty <p></p>
+                    return tb.process(endTag);
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (name.equals("li")) {
+                if (!tb.inListItemScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (StringUtil.in(name, "dd", "dt")) {
+                if (!tb.inScope(name)) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                }
+            } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                if (!tb.inScope(new String[]{"h1", "h2", "h3", "h4", "h5", "h6"})) {
+                    tb.error(this);
+                    return false;
+                } else {
+                    tb.generateImpliedEndTags(name);
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose("h1", "h2", "h3", "h4", "h5", "h6");
+                }
+            } else if (name.equals("sarcasm")) {
+                // *sigh*
+                return anyOtherEndTag(t, tb);
+            } else if (StringUtil.in(name,
+                    "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u")) {
+                // Adoption Agency Algorithm.
+                OUTER:
+                for (int i = 0; i < 8; i++) {
+                    Element formatEl = tb.getActiveFormattingElement(name);
+                    if (formatEl == null)
+                        return anyOtherEndTag(t, tb);
+                    else if (!tb.onStack(formatEl)) {
+                        tb.error(this);
+                        tb.removeFromActiveFormattingElements(formatEl);
+                        return true;
+                    } else if (!tb.inScope(formatEl.nodeName())) {
+                        tb.error(this);
+                        return false;
+                    } else if (tb.currentElement()!= formatEl)
+                        tb.error(this);
+
+                    Element furthestBlock = null;
+                    Element commonAncestor = null;
+                    boolean seenFormattingElement = false;
+                    LinkedList<Element> stack = tb.getStack();
+                    for (int si = 0; si < stack.size(); si++) {
+                        Element el = stack.get(si);
+                        if (el == formatEl) {
+                            commonAncestor = stack.get(si - 1);
+                            seenFormattingElement = true;
+                        } else if (seenFormattingElement && tb.isSpecial(el)) {
+                            furthestBlock = el;
+                            break;
+                        }
+                    }
+                    if (furthestBlock == null) {
+                        tb.popStackToClose(formatEl.nodeName());
+                        tb.removeFromActiveFormattingElements(formatEl);
+                        return true;
+                    }
+
+                    // todo: Let a bookmark note the position of the formatting element in the list of active formatting elements relative to the elements on either side of it in the list.
+                    // does that mean: int pos of format el in list?
+                    Element node = furthestBlock;
+                    Element lastNode = furthestBlock;
+                    INNER:
+                    for (int j = 0; j < 3; j++) {
+                        if (tb.onStack(node))
+                            node = tb.aboveOnStack(node);
+                        if (!tb.isInActiveFormattingElements(node)) { // note no bookmark check
+                            tb.removeFromStack(node);
+                            continue INNER;
+                        } else if (node == formatEl)
+                            break INNER;
+
+                        Element replacement = new Element(Tag.valueOf(node.nodeName()), tb.getBaseUri());
+                        tb.replaceActiveFormattingElement(node, replacement);
+                        tb.replaceOnStack(node, replacement);
+                        node = replacement;
+
+                        if (lastNode == furthestBlock) {
+                            // todo: move the aforementioned bookmark to be immediately after the new node in the list of active formatting elements.
+                            // not getting how this bookmark both straddles the element above, but is inbetween here...
+                        }
+                        if (lastNode.parent()!= null)
+                            lastNode.remove();
+                        node.appendChild(lastNode);
+
+                        lastNode = node;
+                    }
+
+                    if (StringUtil.in(commonAncestor.nodeName(), "table", "tbody", "tfoot", "thead", "tr")) {
+                        if (lastNode.parent()!= null)
+                            lastNode.remove();
+                        tb.insertInFosterParent(lastNode);
+                    } else {
+                        if (lastNode.parent()!= null)
+                            lastNode.remove();
+                        commonAncestor.appendChild(lastNode);
+                    }
+
+                    Element adopter = new Element(Tag.valueOf(name), tb.getBaseUri());
+                    Node[] childNodes = furthestBlock.childNodes().toArray(new Node[furthestBlock.childNodes().size()]);
+                    for (Node childNode : childNodes) {
+                        adopter.appendChild(childNode); // append will reparent. thus the clone to avoid concurrent mod.
+                    }
+                    furthestBlock.appendChild(adopter);
+                    tb.removeFromActiveFormattingElements(formatEl);
+                    // todo: insert the new element into the list of active formatting elements at the position of the aforementioned bookmark.
+                    tb.removeFromStack(formatEl);
+                    tb.insertOnStackAfter(furthestBlock, adopter);
+                }
+            } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                if (!tb.inScope("name")) {
+                    if (!tb.inScope(name)) {
+                        tb.error(this);
+                        return false;
+                    }
+                    tb.generateImpliedEndTags();
+                    if (!tb.currentElement().nodeName().equals(name))
+                        tb.error(this);
+                    tb.popStackToClose(name);
+                    tb.clearFormattingElementsToLastMarker();
+                }
+            } else if (name.equals("br")) {
+                tb.error(this);
+                tb.process(new Token.StartTag("br"));
+                return false;
+            } else {
+                return anyOtherEndTag(t, tb);
+            }
+
+            break;
+        case EOF:
+            // todo: error if stack contains something not dd, dt, li, p, tbody, td, tfoot, th, thead, tr, body, html
+            // stop parsing
+            break;
+    }
+    return true;
+}
+```
+
+The key change is handling `<style>` and `<script>` tags by transitioning to `Text` mode, ensuring their content is treated as raw data and not included in the document's text.
+~~~~~~~~~~~~~~~~~
+Okay, I'm trying to fix this bug in the given Java function. The test that's failing is handlesDataOnlyTags. From the error message, it seems like the parser is not handling script or style tags correctly. The test expects that the data inside these tags is captured properly, and the text outside is parsed without including the script content.
+
+Looking at the code, I see that in the process function, when handling a StartTag, there are cases for "script" and "style". Wait, no, actually, in the provided code, the case for StartTag includes handling of "html", "body", etc., but I don't see specific handling for "script" or "style". That's probably the issue.
+
+In the original code, the StartTag case has an else-if chain. I notice that in the else-if for name.equals("textarea"), it transitions to Text mode. Similarly, for "xmp" and others, it handles raw text. But for "script" and "style", there's no specific handling, so they're probably being processed as normal tags, which would cause their content to be treated as text nodes, leading to the test failure.
+
+So, I need to add cases for "script" and "style" in the StartTag handling. When a StartTag of "script" or "style" is encountered, the parser should switch to a mode where the content is treated as raw text, similar to how "textarea" works.
+
+In the current code, after handling "textarea", it calls tb.tokeniser.transition(TokeniserState.Rcdata). For "script" and "style", I should do something similar. So, I'll add an else-if condition checking if the name is "script" or "style". When that's true, I'll transition the tokeniser to Rcdata state and set the insertion mode to Text.
+
+So, the steps are:
+
+1. In the StartTag case, after the existing conditions, add a new else-if condition to check if the name is "script" or "style".
+2. When this condition is met, call tb.tokeniser.transition(TokeniserState.Rcdata) to handle the content as raw text.
+3. Also, call tb.markInsertionMode() to ensure that the content is inserted correctly.
+4. Set tb.transition(Text) to switch to text mode, so subsequent characters are treated as data.
+
+Adding these changes should make the parser correctly handle script and style tags, capturing their content without parsing it as HTML, which should fix the failing test.
+</think>
+
+To fix this issue, we need to correctly handle `<script>` and `<style>` tags by treating their contents as raw text. This involves transitioning the parser to `TokeniserState.Rcdata` when encountering these tags.
+
+Here is the fixed code:
+
+```java
+        boolean process(Token t, TreeBuilder tb) {
+            switch (t.type) {
+                case Character: {
+                    Token.Character c = t.asCharacter();
+                    if (c.getData().equals(nullString)) {
+                        // todo confirm that check
+                        tb.error(this);
+                        return false;
+                    } else if (isWhitespace(c)) {
+                        tb.reconstructFormattingElements();
+                        tb.insert(c);
+                    } else {
+                        tb.reconstructFormattingElements();
+                        tb.insert(c);
+                        tb.framesetOk(false);
+                    }
+                    break;
+                }
+                case Comment: {
+                    tb.insert(t.asComment());
+                    break;
+                }
+                case Doctype: {
+                    tb.error(this);
+                    return false;
+                }
+                case StartTag:
+                    Token.StartTag startTag = t.asStartTag();
+                    String name = startTag.name();
+                    if (name.equals("html")) {
+                        tb.error(this);
+                        // merge attributes onto real html
+                        Element html = tb.getStack().getFirst();
+                        for (Attribute attribute : startTag.getAttributes()) {
+                            if (!html.hasAttr(attribute.getKey()))
+                                html.attributes().put(attribute);
+                        }
+                    } else if (StringUtil.in(name, "base", "basefont", "bgsound", "command", "link", "meta", "noframes", "style", "title")) {
+                        return tb.process(t, InHead);
+                    } else if (name.equals("body")) {
+                        tb.error(this);
+                        LinkedList<Element> stack = tb.getStack();
+                        if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                            // only in fragment case
+                            return false; // ignore
+                        } else {
+                            tb.framesetOk(false);
+                            Element body = stack.get(1);
+                            for (Attribute attribute : startTag.getAttributes()) {
+                                if (!body.hasAttr(attribute.getKey()))
+                                    body.attributes().put(attribute);
+                            }
+                        }
+                    } else if (name.equals("frameset")) {
+                        tb.error(this);
+                        LinkedList<Element> stack = tb.getStack();
+                        if (stack.size() == 1 || (stack.size() > 2 &&!stack.get(1).nodeName().equals("body"))) {
+                            // only in fragment case
+                            return false; // ignore
+                        } else if (!tb.framesetOk()) {
+                            return false; // ignore frameset
+                        } else {
+                            Element second = stack.get(1);
+                            if (second.parent()!= null)
+                                second.remove();
+                            // pop up to html element
+                            while (stack.size() > 1)
+                                stack.removeLast();
+                            tb.insert(startTag);
+                            tb.transition(InFrameset);
+                        }
+                    } else if (StringUtil.in(name,
+                            "address", "article", "aside", "blockquote", "center", "details", "dir", "div", "dl",
+                            "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "menu", "nav", "ol",
+                            "p", "section", "summary", "ul")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                    } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        if (StringUtil.in(tb.currentElement().nodeName(), "h1", "h2", "h3", "h4", "h5", "h6")) {
+                            tb.error(this);
+                            tb.pop();
+                        }
+                        tb.insert(startTag);
+                    } else if (StringUtil.in(name, "pre", "listing")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                        // todo: ignore LF if next token
+                        tb.framesetOk(false);
+                    } else if (name.equals("form")) {
+                        if (tb.getFormElement()!= null) {
+                            tb.error(this);
+                            return false;
+                        }
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        Element form = tb.insert(startTag);
+                        tb.setFormElement(form);
+                    } else if (name.equals("li")) {
+                        tb.framesetOk(false);
+                        LinkedList<Element> stack = tb.getStack();
+                        for (int i = stack.size() - 1; i > 0; i--) {
+                            Element el = stack.get(i);
+                            if (el.nodeName().equals("li")) {
+                                tb.process(new Token.EndTag("li"));
+                                break;
+                            }
+                            if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                                break;
+                        }
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                    } else if (StringUtil.in(name, "dd", "dt")) {
+                        tb.framesetOk(false);
+                        LinkedList<Element> stack = tb.getStack();
+                        for (int i = stack.size() - 1; i > 0; i--) {
+                            Element el = stack.get(i);
+                            if (StringUtil.in(el.nodeName(), "dd", "dt")) {
+                                tb.process(new Token.EndTag(el.nodeName()));
+                                break;
+                            }
+                            if (tb.isSpecial(el) &&!StringUtil.in(el.nodeName(), "address", "div", "p"))
+                                break;
+                        }
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                    } else if (name.equals("plaintext")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                        tb.tokeniser.transition(TokeniserState.PLAINTEXT); // once in, never gets out
+                    } else if (name.equals("button")) {
+                        if (tb.inButtonScope("button")) {
+                            // close and reprocess
+                            tb.error(this);
+                            tb.process(new Token.EndTag("button"));
+                            tb.process(startTag);
+                        } else {
+                            tb.reconstructFormattingElements();
+                            tb.insert(startTag);
+                            tb.framesetOk(false);
+                        }
+                    } else if (name.equals("a")) {
+                        if (tb.getActiveFormattingElement("a")!= null) {
+                            tb.error(this);
+                            tb.process(new Token.EndTag("a"));
+
+                            // still on stack?
+                            Element remainingA = tb.getFromStack("a");
+                            if (remainingA!= null) {
+                                tb.removeFromActiveFormattingElements(remainingA);
+                                tb.removeFromStack(remainingA);
+                            }
+                        }
+                        tb.reconstructFormattingElements();
+                        Element a = tb.insert(startTag);
+                        tb.pushActiveFormattingElements(a);
+                    } else if (StringUtil.in(name,
+                            "b", "big", "code", "em", "font", "i", "s", "small", "strike", "strong", "tt", "u")) {
+                        tb.reconstructFormattingElements();
+                        Element el = tb.insert(startTag);
+                        tb.pushActiveFormattingElements(el);
+                    } else if (name.equals("nobr")) {
+                        tb.reconstructFormattingElements();
+                        if (tb.inScope("nobr")) {
+                            tb.error(this);
+                            tb.process(new Token.EndTag("nobr"));
+                            tb.reconstructFormattingElements();
+                        }
+                        Element el = tb.insert(startTag);
+                        tb.pushActiveFormattingElements(el);
+                    } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                        tb.reconstructFormattingElements();
+                        tb.insert(startTag);
+                        tb.insertMarkerToFormattingElements();
+                        tb.framesetOk(false);
+                    } else if (name.equals("table")) {
+                        if (tb.getDocument().quirksMode()!= Document.QuirksMode.quirks && tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insert(startTag);
+                        tb.framesetOk(false);
+                        tb.transition(InTable);
+                    } else if (StringUtil.in(name, "area", "br", "embed", "img", "keygen", "wbr")) {
+                        tb.reconstructFormattingElements();
+                        tb.insertEmpty(startTag);
+                        tb.framesetOk(false);
+                    } else if (name.equals("input")) {
+                        tb.reconstructFormattingElements();
+                        Element el = tb.insertEmpty(startTag);
+                        if (!el.attr("type").equalsIgnoreCase("hidden"))
+                            tb.framesetOk(false);
+                    } else if (StringUtil.in(name, "param", "source", "track")) {
+                        tb.insertEmpty(startTag);
+                    } else if (name.equals("hr")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.insertEmpty(startTag);
+                        tb.framesetOk(false);
+                    } else if (name.equals("image")) {
+                        // we're not supposed to ask.
+                        startTag.name("img");
+                        return tb.process(startTag);
+                    } else if (name.equals("isindex")) {
+                        // how much do we care about the early 90s?
+                        tb.error(this);
+                        if (tb.getFormElement()!= null)
+                            return false;
+
+                        tb.tokeniser.acknowledgeSelfClosingFlag();
+                        tb.process(new Token.StartTag("form"));
+                        if (startTag.attributes.hasKey("action")) {
+                            Element form = tb.getFormElement();
+                            form.attr("action", startTag.attributes.get("action"));
+                        }
+                        tb.process(new Token.StartTag("hr"));
+                        tb.process(new Token.StartTag("label"));
+                        // hope you like english.
+                        String prompt = startTag.attributes.hasKey("prompt")?
+                                startTag.attributes.get("prompt") :
+                                "This is a searchable index. Enter search keywords: ";
+
+                        tb.process(new Token.Character(prompt));
+
+                        // input
+                        Attributes inputAttribs = new Attributes();
+                        for (Attribute attr : startTag.attributes) {
+                            if (!StringUtil.in(attr.getKey(), "name", "action", "prompt"))
+                                inputAttribs.put(attr);
+                        }
+                        inputAttribs.put("name", "isindex");
+                        tb.process(new Token.StartTag("input", inputAttribs));
+                        tb.process(new Token.EndTag("label"));
+                        tb.process(new Token.StartTag("hr"));
+                        tb.process(new Token.EndTag("form"));
+                    } else if (name.equals("textarea")) {
+                        tb.insert(startTag);
+                        // todo: If the next token is a U+000A LINE FEED (LF) character token, then ignore that token and move on to the next one. (Newlines at the start of textarea elements are ignored as an authoring convenience.)
+                        tb.tokeniser.transition(TokeniserState.Rcdata);
+                        tb.markInsertionMode();
+                        tb.framesetOk(false);
+                        tb.transition(Text);
+                    } else if (name.equals("xmp")) {
+                        if (tb.inButtonScope("p")) {
+                            tb.process(new Token.EndTag("p"));
+                        }
+                        tb.reconstructFormattingElements();
+                        tb.framesetOk(false);
+                        handleRawtext(startTag, tb);
+                    } else if (name.equals("iframe")) {
+                        tb.framesetOk(false);
+                        handleRawtext(startTag, tb);
+                    } else if (name.equals("noembed")) {
+                        // also handle noscript if script enabled
+                        handleRawtext(startTag, tb);
+                    } else if (name.equals("select")) {
+                        tb.reconstructFormattingElements();
+                        tb.insert(startTag);
+                        tb.framesetOk(false);
+
+                        TreeBuilderState state = tb.state();
+                        if (state.equals(InTable) || state.equals(InCaption) || state.equals(InTableBody) || state.equals(InRow) || state.equals(InCell))
+                            tb.transition(InSelectInTable);
+                        else
+                            tb.transition(InSelect);
+                    } else if (StringUtil.in("optgroup", "option")) {
+                        if (tb.currentElement().nodeName().equals("option"))
+                            tb.process(new Token.EndTag("option"));
+                        tb.reconstructFormattingElements();
+                        tb.insert(startTag);
+                    } else if (StringUtil.in("rp", "rt")) {
+                        if (tb.inScope("ruby")) {
+                            tb.generateImpliedEndTags();
+                            if (!tb.currentElement().nodeName().equals("ruby")) {
+                                tb.error(this);
+                                tb.popStackToBefore("ruby"); // i.e. close up to but not include name
+                            }
+                            tb.insert(startTag);
+                        }
+                    } else if (name.equals("math")) {
+                        tb.reconstructFormattingElements();
+                        // todo: handle A start tag whose tag name is "math" (i.e. foreign, mathml)
+                        tb.insert(startTag);
+                        tb.tokeniser.acknowledgeSelfClosingFlag();
+                    } else if (name.equals("svg")) {
+                        tb.reconstructFormattingElements();
+                        // todo: handle A start tag whose tag name is "svg" (xlink, svg)
+                        tb.insert(startTag);
+                        tb.tokeniser.acknowledgeSelfClosingFlag();
+                    } else if (StringUtil.in(name,
+                            "caption", "col", "colgroup", "frame", "head", "tbody", "td", "tfoot", "th", "thead", "tr")) {
+                        tb.error(this);
+                        return false;
+                    } else if (StringUtil.in(name, "script", "style")) {
+                        tb.tokeniser.transition(TokeniserState.Rcdata);
+                        tb.markInsertionMode();
+                        tb.framesetOk(false);
+                        tb.transition(Text);
+                    } else {
+                        tb.reconstructFormattingElements();
+                        tb.insert(startTag);
+                    }
+                    break;
+
+                case EndTag:
+                    Token.EndTag endTag = t.asEndTag();
+                    name = endTag.name();
+                    if (name.equals("body")) {
+                        if (!tb.inScope("body")) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            // todo: error if stack contains something not dd, dt, li, optgroup, option, p, rp, rt, tbody, td, tfoot, th, thead, tr, body, html
+                            tb.transition(AfterBody);
+                        }
+                    } else if (name.equals("html")) {
+                        boolean notIgnored = tb.process(new Token.EndTag("body"));
+                        if (notIgnored)
+                            return tb.process(endTag);
+                    } else if (StringUtil.in(name,
+                            "address", "article", "aside", "blockquote", "button", "center", "details", "dir", "div",
+                            "dl", "fieldset", "figcaption", "figure", "footer", "header", "hgroup", "listing", "menu",
+                            "nav", "ol", "pre", "section", "summary", "ul")) {
+                        // todo: refactor these lookups
+                        if (!tb.inScope(name)) {
+                            // nothing to close
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags();
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                        }
+                    } else if (name.equals("form")) {
+                        Element currentForm = tb.getFormElement();
+                        tb.setFormElement(null);
+                        if (currentForm == null ||!tb.inScope(name)) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags();
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            // remove currentForm from stack. will shift anything under up.
+                            tb.removeFromStack(currentForm);
+                        }
+                    } else if (name.equals("p")) {
+                        if (!tb.inButtonScope(name)) {
+                            tb.error(this);
+                            tb.process(new Token.StartTag(name)); // if no p to close, creates an empty <p></p>
+                            return tb.process(endTag);
+                        } else {
+                            tb.generateImpliedEndTags(name);
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                        }
+                    } else if (name.equals("li")) {
+                        if (!tb.inListItemScope(name)) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags(name);
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                        }
+                    } else if (StringUtil.in(name, "dd", "dt")) {
+                        if (!tb.inScope(name)) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags(name);
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                        }
+                    } else if (StringUtil.in(name, "h1", "h2", "h3", "h4", "h5", "h6")) {
+                        if (!tb.inScope(new String[]{"h1", "h2", "h3", "h4", "h5", "h6"})) {
+                            tb.error(this);
+                            return false;
+                        } else {
+                            tb.generateImpliedEndTags(name);
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose("h1", "h2", "h3", "h4", "h5", "h6");
+                        }
+                    } else if (name.equals("sarcasm")) {
+                        // *sigh*
+                        return anyOtherEndTag(t, tb);
+                    } else if (StringUtil.in(name,
+                            "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u")) {
+                        // Adoption Agency Algorithm.
+                        OUTER:
+                        for (int i = 0; i < 8; i++) {
+                            Element formatEl = tb.getActiveFormattingElement(name);
+                            if (formatEl == null)
+                                return anyOtherEndTag(t, tb);
+                            else if (!tb.onStack(formatEl)) {
+                                tb.error(this);
+                                tb.removeFromActiveFormattingElements(formatEl);
+                                return true;
+                            } else if (!tb.inScope(formatEl.nodeName())) {
+                                tb.error(this);
+                                return false;
+                            } else if (tb.currentElement()!= formatEl)
+                                tb.error(this);
+
+                            Element furthestBlock = null;
+                            Element commonAncestor = null;
+                            boolean seenFormattingElement = false;
+                            LinkedList<Element> stack = tb.getStack();
+                            for (int si = 0; si < stack.size(); si++) {
+                                Element el = stack.get(si);
+                                if (el == formatEl) {
+                                    commonAncestor = stack.get(si - 1);
+                                    seenFormattingElement = true;
+                                } else if (seenFormattingElement && tb.isSpecial(el)) {
+                                    furthestBlock = el;
+                                    break;
+                                }
+                            }
+                            if (furthestBlock == null) {
+                                tb.popStackToClose(formatEl.nodeName());
+                                tb.removeFromActiveFormattingElements(formatEl);
+                                return true;
+                            }
+
+                            // todo: Let a bookmark note the position of the formatting element in the list of active formatting elements relative to the elements on either side of it in the list.
+                            // does that mean: int pos of format el in list?
+                            Element node = furthestBlock;
+                            Element lastNode = furthestBlock;
+                            INNER:
+                            for (int j = 0; j < 3; j++) {
+                                if (tb.onStack(node))
+                                    node = tb.aboveOnStack(node);
+                                if (!tb.isInActiveFormattingElements(node)) { // note no bookmark check
+                                    tb.removeFromStack(node);
+                                    continue INNER;
+                                } else if (node == formatEl)
+                                    break INNER;
+
+                                Element replacement = new Element(Tag.valueOf(node.nodeName()), tb.getBaseUri());
+                                tb.replaceActiveFormattingElement(node, replacement);
+                                tb.replaceOnStack(node, replacement);
+                                node = replacement;
+
+                                if (lastNode == furthestBlock) {
+                                    // todo: move the aforementioned bookmark to be immediately after the new node in the list of active formatting elements.
+                                    // not getting how this bookmark both straddles the element above, but is inbetween here...
+                                }
+                                if (lastNode.parent()!= null)
+                                    lastNode.remove();
+                                node.appendChild(lastNode);
+
+                                lastNode = node;
+                            }
+
+                            if (StringUtil.in(commonAncestor.nodeName(), "table", "tbody", "tfoot", "thead", "tr")) {
+                                if (lastNode.parent()!= null)
+                                    lastNode.remove();
+                                tb.insertInFosterParent(lastNode);
+                            } else {
+                                if (lastNode.parent()!= null)
+                                    lastNode.remove();
+                                commonAncestor.appendChild(lastNode);
+                            }
+
+                            Element adopter = new Element(Tag.valueOf(name), tb.getBaseUri());
+                            Node[] childNodes = furthestBlock.childNodes().toArray(new Node[furthestBlock.childNodes().size()]);
+                            for (Node childNode : childNodes) {
+                                adopter.appendChild(childNode); // append will reparent. thus the clone to avvoid concurrent mod.
+                            }
+                            furthestBlock.appendChild(adopter);
+                            tb.removeFromActiveFormattingElements(formatEl);
+                            // todo: insert the new element into the list of active formatting elements at the position of the aforementioned bookmark.
+                            tb.removeFromStack(formatEl);
+                            tb.insertOnStackAfter(furthestBlock, adopter);
+                        }
+                    } else if (StringUtil.in(name, "applet", "marquee", "object")) {
+                        if (!tb.inScope("name")) {
+                            if (!tb.inScope(name)) {
+                                tb.error(this);
+                                return false;
+                            }
+                            tb.generateImpliedEndTags();
+                            if (!tb.currentElement().nodeName().equals(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                            tb.clearFormattingElementsToLastMarker();
+                        }
+                    } else if (name.equals("br")) {
+                        tb.error(this);
+                        tb.process(new Token.StartTag("br"));
+                        return false;
+                    } else {
+                        return anyOtherEndTag(t, tb);
+                    }
+
+                    break;
+                case EOF:
+                    // todo: error if stack contains something not dd, dt, li, p, tbody, td, tfoot, th, thead, tr, body, html
+                    // stop parsing
+                    break;
+            }
+            return true;
+        }
+```
+~~~~~~~~~~~~~~~~~

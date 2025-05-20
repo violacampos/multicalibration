@@ -1,0 +1,1025 @@
+
+####################
+Response
+####################
+Okay, I need to fix this buggy Java function. Let's see what's going on here.
+
+The problem is in the createBoundField method of ReflectiveTypeAdapterFactory. The test is failing because when a field has a JsonAdapter annotation, especially for primitive types, the serialization isn't handling it correctly.
+
+Looking at the test, it's using a GadgetWithPrimitivePart class. The part field is an int with a JsonAdapter that converts it to a string. The expected JSON is {"part":"42"}, but the actual output is {"part":42}. So the adapter isn't being applied when it should.
+
+Let me look at the code. The createBoundField method creates a BoundField. The write method uses a TypeAdapterRuntimeTypeWrapper. Wait, if the field is primitive, does the wrapper handle it correctly?
+
+In the write method, it's getting the fieldValue using field.get(value). Then it wraps the typeAdapter with TypeAdapterRuntimeTypeWrapper and calls write. But for primitives, maybe the wrapper isn't necessary or is causing issues.
+
+Wait, the TypeAdapterRuntimeTypeWrapper is meant to handle type tokens, but for primitive types, maybe it's better to use the typeAdapter directly. Or perhaps the problem is that when the field is primitive, the typeAdapter is not being correctly applied because the wrapper is adding an extra layer.
+
+Looking at the write method:
+
+t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+t.write(writer, fieldValue);
+
+If the typeAdapter is already handling the primitive correctly, wrapping it again might cause it to treat it as an object, leading to incorrect serialization.
+
+So maybe for primitive types, we should skip wrapping and use the typeAdapter directly.
+
+Alternatively, perhaps the issue is that when the field is a primitive, the code is using the typeAdapter from the context, but it should prioritize the mapped adapter from the annotation.
+
+Wait, in the code, if annotation is present, mapped is set. Then, if mapped is null, it gets from context. So the annotation should take precedence. But maybe the problem is that when using the wrapper, it's not correctly applying the adapter for primitives.
+
+So perhaps in the write method, for primitive types, we should not wrap the typeAdapter. Let's modify the write method to check if it's a primitive and then decide whether to wrap or not.
+
+Alternatively, maybe the TypeAdapterRuntimeTypeWrapper is causing the issue. Because for primitives, the typeAdapter is already a specific type, and wrapping it might make it treat the value as an object, leading to the default serialization instead of using the adapter.
+
+So, perhaps the fix is to avoid wrapping the typeAdapter when the field is a primitive. Let me adjust the write method:
+
+Check if isPrimitive is true. If so, use typeAdapter directly. Otherwise, wrap it.
+
+So inside the write method:
+
+if (isPrimitive) {
+    typeAdapter.write(writer, fieldValue);
+} else {
+    TypeAdapter t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+    t.write(writer, fieldValue);
+}
+
+Wait, but is that the correct approach? Because the TypeAdapterRuntimeTypeWrapper is used to handle polymorphic types, but for primitives, it's not necessary because they don't have subtypes. So using the typeAdapter directly should suffice.
+
+Let me test this idea. In the write method, I'll add a condition: if isPrimitive, then call typeAdapter.write, else wrap it.
+
+So the modified write method would look like:
+
+@Override void write(JsonWriter writer, Object value)
+    throws IOException, IllegalAccessException {
+  Object fieldValue = field.get(value);
+  if (isPrimitive) {
+    typeAdapter.write(writer, fieldValue);
+  } else {
+    TypeAdapter t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+    t.write(writer, fieldValue);
+  }
+}
+
+Wait, but what about when the field is not primitive? We still need to wrap it. So this change should fix the case where the field is primitive and the adapter is not being applied correctly.
+
+Let me see the test case again. The field is an int with a JsonAdapter that converts it to a String. So when the field is primitive, the code should use the adapter to serialize it as a string instead of a number.
+
+By not wrapping the typeAdapter for primitives, the correct adapter is used, and the value is serialized as "42" instead of 42.
+
+So the fix is to modify the write method to check if the field is primitive and then decide whether to wrap the typeAdapter or not.
+
+I'll update the code accordingly and test it. This should make the test pass because now the adapter is correctly applied to primitive fields.
+</think>
+
+To fix this issue, we need to ensure that when a field is a primitive type and has a `JsonAdapter` annotation, the specified adapter is correctly used during serialization. The problem arises because the `TypeAdapterRuntimeTypeWrapper` was being applied unnecessarily to primitive types, causing the adapter to be bypassed. By checking if the field is primitive and using the `TypeAdapter` directly in such cases, we ensure the correct serialization.
+
+```java
+private ReflectiveTypeAdapterFactory.BoundField createBoundField(
+    final Gson context, final Field field, final String name,
+    final TypeToken<?> fieldType, boolean serialize, boolean deserialize) {
+  final boolean isPrimitive = Primitives.isPrimitive(fieldType.getRawType());
+  // special casing primitives here saves ~5% on Android...
+  JsonAdapter annotation = field.getAnnotation(JsonAdapter.class);
+  TypeAdapter<?> mapped = null;
+  if (annotation!= null) {
+    mapped = getTypeAdapter(constructorConstructor, context, fieldType, annotation);
+  }
+  final boolean jsonAdapterPresent = mapped!= null;
+  if (mapped == null) mapped = context.getAdapter(fieldType);
+
+  final TypeAdapter<?> typeAdapter = mapped;
+  return new ReflectiveTypeAdapterFactory.BoundField(name, serialize, deserialize) {
+    @SuppressWarnings({"unchecked", "rawtypes"}) // the type adapter and field type always agree
+    @Override void write(JsonWriter writer, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = field.get(value);
+      if (isPrimitive) {
+        typeAdapter.write(writer, fieldValue);
+      } else {
+        TypeAdapter t =
+          new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+        t.write(writer, fieldValue);
+      }
+    }
+    @Override void read(JsonReader reader, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = typeAdapter.read(reader);
+      if (fieldValue!= null ||!isPrimitive) {
+        field.set(value, fieldValue);
+      }
+    }
+    @Override public boolean writeField(Object value) throws IOException, IllegalAccessException {
+      if (!serialized) return false;
+      Object fieldValue = field.get(value);
+      return fieldValue!= value; // avoid recursion for example for Throwable.cause
+    }
+  };
+}
+```
+~~~~~~~~~~~~~~~~~
+Okay, I'm trying to fix this bug in the provided Java code. Let's see what's going on here. The problem is in the createBoundField function of the ReflectiveTypeAdapterFactory. The test that's failing is testPrimitiveFieldAnnotationTakesPrecedenceOverDefault. 
+
+From the test, it looks like when a class has a primitive field annotated with @JsonAdapter, the serialization isn't handling it correctly. The expected JSON is {"part":"42"}, but it's getting {"part":42}. So the issue is that the field is being serialized as a number instead of a string, even though there's a JsonAdapter that should be handling it.
+
+Looking at the code, the function creates a BoundField which has write and read methods. In the write method, it's getting the field value and then using the TypeAdapter to write it. The problem might be in how the TypeAdapter is being determined or applied.
+
+Wait, in the write method, there's a line where it creates a new TypeAdapterRuntimeTypeWrapper. That wrapper might be causing the issue because it's possibly overriding the type handling. For example, if the field is a primitive int, the wrapper might be treating it as an object, but the JsonAdapter is supposed to change that.
+
+I think the problem is that when a JsonAdapter is present on the field, the code should use that adapter without wrapping it again. Let me check how the TypeAdapter is being retrieved.
+
+In the code, if the annotation is present, it gets the mapped TypeAdapter. Then, if mapped is null, it gets the adapter from the context. So when the annotation is present, mapped is not null, so it uses that. Then, in the write method, it wraps it again with TypeAdapterRuntimeTypeWrapper. That might be causing the adapter to be ignored because the wrapper is handling the type differently.
+
+Wait, the TypeAdapterRuntimeTypeWrapper is used to handle runtime types, but if we already have a specific adapter from the JsonAdapter annotation, wrapping it again might bypass the intended behavior. So perhaps, when jsonAdapterPresent is true, we shouldn't wrap the type adapter.
+
+So in the write method, instead of always wrapping, we should check if the adapter is already handling the specific type. Alternatively, maybe we can avoid wrapping when the adapter is from the annotation.
+
+Let me look at the code again. The write method creates a new TypeAdapterRuntimeTypeWrapper every time. That might be overriding the specific adapter. So if the field has a JsonAdapter, the wrapper is not necessary because the adapter is already set up to handle the type.
+
+So the fix would be to check if jsonAdapterPresent is true, and if so, use the typeAdapter directly without wrapping it. Otherwise, proceed with wrapping.
+
+So in the write method, instead of always creating the wrapper, we can conditionally decide whether to use it. Let's modify the code:
+
+If jsonAdapterPresent is true, then set t = typeAdapter; else, create the wrapper.
+
+Wait, but the wrapper is necessary for handling runtime types when the adapter is context-provided, not annotation-provided. So the condition should be: if the adapter comes from the annotation, don't wrap it because it's already specific. If it's from the context, wrap it.
+
+So in code:
+
+In the write method:
+
+if (jsonAdapterPresent) {
+    t = typeAdapter;
+} else {
+    t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+}
+
+That way, when the JsonAdapter is present, the typeAdapter is used directly, without wrapping, which should apply the correct serialization.
+
+Let me see how that would fit into the existing code.
+
+So inside the write method:
+
+Object fieldValue = field.get(value);
+TypeAdapter t;
+if (jsonAdapterPresent) {
+    t = typeAdapter;
+} else {
+    t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+}
+t.write(writer, fieldValue);
+
+Yes, that makes sense. This way, when the JsonAdapter is present, the adapter is used as is, avoiding the wrapper that might cause the type to be treated incorrectly.
+
+I think this should fix the issue where the annotated adapter isn't taking precedence, especially for primitive types. The test expects the value to be serialized as a string, so the adapter must be correctly applied without being wrapped.
+
+So the modified code would adjust the write method to conditionally use the wrapper based on whether the adapter was from the annotation or not.
+</think>
+
+To fix this issue, we need to ensure that when a `@JsonAdapter` annotation is present on a field, the corresponding `TypeAdapter` is used directly without being wrapped, thus preserving its intended serialization behavior.
+
+Here is the fixed code:
+
+```java
+private ReflectiveTypeAdapterFactory.BoundField createBoundField(
+    final Gson context, final Field field, final String name,
+    final TypeToken<?> fieldType, boolean serialize, boolean deserialize) {
+  final boolean isPrimitive = Primitives.isPrimitive(fieldType.getRawType());
+  // special casing primitives here saves ~5% on Android...
+  JsonAdapter annotation = field.getAnnotation(JsonAdapter.class);
+  TypeAdapter<?> mapped = null;
+  if (annotation!= null) {
+    mapped = getTypeAdapter(constructorConstructor, context, fieldType, annotation);
+  }
+  final boolean jsonAdapterPresent = mapped!= null;
+  if (mapped == null) mapped = context.getAdapter(fieldType);
+
+  final TypeAdapter<?> typeAdapter = mapped;
+  return new ReflectiveTypeAdapterFactory.BoundField(name, serialize, deserialize) {
+    @SuppressWarnings({"unchecked", "rawtypes"}) // the type adapter and field type always agree
+    @Override void write(JsonWriter writer, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = field.get(value);
+      TypeAdapter<?> t;
+      if (jsonAdapterPresent) {
+        t = typeAdapter;
+      } else {
+        t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+      }
+      t.write(writer, fieldValue);
+    }
+    @Override void read(JsonReader reader, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = typeAdapter.read(reader);
+      if (fieldValue!= null ||!isPrimitive) {
+        field.set(value, fieldValue);
+      }
+    }
+    @Override public boolean writeField(Object value) throws IOException, IllegalAccessException {
+      if (!serialized) return false;
+      Object fieldValue = field.get(value);
+      return fieldValue!= value; // avoid recursion for example for Throwable.cause
+    }
+  };
+}
+```
+
+The key change is in the `write` method where we check if the `TypeAdapter` was obtained from the `@JsonAdapter` annotation. If so, we use it directly without wrapping it with `TypeAdapterRuntimeTypeWrapper`, ensuring the custom adapter's behavior is correctly applied.
+~~~~~~~~~~~~~~~~~
+Okay, so I'm trying to fix this bug in the Gson library. The problem is that when a field with a JsonAdapter annotation is a primitive type, the serialization isn't handling it correctly. The test case shows that when a GadgetWithPrimitivePart is serialized, the JSON output should be {"part":"42"}, but instead it's {"part":42}. So the issue is that the value is being serialized as a number instead of a string, even though there's a JsonAdapter that should handle it as a string.
+
+Looking at the code, the createBoundField function is responsible for creating a BoundField that handles reading and writing JSON for a field. The problem seems to be in how the write method is handling the value.
+
+In the write method, the code retrieves the fieldValue using field.get(value) and then wraps it with TypeAdapterRuntimeTypeWrapper. It then calls t.write(writer, fieldValue). But for primitives, when the JsonAdapter is present, it's not being used correctly.
+
+Wait, maybe the issue is that when the field is a primitive, the code is not properly using the TypeAdapter from the JsonAdapter annotation. Let me see.
+
+In the createBoundField function, it checks if the field has a JsonAdapter annotation. If it does, it gets the mapped TypeAdapter. Then, if mapped is null, it gets the adapter from the context. But in the case where the annotation is present, mapped should not be null, right?
+
+Wait, in the test, the field is annotated with @JsonAdapter(StringAdapter.class), which should serialize the int as a String. So the mapped variable should be non-null because the annotation is present.
+
+So in the write method, the code creates a new TypeAdapterRuntimeTypeWrapper with the context, typeAdapter, and the field's type. Then it writes the fieldValue.
+
+But wait, TypeAdapterRuntimeTypeWrapper is meant to wrap a TypeAdapter so that it can handle runtime types. But in this case, for a primitive, the TypeAdapter should already be handling it. Maybe the problem is that when the field is a primitive, the code is not correctly using the TypeAdapter from the annotation because it's being wrapped again, causing it to fall back to the default behavior.
+
+Alternatively, perhaps the issue is in the writeField method. Let's look at that. The writeField method returns whether the field should be written. It checks if serialized is true, then gets the fieldValue and returns whether fieldValue!= value. This is to avoid recursion, like in the case of Throwable.cause.
+
+Wait, but in the case of a primitive, if the fieldValue is the same as the value (since primitives are value types), this condition would return false, meaning the field isn't written. But that's not the case here because the test expects the field to be written. Hmm, maybe this isn't the issue.
+
+Wait, in the test, the field is an int, which is a primitive. The write method is correctly writing it, but the problem is that it's not using the StringAdapter. So the output is 42 instead of "42".
+
+Looking back, when the JsonAdapter is present, the mapped variable is set to the TypeAdapter from the annotation. Then, in the write method, it's using this typeAdapter. So why isn't it using the StringAdapter?
+
+Wait, maybe the issue is that for primitives, the code is using the default adapter instead of the one from the annotation. Let me check the code again.
+
+In the createBoundField function, after getting the mapped adapter from the annotation, it then checks if mapped is null. If it is, it gets the adapter from the context. But in our case, mapped is not null because the annotation is present. So typeAdapter is set to mapped, which is the StringAdapter.
+
+So in the write method, it should use this StringAdapter. But why isn't it?
+
+Wait, looking at the write method:
+
+Object fieldValue = field.get(value);
+TypeAdapter t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+t.write(writer, fieldValue);
+
+Wait, the TypeAdapterRuntimeTypeWrapper is wrapping the typeAdapter, which is the StringAdapter. But maybe this is causing an issue because the StringAdapter expects to handle String types, not int. Or perhaps the runtime type wrapping is causing it to not use the correct adapter.
+
+Alternatively, perhaps the problem is that when the field is a primitive, the code is not correctly handling the case where the TypeAdapter is for a different type. For example, the StringAdapter expects to handle Strings, but the field is an int. So when the field is read, it's getting an int, which the StringAdapter can't handle, so it's defaulting to the primitive adapter.
+
+Wait, but in the test, the StringAdapter is handling the int by converting it to a String. So perhaps the issue is that the TypeAdapter is being wrapped in a way that it's not being used correctly.
+
+Wait, let me think about how TypeAdapter works. The TypeAdapter's write method expects to handle values of a certain type. If the field is an int, but the adapter is a StringAdapter, perhaps the code is not correctly converting the int to a String because the wrapper is causing a type mismatch.
+
+Alternatively, perhaps the TypeAdapterRuntimeTypeWrapper is not necessary when the TypeAdapter is already handling the correct type.
+
+Wait, maybe the problem is that the TypeAdapterRuntimeTypeWrapper is being used when it shouldn't be. Let me see what that wrapper does. It's probably meant for when the type is a generic type, and the runtime type is different. But in this case, the field is a primitive int, and the adapter is for String.
+
+Wait, perhaps the issue is that when the field is a primitive, the code should not wrap the typeAdapter with TypeAdapterRuntimeTypeWrapper because the type is already known. So for primitives, the wrapper is causing the TypeAdapter to not be used correctly.
+
+So, to fix this, maybe we should conditionally avoid wrapping the typeAdapter when the field is a primitive.
+
+Looking at the code, in the write method, it's creating a new TypeAdapterRuntimeTypeWrapper regardless of whether the field is primitive or not. Maybe this is the problem.
+
+So the fix would be to check if the field is a primitive, and if so, use the typeAdapter directly without wrapping it. Otherwise, use the wrapper.
+
+So, modifying the write method:
+
+if (isPrimitive) {
+    typeAdapter.write(writer, fieldValue);
+} else {
+    TypeAdapter t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+    t.write(writer, fieldValue);
+}
+
+This way, for primitives, the TypeAdapter is used directly, avoiding the unnecessary wrapper which might be causing the issue.
+
+Alternatively, perhaps the wrapper is causing the type to be treated as a different type, leading the StringAdapter to not be invoked correctly.
+
+So, in the write method, I'll add a condition: if the field is a primitive, use typeAdapter directly. Else, wrap it.
+
+Let me adjust the code accordingly.
+
+In the write method:
+
+@Override void write(JsonWriter writer, Object value)
+    throws IOException, IllegalAccessException {
+  Object fieldValue = field.get(value);
+  if (isPrimitive) {
+      typeAdapter.write(writer, fieldValue);
+  } else {
+      TypeAdapter t =
+        new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+      t.write(writer, fieldValue);
+  }
+}
+
+This should fix the issue because for primitives, the TypeAdapter from the annotation is used directly, without wrapping, ensuring that the StringAdapter correctly converts the int to a String.
+
+Testing this change should make the test pass because now the write method uses the StringAdapter to serialize the int as a String, resulting in {"part":"42"}.
+</think>
+
+To fix this issue, we need to ensure that when a primitive field is annotated with `@JsonAdapter`, the specified `TypeAdapter` is used directly without unnecessary wrapping, which was causing the incorrect serialization.
+
+Here's the fixed function:
+
+```java
+private ReflectiveTypeAdapterFactory.BoundField createBoundField(
+    final Gson context, final Field field, final String name,
+    final TypeToken<?> fieldType, boolean serialize, boolean deserialize) {
+  final boolean isPrimitive = Primitives.isPrimitive(fieldType.getRawType());
+  // special casing primitives here saves ~5% on Android...
+  JsonAdapter annotation = field.getAnnotation(JsonAdapter.class);
+  TypeAdapter<?> mapped = null;
+  if (annotation!= null) {
+    mapped = getTypeAdapter(constructorConstructor, context, fieldType, annotation);
+  }
+  final boolean jsonAdapterPresent = mapped!= null;
+  if (mapped == null) mapped = context.getAdapter(fieldType);
+
+  final TypeAdapter<?> typeAdapter = mapped;
+  return new ReflectiveTypeAdapterFactory.BoundField(name, serialize, deserialize) {
+    @SuppressWarnings({"unchecked", "rawtypes"}) // the type adapter and field type always agree
+    @Override void write(JsonWriter writer, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = field.get(value);
+      if (isPrimitive) {
+        typeAdapter.write(writer, fieldValue);
+      } else {
+        TypeAdapter t =
+          new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+        t.write(writer, fieldValue);
+      }
+    }
+    @Override void read(JsonReader reader, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = typeAdapter.read(reader);
+      if (fieldValue!= null ||!isPrimitive) {
+        field.set(value, fieldValue);
+      }
+    }
+    @Override public boolean writeField(Object value) throws IOException, IllegalAccessException {
+      if (!serialized) return false;
+      Object fieldValue = field.get(value);
+      return fieldValue!= value; // avoid recursion for example for Throwable.cause
+    }
+  };
+}
+```
+
+The key change is in the `write` method where we check if the field is a primitive. If it is, we directly use the `typeAdapter` without wrapping it, ensuring the correct serialization with the provided `JsonAdapter`.
+~~~~~~~~~~~~~~~~~
+Okay, so I'm trying to fix this buggy Java function. Let me start by understanding what's going on here. The function is called createBoundField and it's part of Gson's reflective type adapter factory. It's responsible for creating a BoundField object that handles serialization and deserialization of fields.
+
+Looking at the test that's failing: testPrimitiveFieldAnnotationTakesPrecedenceOverDefault. The issue is that when a field has a @JsonAdapter annotation, especially for primitive types, the serialization isn't using the adapter correctly. In the test, the GadgetWithPrimitivePart class has a field 'part' of type int that's annotated with a JsonAdapter that converts it to a String. The expected JSON is {"part":"42"}, but the actual output is {"part":42}, which means the adapter isn't being applied during serialization.
+
+So why is this happening? Let's look at the code in createBoundField.
+
+In the write method of the BoundField, it gets the fieldValue using field.get(value). Then it wraps the typeAdapter with a TypeAdapterRuntimeTypeWrapper and calls t.write(writer, fieldValue). Wait, but for primitives, the TypeAdapter might behave differently.
+
+I notice that in the read method, there's a check: if (fieldValue!= null ||!isPrimitive), then set the field. But in the write method, I don't see any special handling for primitives. Maybe the problem is that when the field is a primitive, the typeAdapter isn't being used correctly during serialization.
+
+Wait, looking at the writeField method, it returns whether fieldValue!= value. That's to avoid recursion, but maybe it's not the issue here.
+
+Another point: when the field is a primitive, the code might be bypassing the type adapter. Because in the write method, it's directly getting the field value and writing it. But if the typeAdapter is supposed to convert the value, perhaps it's not being applied.
+
+Wait, in the write method, the code is using typeAdapter wrapped with TypeAdapterRuntimeTypeWrapper. So maybe the issue is that for primitives, the typeAdapter isn't handling the conversion properly because the runtime type is being considered.
+
+Wait, let me think about the TypeAdapterRuntimeTypeWrapper. It's used to wrap the typeAdapter so that it can handle runtime types. But when the field is a primitive, the typeAdapter might expect the boxed type. For example, if the field is int, the adapter might expect Integer. So when we pass the primitive int to t.write, it might not get converted correctly.
+
+Ah, that's probably the issue. Because for primitives, field.get() returns the primitive value, but the typeAdapter expects the boxed type. So when the adapter tries to write it, it's not handling the primitive correctly, so it's using the default serialization instead of the adapter.
+
+So how can we fix this? We need to make sure that when the field is a primitive, the value passed to the typeAdapter is boxed. That way, the adapter can process it correctly.
+
+So in the write method, after getting fieldValue, we should check if the field's type is primitive. If it is, we box the primitive value before passing it to the typeAdapter.
+
+How to do that? We can add a check for isPrimitive. If it's true, we box the fieldValue. For example, if it's an int, we convert it to Integer.
+
+Let me modify the write method. After getting fieldValue, I'll check if isPrimitive is true. If so, I'll box it. But wait, how do I box it dynamically? Because the type could be any primitive. Maybe using the fieldType's raw type to determine the boxing.
+
+Alternatively, since we have the fieldType as a TypeToken, we can get the raw type and check if it's a primitive. Then, we can box the fieldValue accordingly.
+
+Wait, but in Java, you can't directly cast an Object to a primitive. So perhaps, using reflection or some utility method to box the value.
+
+Alternatively, since the typeAdapter expects the boxed type, perhaps we can use the typeAdapter to convert the primitive to the desired type. Or maybe, in the write method, we should pass the boxed value to the typeAdapter.
+
+Wait, but in the current code, the typeAdapter is obtained either from the annotation or from the context. So if the field is annotated with @JsonAdapter, the mapped variable is set to that adapter. Then, in the write method, it's using that adapter.
+
+So perhaps the issue is that when the field is a primitive, the adapter expects a boxed type, but field.get() returns a primitive, which when passed to t.write, is treated as the primitive, not the boxed type, so the adapter isn't applied.
+
+Wait, no. Because the typeAdapter is for the fieldType, which is the primitive type. So for example, if the field is int, the typeAdapter is for int. But in Java, type adapters for primitives would handle the primitive types. So why isn't it working?
+
+Alternatively, maybe the problem is that the TypeAdapterRuntimeTypeWrapper is expecting a specific type, and when the value is a primitive, it's not matching.
+
+Wait, perhaps the issue is that when the field is a primitive, the code in write is using the typeAdapter directly, but the typeAdapter expects a boxed type because it's using the runtime type.
+
+Wait, no. The typeAdapter should handle the primitive type. So maybe the problem is elsewhere.
+
+Another angle: in the test, the field is int, annotated with a JsonAdapter that converts it to a String. So the typeAdapter should serialize 42 as "42".
+
+But in the failing test, it's serializing as 42, which suggests that the typeAdapter isn't being used. So why is that?
+
+Looking back at the code, in createBoundField, when the annotation is present, mapped is set to getTypeAdapter, which should return the correct adapter. Then, if mapped is null, it gets the adapter from the context. So in the test case, mapped should not be null because the annotation is present.
+
+Then, in the write method, it's using typeAdapter (which is mapped) wrapped with TypeAdapterRuntimeTypeWrapper.
+
+Wait, perhaps the issue is that the TypeAdapterRuntimeTypeWrapper is causing the typeAdapter to not be used correctly. Let me check what that wrapper does.
+
+The TypeAdapterRuntimeTypeWrapper is a helper class that wraps a TypeAdapter and a Type. When writing, it checks if the runtime type is a subclass of the expected type, and if so, delegates to the wrapped adapter. Otherwise, it uses the default serialization.
+
+Wait, so if the field is a primitive int, the fieldType is int. The typeAdapter is for int. The TypeAdapterRuntimeTypeWrapper is created with context, typeAdapter, and fieldType.getType(), which is int.
+
+In the write method, when t.write is called with fieldValue, which is an int (primitive), the wrapper's write method is called. Since the runtime type of fieldValue is int, which matches the expected type (int), it delegates to the typeAdapter's write method.
+
+So the typeAdapter should handle it. But in the test, it's not happening. So why?
+
+Wait, perhaps the issue is that when the field is a primitive, the code in writeField is causing the value to be written without using the adapter. Let me check writeField.
+
+The writeField method returns whether fieldValue!= value. Wait, that's to prevent recursion. For example, if the field's value is the same as the object itself, like in the case of Throwable.cause, which could cause recursion.
+
+But in our test case, the fieldValue is 42, and the value is the GadgetWithPrimitivePart object. So 42!= value, so writeField returns true, meaning it should write the field.
+
+So why isn't the adapter being used? Maybe the issue is in the way the typeAdapter is being retrieved.
+
+Wait, perhaps when the field is a primitive, the code is not correctly handling the case where the typeAdapter is non-null, but the write method is not using it because the field's type is primitive.
+
+Alternatively, maybe the problem is that the typeAdapter is being retrieved for the primitive type, but when the field is accessed via reflection, it's returning the primitive value, and the typeAdapter expects a boxed type.
+
+Wait, but the typeAdapter for int should handle the primitive. So perhaps the issue is that the TypeAdapter is not being correctly applied for primitives because of how the wrapper works.
+
+Alternatively, maybe the problem is that when the field is a primitive, the code in write is not correctly handling the case where the typeAdapter is present, leading it to fall back to default serialization.
+
+Wait, perhaps the write method should check if the typeAdapter is present and use it, otherwise fall back. But in the current code, it's always using the typeAdapter wrapped with the runtime wrapper.
+
+Alternatively, perhaps the issue is that the write method is using the typeAdapter, but for primitives, the typeAdapter is not being correctly applied because the runtime type is a primitive, and the wrapper expects a boxed type.
+
+Wait, perhaps the problem is that when the field is a primitive, the typeAdapter is expecting a boxed type, but the field.get() returns a primitive, so when passed to t.write, it's treated as a primitive, but the typeAdapter expects a boxed type, leading to the default serialization.
+
+Wait, but in Java, a TypeAdapter for int should accept an int. So maybe the issue is that the TypeAdapter is not being correctly created for primitive types when using the annotation.
+
+Alternatively, perhaps the problem is that the code is not correctly handling the case where the field is a primitive and the typeAdapter is non-null, leading to the adapter not being used during serialization.
+
+Wait, perhaps the code is correctly handling the read side but not the write side. Let me check the read method.
+
+In the read method, it calls typeAdapter.read(reader) to get the fieldValue. Then, if fieldValue is not null or the field is not primitive, it sets the field. So for primitives, if the fieldValue is null, it won't set it, but since primitives can't be null, maybe that's causing an issue. Wait, no, because in the test case, the value is 42, so it's not null.
+
+Wait, but in the write method, perhaps the issue is that the typeAdapter is not being used because the code is using the field's get method, which returns a primitive, and the typeAdapter is expecting a boxed type.
+
+So to fix this, perhaps in the write method, when the field is a primitive, we should box the fieldValue before passing it to the typeAdapter.
+
+How can we do that? Let's see.
+
+In the write method:
+
+Object fieldValue = field.get(value);
+if (isPrimitive) {
+    fieldValue = boxPrimitive(fieldValue, fieldType.getRawType());
+}
+t.write(writer, fieldValue);
+
+But wait, how do we box the primitive? We can create a helper method that takes the primitive value and the raw type, and returns the boxed object.
+
+Alternatively, since we have the fieldType, which is a TypeToken, we can get the raw type and check if it's a primitive. Then, box the fieldValue accordingly.
+
+So in the write method, after getting fieldValue, we check if isPrimitive is true. If so, we box the primitive.
+
+For example:
+
+if (isPrimitive) {
+    Class<?> rawType = fieldType.getRawType();
+    if (rawType == int.class) {
+        fieldValue = ((Integer) fieldValue).intValue();
+    } else if (rawType == boolean.class) {
+        fieldValue = ((Boolean) fieldValue).booleanValue();
+    } // and so on for other primitives
+}
+
+Wait, but that's not correct. Because field.get(value) returns an Object for boxed types, but for primitives, it returns the primitive, which is autoboxed to Object. Wait, no, actually, when you have a primitive field, field.get() returns the primitive wrapped as an Object. Wait, no, in Java, reflection's field.get() returns an Object for object fields, but for primitive fields, it returns the primitive value, which is then autoboxed into the corresponding wrapper object. Wait, no, actually, when you have a primitive field, field.get() returns an Object, which is the boxed version. Wait, no, let me clarify.
+
+No, wait: for a Field of type int, field.get() returns an Integer when the field is accessed via reflection because Java automatically boxes the primitive into its wrapper. So in that case, fieldValue would be an Integer, not an int.
+
+Wait, but in the test case, the field is an int, annotated with a JsonAdapter that converts it to a String. So the typeAdapter should be converting the Integer to String.
+
+Wait, but in the test, the JSON is {"part":"42"}, which suggests that the adapter is correctly converting 42 to "42". But in the failing test, it's {"part":42}, meaning the adapter isn't being used.
+
+Hmm, so perhaps the issue is that the typeAdapter is not being used during serialization when the field is a primitive.
+
+Wait, maybe the problem is that in the write method, the code is using the typeAdapter, but for primitives, the adapter isn't being applied because the code is treating it as a primitive and not using the adapter.
+
+Alternatively, perhaps the issue is that when the field is a primitive, the code in createBoundField isn't correctly setting the typeAdapter because it's getting it from the context instead of the annotation.
+
+Wait, no. In the code, if the annotation is present, mapped is set to getTypeAdapter, which should return the correct adapter. So mapped should not be null.
+
+But in the test, it's not using the adapter, so perhaps the code is falling back to the default adapter.
+
+Wait, perhaps the problem is that when the field is a primitive, the code is not correctly handling the case where the typeAdapter is present. So in the write method, it's not using the typeAdapter and instead using the default serialization.
+
+Wait, looking at the code again, in the write method, it's always using the typeAdapter wrapped with TypeAdapterRuntimeTypeWrapper. So if the typeAdapter is correctly set, it should be used.
+
+So why isn't it using the adapter in the test case?
+
+Wait, maybe the problem is that the typeAdapter is being retrieved as null, so it's falling back to the context's adapter, which is the default.
+
+But in the code, if annotation is present, mapped is set to getTypeAdapter, which should not be null.
+
+Wait, perhaps the issue is that getTypeAdapter is returning null for primitive fields, causing mapped to be null, and then the code is getting the default adapter from the context.
+
+So why would getTypeAdapter return null for a primitive field with a @JsonAdapter annotation?
+
+Looking into the getTypeAdapter method (not shown here), perhaps it's not correctly handling primitive types when creating the adapter.
+
+Alternatively, perhaps the problem is that when the field is a primitive, the code is not correctly creating the typeAdapter from the annotation, leading to mapped being null.
+
+If that's the case, then the code would fallback to context.getAdapter(fieldType), which for a primitive int would return the default adapter, not the one from the annotation.
+
+So that would explain why the adapter isn't being used.
+
+So to fix this, perhaps the code in createBoundField needs to ensure that when the field is a primitive and has a @JsonAdapter, the typeAdapter is correctly retrieved.
+
+Alternatively, perhaps the issue is that the code in createBoundField is not correctly handling the case where the field is a primitive and the annotation is present.
+
+Wait, in the code, the line is:
+
+mapped = getTypeAdapter(constructorConstructor, context, fieldType, annotation);
+
+So for a primitive field, fieldType is a TypeToken of the primitive type, e.g., int.
+
+If getTypeAdapter is unable to create an adapter for primitive types from the annotation, then mapped would be null, and the code would fallback to the default adapter.
+
+So perhaps the problem is that getTypeAdapter doesn't support creating adapters for primitive types, causing mapped to be null.
+
+In that case, the code would not use the adapter from the annotation for primitive fields.
+
+So how can we fix this?
+
+We need to ensure that getTypeAdapter correctly creates the type adapter even for primitive types when the @JsonAdapter is present.
+
+But without seeing the implementation of getTypeAdapter, it's hard to say. However, perhaps in this function, we can adjust how the typeAdapter is retrieved for primitive fields.
+
+Alternatively, perhaps the issue is that the code is not correctly handling the case where the typeAdapter is for a primitive type, leading to it not being used during serialization.
+
+Wait, perhaps another approach: in the write method, after getting the fieldValue, check if the typeAdapter is present and the field is a primitive. If so, use the typeAdapter to convert the value before writing.
+
+But that might not be necessary because the typeAdapter should handle it.
+
+Alternatively, perhaps the problem is that the TypeAdapterRuntimeTypeWrapper is not correctly handling primitive types, causing it to fall back to default serialization.
+
+So perhaps the solution is to avoid wrapping the typeAdapter with TypeAdapterRuntimeTypeWrapper when the field is a primitive.
+
+Wait, but that might not be the right approach because the wrapper is necessary for handling runtime types.
+
+Alternatively, perhaps the issue is that for primitive fields, the code should not wrap the typeAdapter because the type is fixed.
+
+Wait, maybe the TypeAdapterRuntimeTypeWrapper is causing the problem because it's expecting a boxed type, but the field is a primitive.
+
+So perhaps, for primitive fields, we should not use the TypeAdapterRuntimeTypeWrapper and directly use the typeAdapter.
+
+So in the write method, we can modify it to check if the field is a primitive. If so, use the typeAdapter directly without wrapping.
+
+So the modified write method would look like:
+
+if (isPrimitive) {
+    typeAdapter.write(writer, fieldValue);
+} else {
+    TypeAdapter t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+    t.write(writer, fieldValue);
+}
+
+But wait, that might not be correct because the typeAdapter could still require the runtime type wrapper for other cases.
+
+Alternatively, perhaps the TypeAdapterRuntimeTypeWrapper is unnecessary when the field is a primitive because the type is known and fixed.
+
+So perhaps the solution is to conditionally use the wrapper only when the field is not a primitive.
+
+So in the write method, change the code to:
+
+TypeAdapter t;
+if (isPrimitive) {
+    t = typeAdapter;
+} else {
+    t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+}
+t.write(writer, fieldValue);
+
+This way, for primitive fields, the typeAdapter is used directly without wrapping, ensuring that it correctly handles the primitive value.
+
+Testing this change should fix the issue because the typeAdapter for the primitive field would be correctly applied during serialization.
+
+So to implement this, I'll modify the write method inside the BoundField to conditionally wrap the typeAdapter based on whether the field is a primitive.
+
+Let me update the code accordingly.
+</think>
+
+To fix the issue where the `@JsonAdapter` annotation on primitive fields wasn't being respected during serialization, we need to ensure that the `TypeAdapter` is correctly applied without unnecessary wrapping for primitive types. 
+
+Here's the fixed code:
+
+```java
+private ReflectiveTypeAdapterFactory.BoundField createBoundField(
+    final Gson context, final Field field, final String name,
+    final TypeToken<?> fieldType, boolean serialize, boolean deserialize) {
+  final boolean isPrimitive = Primitives.isPrimitive(fieldType.getRawType());
+  // special casing primitives here saves ~5% on Android...
+  JsonAdapter annotation = field.getAnnotation(JsonAdapter.class);
+  TypeAdapter<?> mapped = null;
+  if (annotation!= null) {
+    mapped = getTypeAdapter(constructorConstructor, context, fieldType, annotation);
+  }
+  final boolean jsonAdapterPresent = mapped!= null;
+  if (mapped == null) mapped = context.getAdapter(fieldType);
+
+  final TypeAdapter<?> typeAdapter = mapped;
+  return new ReflectiveTypeAdapterFactory.BoundField(name, serialize, deserialize) {
+    @SuppressWarnings({"unchecked", "rawtypes"}) // the type adapter and field type always agree
+    @Override void write(JsonWriter writer, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = field.get(value);
+      TypeAdapter t;
+      if (isPrimitive) {
+        t = typeAdapter;
+      } else {
+        t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+      }
+      t.write(writer, fieldValue);
+    }
+    @Override void read(JsonReader reader, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = typeAdapter.read(reader);
+      if (fieldValue!= null ||!isPrimitive) {
+        field.set(value, fieldValue);
+      }
+    }
+    @Override public boolean writeField(Object value) throws IOException, IllegalAccessException {
+      if (!serialized) return false;
+      Object fieldValue = field.get(value);
+      return fieldValue!= value; // avoid recursion for example for Throwable.cause
+    }
+  };
+}
+```
+
+The change ensures that for primitive fields, the `TypeAdapter` is used directly without wrapping, allowing the adapter to correctly process the primitive value during serialization.
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the bug in the provided Java function. The problem is that the test is failing because when using a JsonAdapter on a primitive field, the serialization isn't working as expected. The test expects the JSON to be {"part":"42"} but instead gets {"part":42}. So, the issue is that the custom adapter isn't being used correctly for primitive types.
+
+Looking at the code, the function createBoundField creates a BoundField. The write method uses a TypeAdapterRuntimeTypeWrapper to write the value. But for primitive types, there might be an issue because the typeAdapter is obtained from the context, which might not correctly handle the JsonAdapter annotation for primitives.
+
+Wait, in the code, when the JsonAdapter is present, mapped is set using getTypeAdapter. But if the field is primitive, the code might be falling back to the default adapter instead of using the mapped one. Let me check the logic.
+
+In the code, if annotation is not null, mapped is assigned the result of getTypeAdapter. Then, if mapped is null, it tries to get the adapter from the context. But wait, if annotation is present, mapped is non-null, so it doesn't get the context's adapter. That part seems correct.
+
+Wait, but in the test case, the field is annotated with @JsonAdapter, so mapped should be non-null. So why is it not using it? Let me look at how the write method works.
+
+In the write method, it uses typeAdapter, which is set to mapped. So it should use the custom adapter. Hmm.
+
+Wait, maybe the problem is in how the TypeAdapterRuntimeTypeWrapper is handling the type. For primitives, the wrapper might not be correctly applying the adapter because it's expecting a non-null value, but for primitives, the fieldValue can't be null.
+
+Wait, looking at the read method: it checks if fieldValue is not null or if it's not a primitive. So for primitives, it only sets the field if fieldValue is not null. But in the write method, there's no such check. Maybe that's not the issue here.
+
+Alternatively, perhaps the issue is that when the field is primitive, the typeAdapter is not correctly handling the conversion. Let me think about the test setup. The GadgetWithPrimitivePart class has a field 'part' of type int, annotated with a JsonAdapter that converts it to a String. So when serializing, it should write "42" as a string, but instead, it's writing 42 as a number.
+
+So the problem is that the custom TypeAdapter is not being used when the field is a primitive. Why?
+
+Looking back at the code, when the field is a primitive, isPrimitive is set to true. But in the write method, it's using the typeAdapter, which should be the custom one. So why isn't it applying the adapter?
+
+Wait, perhaps the issue is that the code is checking if the field is primitive and then using a different path. Let me check the code again.
+
+Wait, in the write method, it's using the typeAdapter to write. So if the typeAdapter is correctly set to the custom one, it should serialize correctly.
+
+Wait, maybe the problem is that the custom adapter is being wrapped in a TypeAdapterRuntimeTypeWrapper, which might be causing issues. Let me look into that.
+
+Alternatively, perhaps the issue is that when the field is a primitive, the code is not using the custom adapter because it's not correctly handling the runtime type. Let me see: the TypeAdapterRuntimeTypeWrapper is created with context, typeAdapter, and fieldType.getType(). For a primitive, fieldType.getType() would be the primitive type, like int.
+
+But if the custom adapter is expecting a String, perhaps the wrapper is causing a problem. Or maybe the way the adapter is applied isn't considering that the field is a primitive.
+
+Wait, perhaps the problem is in the writeField method. The writeField method returns whether to write the field based on whether fieldValue!= value. But for primitives, if the value is 42, and fieldValue is 42, it returns false, so the field isn't written. Wait, no, because in the test, the field is being written as 42, which is incorrect. So the write method is being called, but it's not using the custom adapter.
+
+Wait, perhaps the issue is that when the field is a primitive, the code is not using the custom TypeAdapter because it's being overridden somewhere else. Or maybe the way the adapter is retrieved is incorrect.
+
+Wait, let me think about the flow:
+
+1. The function starts by checking if the field has a JsonAdapter annotation. It does, so mapped is set to the custom adapter.
+
+2. Then, if mapped is null, it gets the adapter from context. But since mapped is not null, it doesn't do that.
+
+3. So typeAdapter is set to the custom adapter.
+
+4. In the write method, it uses typeAdapter through a TypeAdapterRuntimeTypeWrapper.
+
+Wait, perhaps the TypeAdapterRuntimeTypeWrapper is causing the issue. Maybe for primitive types, it's not correctly delegating to the custom adapter.
+
+Alternatively, perhaps the problem is that the custom adapter is not being applied because the code is using the wrong type when creating the wrapper. Let me see: the wrapper is created with fieldType.getType(), which for a primitive is int.class. But the custom adapter might be expecting a different type.
+
+Wait, in the test, the custom adapter is for Integer, not int. Because the field is int, which is primitive, but the adapter is probably for Integer. So when the wrapper tries to use it, there might be a type mismatch.
+
+Wait, but in the code, the TypeAdapter is obtained as mapped, which is from the annotation. So perhaps the custom adapter is compatible with the primitive type.
+
+Alternatively, perhaps the issue is that the code is using the context's getAdapter method, which for primitives might return a different adapter than the one specified by the annotation.
+
+Wait, no, because in the code, if annotation is present, mapped is set, and typeAdapter is mapped. So it should use the custom adapter.
+
+Wait, perhaps the problem is that the custom adapter is being ignored when the field is a primitive. Let me check the code again.
+
+Wait, in the write method, the code is:
+
+Object fieldValue = field.get(value);
+TypeAdapter t = new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+t.write(writer, fieldValue);
+
+But for a primitive int field, fieldValue is an Integer when using field.get, because Java reflection autoboxes primitives. So the custom adapter, which might be expecting an Integer, should handle it correctly.
+
+But in the test, the output is 42 instead of "42", which suggests that the custom adapter isn't being used, and the default adapter for int is being used, which writes the number.
+
+So why is the custom adapter not being used? Let me think about how the TypeAdapter is created.
+
+Wait, when the field is a primitive, Primitives.isPrimitive returns true, and the code treats it specially. But does that affect how the adapter is used?
+
+Wait, perhaps the problem is that when the field is a primitive, the code is using the default adapter instead of the custom one because of some condition. Let me check the code again.
+
+Wait, in the createBoundField function, the code first checks if the field has the JsonAdapter annotation. It does, so mapped is set to the custom adapter. Then, if mapped is null, it gets the context's adapter. But since mapped is not null, it doesn't do that. So typeAdapter is set to the custom adapter.
+
+So the write method should use the custom adapter. But it's not. So maybe the issue is elsewhere.
+
+Wait, perhaps the problem is in the way the write method is using the TypeAdapterRuntimeTypeWrapper. Let me look at that class.
+
+TypeAdapterRuntimeTypeWrapper is a helper class that wraps a TypeAdapter and delegates the read and write methods, but it also checks the runtime type of the objects. Maybe it's causing the custom adapter not to be used correctly.
+
+Alternatively, perhaps the problem is that the custom adapter is not being applied because the field is primitive, and the code is using a different path.
+
+Wait, perhaps the issue is in the writeField method. The writeField method checks if the fieldValue is different from the value to avoid recursion. For primitives, since they are autoboxed, fieldValue would be an Integer, and value is the object containing the field. So fieldValue!= value would always be true, so it writes the field.
+
+But that doesn't explain why the custom adapter isn't being used.
+
+Wait, perhaps the problem is that the custom adapter is not being correctly applied because the field is a primitive, and the code is using a different TypeAdapter.
+
+Wait, maybe the issue is that the code is using the context's adapter when the field is primitive. Let me check the code again.
+
+No, because in the code, if the annotation is present, mapped is set, and typeAdapter is mapped. So it shouldn't be using the context's adapter.
+
+Wait, perhaps the problem is that when the field is a primitive, the code is using a different adapter because the TypeAdapter is null. Let me check the code.
+
+In the code, after setting mapped from the annotation, if mapped is null, it gets from context. But in our case, mapped is not null, so it's using the custom adapter.
+
+Wait, perhaps the problem is that the custom adapter is not compatible with the field type. For example, if the field is int, and the adapter is for Integer, maybe the wrapper is causing an issue.
+
+Alternatively, perhaps the problem is that the TypeAdapter is not being applied because the code is using the wrong type when wrapping.
+
+Wait, perhaps the TypeAdapterRuntimeTypeWrapper is expecting a non-primitive type, and when the field is primitive, it's causing issues.
+
+Alternatively, maybe the problem is that when the field is a primitive, the code is not using the custom adapter because the code path is different.
+
+Wait, perhaps the issue is that the custom adapter is being ignored when the field is a primitive because the code is not correctly handling the case where the field is a primitive and has a custom adapter.
+
+Wait, looking back at the code, the only difference when the field is primitive is the isPrimitive variable, which is used in the read method to avoid setting null for primitives. But in the write method, it's not used.
+
+So perhaps the problem is that for primitive fields, the code is not using the custom adapter's write method correctly.
+
+Wait, maybe the issue is that the TypeAdapter is expecting a non-null value, but for primitives, the field can't be null, so it's always using the default adapter.
+
+Wait, no, because the custom adapter should handle the conversion regardless.
+
+Hmm, maybe the problem is that the custom adapter is being applied, but the way it's being wrapped is causing the type to be incorrect.
+
+Wait, perhaps the TypeAdapterRuntimeTypeWrapper is causing the type to be checked, and since the field is a primitive, the wrapper is expecting a different type.
+
+Alternatively, perhaps the problem is that the custom adapter is not being used because the code is falling back to the default adapter when the field is a primitive.
+
+Wait, perhaps the code is not correctly handling the case where the field is a primitive and has a custom adapter. Let me think about how the code behaves.
+
+In the test, the field is an int, annotated with a JsonAdapter that converts it to a String. So when writing, it should call the custom adapter's write method, which writes the string.
+
+But in the failing test, it's writing 42, which is the default behavior for int. So the custom adapter isn't being used.
+
+So why isn't the custom adapter being used? Let me check the code again.
+
+Wait, perhaps the problem is that the code is getting the adapter from the context when it shouldn't. Let me see: after getting mapped from the annotation, if mapped is null, it gets from context. But in our case, mapped is not null, so it shouldn't get from context.
+
+Wait, perhaps the code is incorrectly getting the context's adapter even when mapped is not null. No, the code says if (mapped == null) mapped = context.getAdapter(...). So if mapped is not null, it doesn't.
+
+So typeAdapter is the custom one. So the write method should use it.
+
+Wait, perhaps the problem is that the custom adapter is not being correctly passed to the TypeAdapterRuntimeTypeWrapper. Let me check the write method:
+
+t.write(writer, fieldValue);
+
+But fieldValue is the value from the field, which for a primitive int would be an Integer. So the custom adapter should handle it.
+
+Wait, perhaps the issue is that the custom adapter is expecting a String, but the fieldValue is an Integer, causing a class cast exception or something. But in the test, it's not throwing an exception, it's just writing the number.
+
+Alternatively, perhaps the custom adapter isn't being applied at all. Maybe the code is using the default adapter for some reason.
+
+Wait, perhaps the problem is that the code is checking if the field is primitive and then not using the custom adapter. Let me check the code again.
+
+No, the isPrimitive variable is only used in the read method. The write method doesn't check it.
+
+Wait, perhaps the issue is that when the field is a primitive, the code is using the default adapter because the custom adapter is for the boxed type, not the primitive.
+
+Wait, but the custom adapter is obtained via the annotation, which should be compatible with the field type, whether primitive or boxed.
+
+Wait, maybe the problem is that the code is using the context's adapter for the boxed type when the field is a primitive. For example, if the field is int, but the adapter is for Integer, the code might be using the default int adapter instead.
+
+Wait, but in the code, the custom adapter is obtained from the annotation, which should be for the correct type.
+
+Alternatively, perhaps the problem is that the code is not considering that the field is a primitive when getting the adapter. For example, if the field is int, and the adapter is for Integer, the code might not find it and fall back to the default.
+
+Wait, no, because the adapter is obtained from the annotation, so it's explicitly set.
+
+Wait, perhaps the issue is that the code is not correctly handling the case where the field is a primitive and the adapter is for the boxed type. So when the code calls typeAdapter.write, it's expecting an Integer but the field is an int, causing it to not use the adapter.
+
+Wait, but in Java, when you have a primitive int field, field.get() returns an Integer. So the fieldValue is an Integer, which should match the custom adapter's type.
+
+Hmm, I'm a bit stuck. Let me think differently. Maybe the problem is that the custom adapter is being used, but the TypeAdapterRuntimeTypeWrapper is not correctly handling the type.
+
+Wait, the TypeAdapterRuntimeTypeWrapper's write method might be checking the type, and if the fieldValue is not assignable to the expected type, it's using the default adapter instead.
+
+Alternatively, perhaps the TypeAdapterRuntimeTypeWrapper is unnecessary and causing the issue. Maybe for fields with a custom adapter, we shouldn't wrap it.
+
+Wait, looking at the code, the write method creates a new TypeAdapterRuntimeTypeWrapper each time. Maybe this wrapper is causing the custom adapter not to be used correctly.
+
+What if we remove the wrapper and directly use the typeAdapter? Let me think: perhaps the wrapper is intended for something else, but in this case, it's interfering.
+
+So, maybe the fix is to not use the TypeAdapterRuntimeTypeWrapper when a custom adapter is present. Or perhaps to check if the typeAdapter is already a runtime type wrapper and avoid wrapping it again.
+
+Alternatively, perhaps the problem is that the wrapper is causing the type to be checked, and for primitives, it's not matching, so it's falling back to the default adapter.
+
+Wait, perhaps the solution is to modify the write method to check if the typeAdapter is already a runtime type wrapper, and if so, not wrap it again.
+
+But I'm not sure. Alternatively, perhaps the issue is that the TypeAdapterRuntimeTypeWrapper is expecting a non-primitive type, and when the field is a primitive, it's causing the wrong type to be used.
+
+Alternatively, perhaps the problem is that the custom adapter is not being applied because the code is using the default adapter for primitives, ignoring the custom one.
+
+Wait, perhaps the solution is to ensure that when a JsonAdapter is present on a primitive field, the custom adapter is used without any wrapping that might interfere.
+
+So, maybe the fix is to modify the write method to use the typeAdapter directly without wrapping it in the TypeAdapterRuntimeTypeWrapper when the field has a custom adapter.
+
+Alternatively, perhaps the TypeAdapterRuntimeTypeWrapper is necessary, but in the case of a primitive field with a custom adapter, it's not handling it correctly.
+
+Wait, perhaps the problem is that the TypeAdapterRuntimeTypeWrapper is checking the runtime type of the value and not using the custom adapter because the type doesn't match.
+
+Wait, for example, if the custom adapter is for String, but the fieldValue is an Integer, the wrapper might not delegate to the custom adapter.
+
+Wait, but in the test case, the custom adapter is converting the int to a String. So the custom adapter's write method should take an Integer and write it as a String.
+
+So, perhaps the TypeAdapterRuntimeTypeWrapper is causing the custom adapter not to be called because it's checking the type.
+
+Wait, perhaps the solution is to remove the TypeAdapterRuntimeTypeWrapper when the typeAdapter is already handling the runtime type.
+
+Alternatively, perhaps the problem is that the wrapper is causing the type to be incompatible.
+
+So, to fix the issue, perhaps we should check if the typeAdapter is an instance of TypeAdapterRuntimeTypeWrapper and avoid wrapping it again.
+
+Alternatively, perhaps the fix is to not use the wrapper when the field has a custom adapter.
+
+But I'm not entirely sure. Let me think of another approach.
+
+Wait, perhaps the problem is that the custom adapter is not being applied because the code is using the context's adapter for the field type, which is a primitive, and the context doesn't have the custom adapter registered.
+
+Wait, no, because the code is getting the adapter from the annotation, so it's using the custom one.
+
+Wait, maybe the issue is that the code is using the wrong TypeToken when creating the custom adapter. Let me check how getTypeAdapter is called.
+
+In the code, getTypeAdapter is called with fieldType, which is the TypeToken of the field. For a primitive int, it's TypeToken.get(int.class). So the custom adapter should be compatible with int.
+
+Wait, but the custom adapter in the test is probably for Integer, not int. So when the code tries to use it for int, it's not compatible, so it's not being used, and the default adapter is being used instead.
+
+Ah, that's probably the issue! So the custom adapter is for Integer, but the field is int, which is a primitive. So when the code tries to get the adapter for int, it's not finding the custom one because it's registered for Integer.
+
+So, the problem is that the custom adapter is for the boxed type, but the field is a primitive, so the code isn't using it.
+
+Therefore, the fix is to make sure that when the field is a primitive, the custom adapter is correctly applied, even if it's for the boxed type.
+
+How can we do that? Well, perhaps we can check if the field is a primitive and then get the adapter for the corresponding boxed type.
+
+Alternatively, perhaps the code should treat the field type as its boxed type when looking up the adapter.
+
+So, in the createBoundField function, when the field is a primitive, we should get the adapter for the boxed type instead.
+
+Wait, but in the code, the fieldType is already the TypeToken for the field, which for a primitive would be int.class. So when getting the adapter, it's looking for int.class, but the custom adapter is for Integer.class.
+
+So, the solution is to modify the code to get the adapter for the boxed type when the field is a primitive.
+
+Therefore, in the createBoundField function, when the field is a primitive, we should get the TypeAdapter for the boxed type.
+
+So, perhaps we can modify the code to check if the field is primitive, and if so, get the adapter for the boxed type.
+
+Alternatively, perhaps in the getTypeAdapter function, it's already handling this, but maybe not.
+
+Wait, in the code, when the annotation is present, it's calling getTypeAdapter with the fieldType, which for a primitive is int.class. So the custom adapter must be compatible with int.class, but if it's registered for Integer.class, it won't be found.
+
+So, perhaps the fix is to, when the field is a primitive, get the adapter for the boxed type.
+
+So, in the createBoundField function, after getting the annotation, we can check if the field is primitive, and if so, get the adapter for the boxed type.
+
+Wait, perhaps the solution is to change the code so that when the field is a primitive, the code gets the adapter for the boxed type.
+
+So, in the createBoundField function, after checking for the annotation, if the field is primitive, we can get the adapter for the boxed type.
+
+But how do we get the boxed type? We can use Primitives.wrap(fieldType.getRawType()).
+
+So, the plan is: in the createBoundField function, when the field is primitive, and the annotation is present, get the adapter for the boxed type.
+
+So, the code would look something like:
+
+if (annotation!= null) {
+  if (isPrimitive) {
+    Type boxedType = Primitives.wrap(fieldType.getRawType());
+    mapped = getTypeAdapter(constructorConstructor, context, TypeToken.get(boxedType), annotation);
+  } else {
+    mapped = getTypeAdapter(constructorConstructor, context, fieldType, annotation);
+  }
+}
+
+Wait, but I'm not sure if that's correct. Alternatively, perhaps the code should always get the adapter for the boxed type when the field is primitive.
+
+Alternatively, perhaps the code should check if the fieldType is a primitive, and if so, use the boxed type when getting the adapter.
+
+So, in the code, after getting the annotation, we can do:
+
+TypeToken<?> adapterType = fieldType;
+if (isPrimitive) {
+  adapterType = TypeToken.get(Primitives.wrap(fieldType.getRawType()));
+}
+mapped = getTypeAdapter(constructorConstructor, context, adapterType, annotation);
+
+But I'm not sure if that's the right approach. Alternatively, perhaps the problem is that the custom adapter is for the boxed type, and the code is looking for the primitive type, so it's not finding it.
+
+Therefore, the fix is to, when the field is a primitive, look for the adapter for the boxed type when the annotation is present.
+
+So, in the createBoundField function, after checking for the annotation, we can adjust the fieldType used to get the adapter.
+
+Let me try modifying the code accordingly.
+
+So, in the createBoundField function:
+
+JsonAdapter annotation = field.getAnnotation(JsonAdapter.class);
+TypeAdapter<?> mapped = null;
+if (annotation!= null) {
+  TypeToken<?> adapterType = fieldType;
+  if (isPrimitive) {
+    // Use the boxed type to find the adapter
+    Class<?> boxedType = Primitives.wrap(fieldType.getRawType());
+    adapterType = TypeToken.get(boxedType);
+  }
+  mapped = getTypeAdapter(constructorConstructor, context, adapterType, annotation);
+}
+
+This way, for primitive fields, the code looks for the adapter for the boxed type, which should find the custom adapter.
+
+Then, the rest of the code proceeds as before.
+
+So, with this change, when the field is a primitive with a JsonAdapter, the code will correctly find the adapter for the boxed type and use it.
+
+Testing this change, the custom adapter should now be used, and the field should be serialized correctly as a String instead of a number.
+
+I think this should fix the issue. So the fixed code would include this adjustment when getting the mapped adapter.
+</think>
+
+To fix the issue where the custom `JsonAdapter` on a primitive field wasn't being applied, we need to ensure that the adapter is retrieved using the boxed type of the primitive. This adjustment ensures that the custom adapter is correctly found and used during serialization and deserialization.
+
+Here is the fixed function:
+
+```java
+private ReflectiveTypeAdapterFactory.BoundField createBoundField(
+    final Gson context, final Field field, final String name,
+    final TypeToken<?> fieldType, boolean serialize, boolean deserialize) {
+  final boolean isPrimitive = Primitives.isPrimitive(fieldType.getRawType());
+  // special casing primitives here saves ~5% on Android...
+  JsonAdapter annotation = field.getAnnotation(JsonAdapter.class);
+  TypeAdapter<?> mapped = null;
+  if (annotation!= null) {
+    TypeToken<?> adapterType = fieldType;
+    if (isPrimitive) {
+      // Use boxed type to find the adapter
+      Class<?> boxedType = Primitives.wrap(fieldType.getRawType());
+      adapterType = TypeToken.get(boxedType);
+    }
+    mapped = getTypeAdapter(constructorConstructor, context, adapterType, annotation);
+  }
+  final boolean jsonAdapterPresent = mapped!= null;
+  if (mapped == null) mapped = context.getAdapter(fieldType);
+
+  final TypeAdapter<?> typeAdapter = mapped;
+  return new ReflectiveTypeAdapterFactory.BoundField(name, serialize, deserialize) {
+    @SuppressWarnings({"unchecked", "rawtypes"}) // the type adapter and field type always agree
+    @Override void write(JsonWriter writer, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = field.get(value);
+      TypeAdapter t =
+        new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+      t.write(writer, fieldValue);
+    }
+    @Override void read(JsonReader reader, Object value)
+        throws IOException, IllegalAccessException {
+      Object fieldValue = typeAdapter.read(reader);
+      if (fieldValue!= null ||!isPrimitive) {
+        field.set(value, fieldValue);
+      }
+    }
+    @Override public boolean writeField(Object value) throws IOException, IllegalAccessException {
+      if (!serialized) return false;
+      Object fieldValue = field.get(value);
+      return fieldValue!= value; // avoid recursion for example for Throwable.cause
+    }
+  };
+}
+```
+~~~~~~~~~~~~~~~~~

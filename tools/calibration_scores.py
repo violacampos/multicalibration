@@ -10,7 +10,7 @@ class score:
     def __init__(self, grid, outputs, debug):
         self.debug = debug
         self.outputs = outputs
-        self.grid = grid
+        #self.grid = grid
         self.score_grid = np.arange(0.0, 1+(1/10), 1/10)
         self.p_r = 0
         self.brier_ref_score = 0
@@ -115,7 +115,7 @@ class score:
     def gasce(self, assigned_bins, labels, groups, grid=None):
         if grid is None: grid = self.score_grid
         num_samples = len(assigned_bins)
-        
+
         # calculate the total correct per bin
         correct_per_bin_group = np.array([[np.divide(len(assigned_bins[(assigned_bins == i) & (labels == 1) & (g ==1)]), len(assigned_bins[(assigned_bins == i) & (g ==1)])) for g in groups.T] for i in grid])
         correct_per_bin_group[np.isnan(correct_per_bin_group)] = 0
@@ -275,10 +275,10 @@ class score:
        
     def get_total_per_group(self, confidences, labels, groups):
         # Assign the values in X to the corresponding bin (discretize values)
-        assigned_bins = binning.round_model_to_grid(confidences, self.grid)
+        assigned_bins = binning.round_model_to_grid(confidences, self.score_grid)
 
         # calculate the total count per bin
-        total_group = np.array([[len(confidences[(assigned_bins == i) & (g == 1)]) for g in groups.T]  for i in self.grid])
+        total_group = np.array([[len(confidences[(assigned_bins == i) & (g == 1)]) for g in groups.T]  for i in self.score_grid])
         total_group[np.isnan(total_group)] = 0
 
         return total_group

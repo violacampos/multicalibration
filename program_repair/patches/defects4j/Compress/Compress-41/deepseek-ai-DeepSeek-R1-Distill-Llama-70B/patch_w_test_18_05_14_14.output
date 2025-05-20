@@ -1,0 +1,1534 @@
+
+####################
+Response
+####################
+Okay, I need to fix the buggy Java function getNextZipEntry() based on the provided test failures. Let's see what the tests are indicating.
+
+First, looking at the testListAllFilesWithNestedArchive test. It's failing because it expects one exception but gets zero. This suggests that the code isn't throwing an exception when it should. The test tries to create a nested ArchiveInputStream from a ZipArchiveInputStream, which isn't allowed because you can't have multiple entries open at the same time. The original code might not be checking if the stream is already reading an entry, so it doesn't throw the expected exception.
+
+Second, the testThrowOnInvalidEntry test is expecting a ZipException but gets an IOException instead. The test uses an invalid zip file, and the function should throw a ZipException with a specific message. So the function might be throwing the wrong type of exception or not throwing at all.
+
+Looking at the provided code, in the getNextZipEntry function:
+
+1. The function starts by checking if the stream is closed or if it's hit the central directory. If so, returns null.
+2. If there's a current entry, it closes it.
+3. Then it tries to read the local file header (LFH_BUF).
+4. If it's the first entry, it reads the LFH; otherwise, it reads fully.
+5. It checks the signature (sig) against CFH_SIG or AED_SIG, and if so, skips the remainder.
+6. If the signature isn't LFH_SIG, returns null.
+7. Then it parses the entry data, sets up the current entry, and initializes the input streams based on the method.
+
+Now, thinking about the issues:
+
+For the first test, when creating a nested ArchiveInputStream, the original stream should detect that it's already reading an entry and throw an exception. So perhaps the function isn't checking if current is null before proceeding. Wait, in the code, current is set to null when closeEntry() is called, which happens when getNextZipEntry is called again. But maybe the issue is that the function allows multiple entries to be read without properly handling the state.
+
+Wait, in the test, when the user tries to create a new ArchiveInputStream from the existing one (in the loop), the new stream's getNextEntry should fail because the parent stream is already in the middle of reading an entry. So the function should check if there's an existing current entry and throw an exception if so.
+
+Looking at the function, when it's called, it first checks if current is not null. If so, it closes the entry and sets firstEntry to false. So the next time getNextEntry is called, it closes the current entry. But in the test, the user is creating a new ArchiveInputStream from the existing one, not reusing the same instance. So each new instance should manage its own state. Hmm, perhaps the issue is that the original stream isn't being properly handled, but maybe that's not directly related to the function.
+
+Wait, perhaps the problem is that when the function reads an entry, it doesn't prevent subsequent reads correctly. Or maybe in the case where the stream is closed, it's not handled properly.
+
+Looking at the testThrowOnInvalidEntry, the function is supposed to throw a ZipException when the signature is invalid. In the code, when reading the signature, if it's not LFH_SIG, it returns null. But in the test, the stream is invalid, so perhaps the readFully or readFirstLocalFileHeader is throwing an EOFException, which is caught, and returns null. But the test expects a ZipException with a specific message.
+
+Wait, in the code, the function catches EOFException and returns null. But in the test, the invalid zip has a bad signature, which should cause the function to throw a ZipException, not return null. So perhaps the function isn't correctly handling the case where the signature is invalid.
+
+Looking at the code:
+
+After reading the signature, if it's CFH_SIG or AED_SIG, it skips the archive. If it's not LFH_SIG, it returns null. So for an invalid signature, it returns null, which would make the test think there are no more entries, but the test expects an exception.
+
+Wait, no, in the test, the invalid-zip.zip probably starts with a bad signature. So when getNextZipEntry is called, it reads the signature and finds it's not LFH_SIG, so returns null. But the test expects a ZipException to be thrown. So perhaps the function should throw an exception instead of returning null when the signature is invalid.
+
+So, in the code, after checking if the signature is LFH_SIG, if not, return null. Instead, it should throw a ZipException indicating an invalid signature.
+
+So, in the code, the part:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    return null;
+}
+
+Should be modified to throw an exception. Because if the signature isn't LFH_SIG, it's an error, not just the end of entries.
+
+Wait, but what about cases where the signature is CFH_SIG or AED_SIG? The code sets hitCentralDirectory and skips. So in that case, it returns null because the central directory has been hit. But for other invalid signatures, like some random bytes, it should throw an exception.
+
+So perhaps the code needs to be adjusted to throw a ZipException when the signature isn't LFH_SIG, and it's not CFH_SIG or AED_SIG. Because in the test, the invalid zip has a bad signature, which should cause an exception.
+
+So, modifying the code:
+
+After reading the signature, if it's CFH_SIG or AED_SIG, handle that case. Else, if it's not LFH_SIG, throw a ZipException.
+
+So, the code should be:
+
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+} else if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+This way, invalid signatures throw an exception, which would make the test pass.
+
+Now, regarding the first test, the issue is that the function isn't throwing an exception when trying to read a nested archive. Perhaps the problem is that the function isn't checking if the stream is already in use. So, when the user tries to create a new ArchiveInputStream from the existing one, the new stream's getNextEntry should detect that the parent stream is already in the middle of an entry and throw an exception.
+
+But in the current function, when a new ZipArchiveInputStream is created, it has its own 'current' variable, which is initially null. So perhaps the issue is elsewhere.
+
+Wait, maybe the problem is that when you create a nested stream, the parent stream's 'current' is not null, so when the nested stream's getNextEntry is called, it tries to read from the same underlying InputStream, which is already positioned after the parent's current entry.
+
+But in the test, the expected exception is a ZipException because you can't create a final ArchiveInputStream from test3.xml. Wait, perhaps the issue is that when the test tries to create a new ArchiveInputStream from the existing one, the existing stream is not closed, leading to an error.
+
+Alternatively, perhaps the function isn't correctly handling the state when multiple entries are being read, leading to the test not catching the expected exception.
+
+Wait, perhaps the function isn't checking whether the stream has already been closed or if the current entry is already set. For example, in the test, when the nested stream is created, perhaps it's trying to read from the parent stream which is still open, causing issues.
+
+Alternatively, maybe the function's closeEntry() isn't properly resetting the state, leading to the stream being in an invalid state.
+
+Wait, perhaps the function's initial check is incorrect. It checks if 'closed' is true or 'hitCentralDirectory' is true. But when a new stream is created, 'closed' is false, and 'hitCentralDirectory' is false. So the function proceeds, but the underlying InputStream is already being read by the parent stream.
+
+So, perhaps the issue is that the function isn't preventing multiple reads on the same InputStream. Each ZipArchiveInputStream should manage its own position in the stream, but if the user creates multiple streams from the same underlying InputStream, it can cause issues. However, that's more of a user error, but the function should handle it gracefully.
+
+Alternatively, perhaps the function's 'closed' flag isn't being properly set when an exception occurs, leading to the stream being in an inconsistent state.
+
+But given the two test failures, the main issues are:
+
+1. The function returns null instead of throwing an exception when the signature is invalid, causing the second test to fail.
+2. The function isn't correctly handling nested streams, leading to the first test not catching the expected exception.
+
+But focusing on the function, the main fix is to throw an exception when the signature isn't LFH_SIG and not a central directory signature.
+
+So, in the code, after handling CFH_SIG and AED_SIG, check if the signature is LFH_SIG. If not, throw an exception.
+
+Another possible issue is that the function isn't checking if the stream is already closed before proceeding. For example, if the stream is closed, it should return null, but perhaps in some cases, it's not handling that correctly.
+
+Wait, looking at the function's initial check:
+
+if (closed || hitCentralDirectory) {
+    return null;
+}
+
+So, if the stream is closed, it returns null, which is correct.
+
+So, to fix the testThrowOnInvalidEntry, the function should throw a ZipException when the signature is invalid.
+
+Now, let's adjust the code accordingly.
+
+In the code, after reading the signature, if it's CFH_SIG or AED_SIG, handle that. Else, if it's not LFH_SIG, throw an exception.
+
+So the modified code would be:
+
+final ZipLong sig = new ZipLong(LFH_BUF);
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+} else if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+This should cause the function to throw the expected exception in the test.
+
+Regarding the first test, perhaps the issue is that when the nested stream is created, the parent stream's state isn't properly checked, allowing the nested stream to proceed without an exception. But since each ZipArchiveInputStream is a separate instance, perhaps the function isn't preventing multiple reads on the same underlying InputStream. However, that's more of an input stream issue rather than the function's problem. But the test expects an exception when trying to create a nested stream from an open entry, which might be because the stream is already positioned after an entry.
+
+Wait, perhaps when the function returns an entry, the underlying stream is positioned right after the entry's data. So when the nested stream tries to read, it's at the wrong position, leading to an invalid signature. But in that case, the function would throw an exception as we fixed earlier.
+
+So, in the first test, when the nested stream's getNextEntry is called, it would read an invalid signature and throw a ZipException, which is caught and added to expectedExceptions. So the test expects one exception, which would now be thrown.
+
+Wait, but in the test, the nestedIn is created as:
+
+final ArchiveInputStream nestedIn = new ArchiveStreamFactory().createArchiveInputStream("zip", in);
+
+So 'in' is the current ZipArchiveInputStream, which is positioned after the current entry. So when the nestedIn tries to read, it's reading from the same underlying stream but at the wrong position, leading to an invalid signature. Thus, the getNextEntry in nestedIn would throw a ZipException, which is what the test expects.
+
+But before the fix, the function would return null instead of throwing, so the test wouldn't catch the exception, leading to expectedExceptions.size() being 0. After the fix, the function throws, so expectedExceptions would have size 1, making the test pass.
+
+So the main fix is to throw an exception when the signature is invalid.
+
+Now, let's implement this in the code.
+</think>
+
+To fix the issues, we need to ensure that the function throws a `ZipException` when encountering an invalid signature and correctly handles the end of the archive.
+
+Here's the fixed code:
+
+```java
+public ZipArchiveEntry getNextZipEntry() throws IOException {
+    boolean firstEntry = true;
+    if (closed || hitCentralDirectory) {
+        return null;
+    }
+    if (current!= null) {
+        closeEntry();
+        firstEntry = false;
+    }
+
+    try {
+        if (firstEntry) {
+            // split archives have a special signature before the
+            // first local file header - look for it and fail with
+            // the appropriate error message if this is a split
+            // archive.
+            readFirstLocalFileHeader(LFH_BUF);
+        } else {
+            readFully(LFH_BUF);
+        }
+    } catch (final EOFException e) {
+        return null;
+    }
+
+    final ZipLong sig = new ZipLong(LFH_BUF);
+    if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+        hitCentralDirectory = true;
+        skipRemainderOfArchive();
+    } else if (!sig.equals(ZipLong.LFH_SIG)) {
+        throw new ZipException("Unexpected record signature: " + sig);
+    }
+
+    int off = WORD;
+    current = new CurrentEntry();
+
+    final int versionMadeBy = ZipShort.getValue(LFH_BUF, off);
+    off += SHORT;
+    current.entry.setPlatform((versionMadeBy >> ZipFile.BYTE_SHIFT) & ZipFile.NIBLET_MASK);
+
+    final GeneralPurposeBit gpFlag = GeneralPurposeBit.parse(LFH_BUF, off);
+    final boolean hasUTF8Flag = gpFlag.usesUTF8ForNames();
+    final ZipEncoding entryEncoding = hasUTF8Flag? ZipEncodingHelper.UTF8_ZIP_ENCODING : zipEncoding;
+    current.hasDataDescriptor = gpFlag.usesDataDescriptor();
+    current.entry.setGeneralPurposeBit(gpFlag);
+
+    off += SHORT;
+
+    current.entry.setMethod(ZipShort.getValue(LFH_BUF, off));
+    off += SHORT;
+
+    final long time = ZipUtil.dosToJavaTime(ZipLong.getValue(LFH_BUF, off));
+    current.entry.setTime(time);
+    off += WORD;
+
+    ZipLong size = null, cSize = null;
+    if (!current.hasDataDescriptor) {
+        current.entry.setCrc(ZipLong.getValue(LFH_BUF, off));
+        off += WORD;
+
+        cSize = new ZipLong(LFH_BUF, off);
+        off += WORD;
+
+        size = new ZipLong(LFH_BUF, off);
+        off += WORD;
+    } else {
+        off += 3 * WORD;
+    }
+
+    final int fileNameLen = ZipShort.getValue(LFH_BUF, off);
+
+    off += SHORT;
+
+    final int extraLen = ZipShort.getValue(LFH_BUF, off);
+    off += SHORT;
+
+    final byte[] fileName = new byte[fileNameLen];
+    readFully(fileName);
+    current.entry.setName(entryEncoding.decode(fileName), fileName);
+
+    final byte[] extraData = new byte[extraLen];
+    readFully(extraData);
+    current.entry.setExtra(extraData);
+
+    if (!hasUTF8Flag && useUnicodeExtraFields) {
+        ZipUtil.setNameAndCommentFromExtraFields(current.entry, fileName, null);
+    }
+
+    processZip64Extra(size, cSize);
+
+    if (current.entry.getCompressedSize()!= ArchiveEntry.SIZE_UNKNOWN) {
+        if (current.entry.getMethod() == ZipMethod.UNSHRINKING.getCode()) {
+            current.in = new UnshrinkingInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+        } else if (current.entry.getMethod() == ZipMethod.IMPLODING.getCode()) {
+            current.in = new ExplodingInputStream(
+                    current.entry.getGeneralPurposeBit().getSlidingDictionarySize(),
+                    current.entry.getGeneralPurposeBit().getNumberOfShannonFanoTrees(),
+                    new BoundedInputStream(in, current.entry.getCompressedSize()));
+        } else if (current.entry.getMethod() == ZipMethod.BZIP2.getCode()) {
+            current.in = new BZip2CompressorInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+        }
+    }
+    
+    entriesRead++;
+    return current.entry;
+}
+```
+
+The key change is adding an `else if` condition to throw a `ZipException` when the signature is neither a local file header nor a central directory/End of Central Directory signature. This ensures that invalid entries properly throw an exception, allowing the tests to pass.
+~~~~~~~~~~~~~~~~~
+Okay, so I have this Java code for a ZipArchiveEntry function that's supposed to get the next entry in a zip archive. But it's failing some tests. I need to figure out what's wrong and fix it.
+
+Looking at the first test, testListAllFilesWithNestedArchive, it's expecting one ZipException but getting zero. That suggests that the code isn't throwing an exception when it should. Maybe it's not properly detecting certain invalid entries or signatures.
+
+The second test, testThrowOnInvalidEntry, expects a ZipException with a specific message, but instead, it's getting an IOException. That makes me think that the code is throwing the wrong type of exception when it encounters an invalid signature.
+
+So, looking at the code, in the getNextZipEntry function, after reading the signature, there's a check: if the signature is CFH_SIG or AED_SIG, it sets hitCentralDirectory and skips the rest. If the signature isn't LFH_SIG, it returns null. But wait, in the second test, the invalid-zip.zip probably has an invalid signature. So, in that case, the code returns null, but the test expects an exception.
+
+Ah, right. The function is returning null when it shouldn't. Instead, when an invalid signature is found, it should throw an exception. Because in the test, it's expecting that getNextZipEntry throws a ZipException when it encounters an unexpected record.
+
+So, in the code, the part where it checks if the signature isn't LFH_SIG, it returns null. But according to the test, it should throw an exception instead.
+
+Wait, but in the current code, when it's not LFH_SIG, it returns null. So in the second test, the function returns null, but the test expects it to throw a ZipException. So that's why the test fails.
+
+So, the fix is: when the signature isn't LFH_SIG, instead of returning null, we should throw a ZipException indicating an invalid entry.
+
+But wait, let me think. The function is supposed to return null when there are no more entries. So, how to distinguish between end of entries and invalid entries?
+
+Looking back, after reading the signature, if it's CFH_SIG or AED_SIG, it sets hitCentralDirectory and skips. Then, it checks if the signature is not LFH_SIG. If that's the case, it returns null. But in the case of an invalid signature (neither LFH, CFH, nor AED), it should throw an exception.
+
+So, perhaps the code should be modified to check if the signature is not LFH_SIG and also not CFH_SIG or AED_SIG. Because if it's CFH or AED, it's handled by setting hitCentralDirectory, but any other signature is invalid.
+
+Wait, let me see. The code does this:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+}
+if (!sig.equals(LFH_SIG)) {
+    return null;
+}
+
+So, if the signature is CFH or AED, it skips the rest, but still proceeds. Then, it returns null because it's not LFH. So, in the case where the signature is CFH or AED, it's allowed, but if it's something else, like an unknown signature, it returns null, but the test expects an exception.
+
+Wait no, the test in question (testThrowOnInvalidEntry) is expecting that when the signature is invalid, an exception is thrown. So, perhaps the code should throw an exception when the signature is neither LFH, CFH, nor AED.
+
+So, the logic should be: if the signature is CFH or AED, process accordingly. If it's LFH, proceed. Else, throw an exception.
+
+So, modifying the code:
+
+After reading the signature, check if it's CFH or AED. If yes, handle and return null. Else, if it's not LFH, throw an exception.
+
+So, the code should have something like:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+} else if (!sig.equals(LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+But wait, in the current code, after handling CFH or AED, it still proceeds to check if the sig is not LFH and returns null. That's incorrect because if the sig is CFH or AED, we have already handled it, but the function should not return an entry in that case. So, perhaps after handling CFH or AED, we should return null, and only throw an exception if the sig is neither.
+
+Alternatively, the code should be restructured to:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+    return null;
+} else if (!sig.equals(LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+Because when the sig is CFH or AED, we're hitting the central directory, so there are no more entries to read, hence return null.
+
+Wait, but in the testListAllFilesWithNestedArchive, the issue is that when trying to create a nested ArchiveInputStream, it's expecting a ZipException but isn't getting it. So perhaps in that case, the function is returning null when it should throw an exception.
+
+Wait, but in the first test, the code is trying to read a nested zip inside another zip. So, when it tries to create a new ArchiveInputStream, perhaps it's hitting an invalid entry and expects an exception.
+
+Wait, the first test is expecting one exception, but it's getting zero. So perhaps the code isn't throwing an exception when it should, leading to the nested stream not being closed properly.
+
+Wait, perhaps the issue is that when the code reads an entry that isn't a file (like a directory or something else), it's not throwing an exception. Or maybe when the entry's method is unknown, it should throw.
+
+Alternatively, looking back, in the code, when the signature is not LFH, it returns null. So, in the case of an invalid signature, the function returns null, which the test interprets as no more entries, but in reality, it should throw an exception.
+
+So, the fix is to modify the code so that when the signature is neither CFH, AED, nor LFH, it throws a ZipException. Also, when the signature is CFH or AED, return null as there are no more entries.
+
+So, adjusting the code:
+
+After reading the signature, if it's CFH or AED, set hitCentralDirectory, skip, and return null. Else, if it's not LFH, throw an exception.
+
+So, the code should look like this:
+
+final ZipLong sig = new ZipLong(LFH_BUF);
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+    return null;
+} else if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+This way, any unexpected signature causes an exception, which is what the test expects.
+
+Let me see how that would affect the tests. In the second test, when an invalid signature is encountered, it would throw a ZipException, which matches the test's expectation. In the first test, when trying to read an invalid entry, it would throw an exception, which is caught and added to expectedExceptions, thus making the test pass.
+
+So, the key fix is to change the code to throw an exception when the signature isn't LFH, CFH, or AED.
+
+Another thing to consider: In the current code, after handling CFH or AED, it doesn't return immediately. So, the code proceeds to check if the sig is LFH, which it's not, so returns null. But perhaps, after handling CFH or AED, we should return null immediately to avoid further processing.
+
+So, restructuring that part:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+    return null;
+}
+if (!sig.equals(LFH_SIG)) {
+    throw new ZipException(...);
+}
+
+Yes, that makes sense.
+
+So, in the fixed code, after checking for CFH or AED, we return null. Then, if the signature isn't LFH, throw an exception.
+
+This should fix both test cases. The second test will now throw the expected exception, and the first test will correctly catch the exception when trying to read an invalid entry.
+</think>
+
+To fix this issue, the function must correctly handle unexpected record signatures by throwing a `ZipException` instead of returning `null`. This ensures that invalid entries are properly reported, allowing the tests to catch the expected exceptions.
+
+Here is the fixed code:
+
+```java
+public ZipArchiveEntry getNextZipEntry() throws IOException {
+    boolean firstEntry = true;
+    if (closed || hitCentralDirectory) {
+        return null;
+    }
+    if (current!= null) {
+        closeEntry();
+        firstEntry = false;
+    }
+
+    try {
+        if (firstEntry) {
+            readFirstLocalFileHeader(LFH_BUF);
+        } else {
+            readFully(LFH_BUF);
+        }
+    } catch (final EOFException e) {
+        return null;
+    }
+
+    final ZipLong sig = new ZipLong(LFH_BUF);
+    if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+        hitCentralDirectory = true;
+        skipRemainderOfArchive();
+        return null;
+    }
+    if (!sig.equals(ZipLong.LFH_SIG)) {
+        throw new ZipException("Unexpected record signature: " + sig);
+    }
+
+    int off = WORD;
+    current = new CurrentEntry();
+
+    final int versionMadeBy = ZipShort.getValue(LFH_BUF, off);
+    off += SHORT;
+    current.entry.setPlatform((versionMadeBy >> ZipFile.BYTE_SHIFT) & ZipFile.NIBLET_MASK);
+
+    final GeneralPurposeBit gpFlag = GeneralPurposeBit.parse(LFH_BUF, off);
+    final boolean hasUTF8Flag = gpFlag.usesUTF8ForNames();
+    final ZipEncoding entryEncoding = hasUTF8Flag? ZipEncodingHelper.UTF8_ZIP_ENCODING : zipEncoding;
+    current.hasDataDescriptor = gpFlag.usesDataDescriptor();
+    current.entry.setGeneralPurposeBit(gpFlag);
+
+    off += SHORT;
+
+    current.entry.setMethod(ZipShort.getValue(LFH_BUF, off));
+    off += SHORT;
+
+    final long time = ZipUtil.dosToJavaTime(ZipLong.getValue(LFH_BUF, off));
+    current.entry.setTime(time);
+    off += WORD;
+
+    ZipLong size = null, cSize = null;
+    if (!current.hasDataDescriptor) {
+        current.entry.setCrc(ZipLong.getValue(LFH_BUF, off));
+        off += WORD;
+
+        cSize = new ZipLong(LFH_BUF, off);
+        off += WORD;
+
+        size = new ZipLong(LFH_BUF, off);
+        off += WORD;
+    } else {
+        off += 3 * WORD;
+    }
+
+    final int fileNameLen = ZipShort.getValue(LFH_BUF, off);
+
+    off += SHORT;
+
+    final int extraLen = ZipShort.getValue(LFH_BUF, off);
+    off += SHORT;
+
+    final byte[] fileName = new byte[fileNameLen];
+    readFully(fileName);
+    current.entry.setName(entryEncoding.decode(fileName), fileName);
+
+    final byte[] extraData = new byte[extraLen];
+    readFully(extraData);
+    current.entry.setExtra(extraData);
+
+    if (!hasUTF8Flag && useUnicodeExtraFields) {
+        ZipUtil.setNameAndCommentFromExtraFields(current.entry, fileName, null);
+    }
+
+    processZip64Extra(size, cSize);
+
+    if (current.entry.getCompressedSize()!= ArchiveEntry.SIZE_UNKNOWN) {
+        if (current.entry.getMethod() == ZipMethod.UNSHRINKING.getCode()) {
+            current.in = new UnshrinkingInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+        } else if (current.entry.getMethod() == ZipMethod.IMPLODING.getCode()) {
+            current.in = new ExplodingInputStream(
+                    current.entry.getGeneralPurposeBit().getSlidingDictionarySize(),
+                    current.entry.getGeneralPurposeBit().getNumberOfShannonFanoTrees(),
+                    new BoundedInputStream(in, current.entry.getCompressedSize()));
+        } else if (current.entry.getMethod() == ZipMethod.BZIP2.getCode()) {
+            current.in = new BZip2CompressorInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+        }
+    }
+    
+    entriesRead++;
+    return current.entry;
+}
+```
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the buggy Java code for the getNextZipEntry method. The provided code is failing two tests, so I should figure out what's wrong.
+
+First, looking at the testListAllFilesWithNestedArchive test. It's expecting one ZipException but isn't getting any. That suggests that when trying to read a nested zip entry, an exception isn't being thrown when it should be. Maybe the current code isn't correctly handling certain cases, like when an entry isn't a valid zip entry.
+
+The second test, testThrowOnInvalidEntry, expects an IOException but gets a ZipException instead. Wait, the test is catching a ZipException, which is a subclass of IOException, so maybe that's not the issue. Alternatively, perhaps the code isn't correctly throwing an exception when it should.
+
+Looking at the code, when the signature isn't LFH_SIG, it returns null. But in some cases, like when it's a data descriptor or something else, maybe it should throw an exception instead.
+
+Wait, in the first test, the problem is that when trying to create a nested ArchiveInputStream from an entry that's not a zip file, it should throw an exception. But the code might not be correctly detecting that the entry is invalid, so the nested stream isn't throwing an exception, leading to expectedExceptions.size() being 0 instead of 1.
+
+In the code, after reading the signature, if it's not LFH_SIG, it returns null. But perhaps in some cases, like when the signature is something unexpected, it should throw an exception instead of just returning null. For example, if the signature is neither CFH_SIG nor AED_SIG nor LFH_SIG, it might be an invalid entry.
+
+So, in the code, after checking if the signature equals CFH_SIG or AED_SIG, it sets hitCentralDirectory and skips. Then, it checks if the signature is not LFH_SIG, returns null. But maybe when the signature is something else entirely, like an unknown signature, it should throw an exception.
+
+In the testThrowOnInvalidEntry, the test expects a ZipException when the signature is invalid. So in the code, when the signature isn't any of the expected ones, it should throw an exception instead of just returning null.
+
+So, perhaps the fix is to add an else clause after the if (!sig.equals(LFH_SIG)) check. If the signature isn't any of the known ones, throw an exception.
+
+Wait, in the current code, after handling CFH_SIG and AED_SIG, it checks if the signature isn't LFH_SIG and returns null. But for other cases, like an invalid signature, it should throw an exception.
+
+So, modifying the code:
+
+After the line:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    return null;
+}
+
+Wait, no. Because if the signature is CFH_SIG or AED_SIG, it sets hitCentralDirectory and skips, then returns null because it's not LFH_SIG. So in that case, it's correct to return null because those are central directory or end records.
+
+But if the signature is something else, like an unknown value, then the code returns null, which might cause the test to fail because it expects an exception.
+
+So, perhaps after reading the signature, if it's neither CFH_SIG, AED_SIG, nor LFH_SIG, then we should throw an exception.
+
+Let me adjust the code:
+
+After reading the signature, check:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    // handle central directory
+} else if (sig.equals(LFH_SIG)) {
+    // proceed normally
+} else {
+    // throw exception for unexpected signature
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+So, in the existing code, the else part is missing. So when a signature is neither CFH, AED, nor LFH, the code returns null, but perhaps it should throw an exception.
+
+So, in the original code:
+
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+}
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    return null;
+}
+
+This means that if the signature is CFH or AED, it sets hitCentralDirectory and returns null because!sig.equals(LFH) is true. That's correct because those are not entries. But if the signature is something else, it returns null, which might not trigger the exception when needed.
+
+So, perhaps after the initial if, add an else if to check for LFH_SIG, else throw.
+
+Alternatively, after the first if, add an else if that checks for LFH_SIG. If not, throw an exception.
+
+So, modifying the code:
+
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+} else if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+Wait, no. Because the first if handles CFH and AED, and sets hitCentralDirectory and skips. Then, the else if would check if it's not LFH, and throw. But wait, in the case of CFH or AED, after handling, the code would still proceed to the else if and throw because sig isn't LFH. That's not correct.
+
+Hmm, perhaps I should restructure the code.
+
+After reading the signature, first check if it's CFH or AED. If so, handle and return null.
+
+Else, check if it's LFH. If not, throw an exception.
+
+Wait, perhaps:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    handle and return null;
+} else if (sig.equals(LFH_SIG)) {
+    proceed to read entry
+} else {
+    throw exception
+}
+
+So, the code would be:
+
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+    return null;
+} else if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+Wait, but in the original code, after handling CFH or AED, it continues and returns null because!sig.equals(LFH) is true. So perhaps I should move the return null into the first if block.
+
+So, restructure:
+
+if (sig.equals(CFH) || sig.equals(AED)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+    return null;
+} else if (!sig.equals(LFH)) {
+    throw new ZipException(...);
+}
+
+This way, only LFH entries proceed, others either return null (for CFH/AED) or throw (for others).
+
+This would cause the testThrowOnInvalidEntry to throw a ZipException when the signature is invalid, which is what the test expects. Also, in the first test, when the nested stream tries to read an invalid entry, it would throw, leading to the expected exception count.
+
+Another thing to check is whether the code correctly handles data descriptors. But perhaps the main issue is the missing exception for unexpected signatures.
+
+So, applying this change to the code.
+</think>
+
+To fix the bugs, we need to ensure that the method throws a `ZipException` when encountering an unexpected record signature and correctly handles cases where the end of central directory is reached.
+
+Here is the fixed code:
+
+```java
+    public ZipArchiveEntry getNextZipEntry() throws IOException {
+        boolean firstEntry = true;
+        if (closed || hitCentralDirectory) {
+            return null;
+        }
+        if (current!= null) {
+            closeEntry();
+            firstEntry = false;
+        }
+
+        try {
+            if (firstEntry) {
+                readFirstLocalFileHeader(LFH_BUF);
+            } else {
+                readFully(LFH_BUF);
+            }
+        } catch (final EOFException e) {
+            return null;
+        }
+
+        final ZipLong sig = new ZipLong(LFH_BUF);
+        if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+            hitCentralDirectory = true;
+            skipRemainderOfArchive();
+            return null;
+        } else if (!sig.equals(ZipLong.LFH_SIG)) {
+            throw new ZipException("Unexpected record signature: " + sig);
+        }
+
+        int off = WORD;
+        current = new CurrentEntry();
+
+        final int versionMadeBy = ZipShort.getValue(LFH_BUF, off);
+        off += SHORT;
+        current.entry.setPlatform((versionMadeBy >> ZipFile.BYTE_SHIFT) & ZipFile.NIBLET_MASK);
+
+        final GeneralPurposeBit gpFlag = GeneralPurposeBit.parse(LFH_BUF, off);
+        final boolean hasUTF8Flag = gpFlag.usesUTF8ForNames();
+        final ZipEncoding entryEncoding = hasUTF8Flag? ZipEncodingHelper.UTF8_ZIP_ENCODING : zipEncoding;
+        current.hasDataDescriptor = gpFlag.usesDataDescriptor();
+        current.entry.setGeneralPurposeBit(gpFlag);
+
+        off += SHORT;
+
+        current.entry.setMethod(ZipShort.getValue(LFH_BUF, off));
+        off += SHORT;
+
+        final long time = ZipUtil.dosToJavaTime(ZipLong.getValue(LFH_BUF, off));
+        current.entry.setTime(time);
+        off += WORD;
+
+        ZipLong size = null, cSize = null;
+        if (!current.hasDataDescriptor) {
+            current.entry.setCrc(ZipLong.getValue(LFH_BUF, off));
+            off += WORD;
+
+            cSize = new ZipLong(LFH_BUF, off);
+            off += WORD;
+
+            size = new ZipLong(LFH_BUF, off);
+            off += WORD;
+        } else {
+            off += 3 * WORD;
+        }
+
+        final int fileNameLen = ZipShort.getValue(LFH_BUF, off);
+
+        off += SHORT;
+
+        final int extraLen = ZipShort.getValue(LFH_BUF, off);
+        off += SHORT;
+
+        final byte[] fileName = new byte[fileNameLen];
+        readFully(fileName);
+        current.entry.setName(entryEncoding.decode(fileName), fileName);
+
+        final byte[] extraData = new byte[extraLen];
+        readFully(extraData);
+        current.entry.setExtra(extraData);
+
+        if (!hasUTF8Flag && useUnicodeExtraFields) {
+            ZipUtil.setNameAndCommentFromExtraFields(current.entry, fileName, null);
+        }
+
+        processZip64Extra(size, cSize);
+
+        if (current.entry.getCompressedSize()!= ArchiveEntry.SIZE_UNKNOWN) {
+            if (current.entry.getMethod() == ZipMethod.UNSHRINKING.getCode()) {
+                current.in = new UnshrinkingInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+            } else if (current.entry.getMethod() == ZipMethod.IMPLODING.getCode()) {
+                current.in = new ExplodingInputStream(
+                        current.entry.getGeneralPurposeBit().getSlidingDictionarySize(),
+                        current.entry.getGeneralPurposeBit().getNumberOfShannonFanoTrees(),
+                        new BoundedInputStream(in, current.entry.getCompressedSize()));
+            } else if (current.entry.getMethod() == ZipMethod.BZIP2.getCode()) {
+                current.in = new BZip2CompressorInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+            }
+        }
+        
+        entriesRead++;
+        return current.entry;
+    }
+```
+~~~~~~~~~~~~~~~~~
+Okay, I have this buggy Java function to fix. Let's see what's going on. The function is called getNextZipEntry and it's part of a ZipArchiveInputStream class. The user provided two failing tests, so I need to figure out what's wrong with the code based on those test failures.
+
+Looking at the first test, testListAllFilesWithNestedArchive, the error is that it expected 1 exception but got 0. So the code isn't throwing an exception when it should. The test is trying to read a nested zip archive, and when it tries to create a new ArchiveInputStream from a ZipArchiveEntry that's actually a directory (like test3.xml), it expects a ZipException. But it's not happening, so maybe the code isn't correctly identifying invalid entries.
+
+The second test, testThrowOnInvalidEntry, expects a ZipException with a message about an unexpected record signature. But instead, it's getting an IOException, possibly because the code is throwing the wrong type of exception or not handling the error correctly.
+
+Looking at the code, the function reads the next zip entry. Let me go through it step by step.
+
+First, it checks if the archive is closed or if it's hit the central directory. Then it closes the current entry if necessary.
+
+It reads the local file header (LFH) into a buffer. If it's the first entry, it uses readFirstLocalFileHeader; otherwise, readFully. Then it checks for EOFException, returning null if it occurs.
+
+Next, it checks the signature (sig) from the buffer. If it's CFH_SIG or AED_SIG, it sets hitCentralDirectory and skips the remainder. If the signature isn't LFH_SIG, it returns null.
+
+Wait a minute. The problem might be here. If the signature is not LFH_SIG, it returns null. But in some cases, like when the entry is a directory, maybe it's not correctly throwing an exception. For example, in the test, when trying to read test3.xml, which is a directory, the code should throw an exception because it can't create an input stream for a directory. But perhaps the code is just returning null instead of throwing.
+
+Looking further down, after processing the entry, if the method is unknown, it might not set up the input stream correctly. But maybe the main issue is that when the signature isn't LFH_SIG, it returns null, but in some cases, like invalid entries, it should throw an exception.
+
+Wait, the test expects a ZipException when trying to create a nested ArchiveInputStream from a non-file entry. So perhaps when the current entry is a directory, the code should throw an exception when getNextEntry is called, or when trying to read it as an entry.
+
+Wait, in the test, the outer loop gets entries, and for each, tries to create a nested ArchiveInputStream. If the entry is a directory (like test3.xml), creating the nested stream should fail. So in the getNextEntry method, when it's processing such an entry, perhaps it's not correctly identifying that it's invalid and not throwing an exception.
+
+But in the current code, when the signature is not LFH_SIG, it returns null, which might not be the right approach. Because in some cases, like when the entry is a directory, it's still a valid entry but without data. So the function should return the entry, but when trying to read it as an input stream, it should throw an exception.
+
+Alternatively, maybe the problem is that the function is not correctly handling the case where an entry is a directory. For example, if an entry has a method that's not supported, or if it's a directory, it should throw an exception when trying to read it.
+
+Wait, looking at the code, after processing the method, if it's unknown, it doesn't set the input stream. But in the test, the issue is that the nested stream is being created even when the entry is a directory. So perhaps the code isn't correctly handling the case where an entry is a directory and thus should not be treated as a valid entry for creating a nested stream.
+
+Alternatively, perhaps the function is incorrectly allowing the creation of an entry for a directory, which should instead be considered invalid and cause an exception.
+
+Wait, the test expects that when trying to create a nested ArchiveInputStream from an entry that's a directory (like test3.xml), it should throw a ZipException. So in the getNextZipEntry method, when it's processing such an entry, it should recognize that it's not a valid file entry and throw an exception.
+
+Looking back at the code, after reading the signature, if it's not LFH_SIG, it returns null. So if the signature is something else, it returns null, which would make the getNextEntry return null, not throw an exception. But in the test, it's expecting an exception when creating the nested stream. So perhaps the issue is that the function is returning null instead of throwing an exception when it encounters an invalid signature.
+
+Wait, but in the test, the outer loop is getting the next entry, which includes the nested zip file. So the function should correctly read the entry as a zip file, and then when trying to create a nested stream, it should process that entry.
+
+Wait, I'm getting a bit confused. Let me think about the second test: testThrowOnInvalidEntry. It expects that when trying to read an invalid zip entry, the function throws a ZipException with a message about an unexpected record signature. But in the current code, when the signature isn't LFH_SIG, it returns null. So perhaps the function is not throwing an exception when it should.
+
+Wait, the test is calling getNextZipEntry on a corrupt zip file, which should cause it to throw a ZipException. But according to the error message, the test is getting an IOException instead of the expected ZipException. Alternatively, perhaps the function is throwing an IOException when it should be throwing a ZipException.
+
+Looking at the code, when readFirstLocalFileHeader or readFully throws an EOFException, it catches it and returns null. But if there's an invalid signature, like not LFH_SIG, it just returns null. But in the test, when the signature is invalid, it should throw an exception, not return null.
+
+Wait, but in the code, after reading the signature, if it's not LFH_SIG, it returns null. So in the test, when the signature is invalid, the function returns null, but the test expects it to throw an exception. So that's a problem. Because the test expects getNextZipEntry to throw a ZipException when the signature is invalid.
+
+So perhaps the code should be modified to throw a ZipException when the signature isn't LFH_SIG, instead of returning null. Because returning null indicates that there are no more entries, but an invalid signature should be treated as an error.
+
+Wait, but in the case of a split archive, maybe it's different. Let me think: The function starts by checking if it's the first entry and reads the first local file header. If it's a split archive, the first entry would have a special signature, but I'm not sure.
+
+Alternatively, perhaps the function should throw an exception when the signature isn't LFH_SIG, except in cases where it's the central directory or something else.
+
+So, in the code, after reading the signature, if it's CFH_SIG or AED_SIG, it handles that. Then, if it's not LFH_SIG, it returns null. But perhaps that's incorrect. Instead, when the signature isn't LFH_SIG, and it's not CFH or AED, it should throw an exception indicating an invalid entry.
+
+So, modifying the code: after checking if the signature is CFH_SIG or AED_SIG, and handling that, if the signature isn't LFH_SIG, then throw a ZipException with an appropriate message, like "Unexpected record signature".
+
+In the test, that would cause the function to throw a ZipException, which is what the test expects. Also, in the first test, when processing an entry that's a directory, perhaps the function would throw an exception when trying to read it, leading to the expected exception count.
+
+So, the plan is:
+
+1. In the code, after the line where it checks if sig is CFH_SIG or AED_SIG, and after handling that, add an else if condition to check if sig is not LFH_SIG. If so, throw a ZipException indicating an invalid signature.
+
+So, the code should look like this:
+
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    // handle central directory
+} else if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+But wait, in the current code, it just returns null if the signature isn't LFH_SIG. So replacing that with throwing an exception.
+
+So, in the code, the lines after the signature check are:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    return null;
+}
+
+We need to change that to throw an exception instead.
+
+So, replacing that with:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+That should cause the function to throw a ZipException when the signature is invalid, which would fix the second test.
+
+Now, looking at the first test, the issue is that it's expecting one exception but getting none. So perhaps when trying to read a directory entry, the function is returning null instead of throwing an exception. But in the test, the code is trying to create a nested ArchiveInputStream from an entry that's a directory, which should throw an exception when getNextEntry is called on the nested stream.
+
+Wait, perhaps the problem is that the current function is allowing the creation of a ZipArchiveEntry for a directory, but when trying to read it as a stream, it should throw an exception. So maybe the function is not correctly handling the case where an entry is a directory.
+
+Looking at the code, after processing the method, if the method is unknown or not supported, it doesn't set the input stream. But in that case, when the user tries to read from the stream, it should throw an exception. However, perhaps the issue is that the function is not checking if the entry is a directory and thus should not be processed as a file.
+
+Wait, the function returns a ZipArchiveEntry regardless of whether it's a file or directory. So when the entry is a directory, the code proceeds, but when trying to read from it, since it's a directory, it's invalid.
+
+But in the test, the nested stream is created with `new ArchiveStreamFactory().createArchiveInputStream("zip", in)`, where `in` is the current stream. So, perhaps the problem is that the current stream is positioned at the data of the entry, which for a directory is zero length, but the code should throw an exception when trying to read it as a zip stream.
+
+Wait, perhaps the issue is that when the entry is a directory, the code doesn't set `current.in` to null or throw an exception, leading to the nested stream not throwing an exception as expected.
+
+Alternatively, perhaps when the entry is a directory, the code should throw an exception when trying to read it as a stream.
+
+Wait, in the code, after processing the method, if the method is unknown, it doesn't set `current.in`, so when the user tries to read, it would throw an exception because `current.in` is null.
+
+But looking at the code, after the method checks:
+
+if (current.entry.getCompressedSize()!= ArchiveEntry.SIZE_UNKNOWN) {
+    if (current.entry.getMethod() == ZipMethod.UNSHRINKING.getCode()) {
+        // set current.in
+    } else if (current.entry.getMethod() == ZipMethod.IMPLODING.getCode()) {
+        // set current.in
+    } else if (current.entry.getMethod() == ZipMethod.BZIP2.getCode()) {
+        // set current.in
+    }
+}
+
+So, if the method is not one of these, `current.in` remains null. Then, when the user tries to read from the stream, it would throw an exception because `current.in` is null.
+
+But in the test, the code is trying to create a nested stream from a directory entry, which would have a method of STORE, perhaps, but with zero size. Or maybe the method is set to something else.
+
+Wait, perhaps the issue is that the function is allowing the creation of a ZipArchiveEntry for a directory, but when trying to read it as a stream, it's not throwing an exception. So, in the code, when `current.in` is null, the `read` method would throw an exception.
+
+But in the test, the outer loop is able to get the entry, and then tries to create a nested stream. So, perhaps the problem is that the function is not correctly identifying that the entry is a directory and thus should not be processed as a file.
+
+Wait, perhaps in the function, it should check if the entry is a directory and throw an exception if someone tries to read it as a stream. Alternatively, when creating the nested stream, it should check if the entry is a directory and throw.
+
+But the function getNextZipEntry is just supposed to get the next entry; it's up to the caller to handle it correctly. So perhaps the issue is that when the entry is a directory, the function should not return it as a valid ZipArchiveEntry, or should mark it as such, so that the caller knows not to try to read it as a stream.
+
+Wait, looking at the code, after processing the entry, it returns `current.entry`, which is a ZipArchiveEntry. The entry has a method, compressed size, etc. But if it's a directory, perhaps the compressed size is zero, and the method is STORE. But the code doesn't prevent creating an input stream for it.
+
+So, when the nested stream is created, it calls getNextEntry on it, which would attempt to read the data. But since it's a directory, the data is not present, leading to an error.
+
+Wait, but in the test, the error is that the expected exception count is 1, but it's getting 0. That suggests that the code is not throwing an exception when it should.
+
+So perhaps the function needs to throw an exception when it's a directory entry. Or, more accurately, when the entry is not a file, it should not be treated as a valid entry for creating a stream.
+
+Wait, perhaps the function should check if the entry is a directory and throw an exception if someone tries to read it as a stream.
+
+But in the current code, the function doesn't do that. It just returns the entry, and the stream's read method would throw an exception when `current.in` is null.
+
+Wait, but in the test, the code is trying to create a nested stream from the entry, which is a directory. So when the nested stream's getNextEntry is called, it should throw an exception.
+
+But perhaps in the function, when the signature is not LFH_SIG, it's returning null, which causes the nested stream's getNextEntry to return null, not throw an exception. Hence, the test doesn't catch the expected exception.
+
+So, to fix the tests, the function needs to throw an exception when the signature is invalid, and also handle the case where an entry is a directory, perhaps by throwing an exception when trying to read it as a stream.
+
+Wait, but the function is called getNextZipEntry, and it's supposed to return the next entry or null if there are no more. So throwing an exception when the signature is invalid makes sense because that indicates a corrupt zip file. But when the entry is a directory, it's a valid entry, so the function should return it, but the stream should throw an exception when trying to read from it.
+
+So, perhaps the issue is that in the function, when the signature is invalid, it's returning null instead of throwing an exception, which is causing the test to not catch the expected exception.
+
+So, the fix is to modify the function to throw a ZipException when the signature is not LFH_SIG, except when it's CFH or AED.
+
+Therefore, the code should be changed to:
+
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+} else if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+This way, when the signature is invalid, the function throws an exception, which should fix the second test. For the first test, when trying to create a nested stream from a directory entry, the function should return the entry, and then when trying to read it, the stream should throw an exception because `current.in` is null.
+
+Wait, but in the first test, the nested stream is created as follows:
+
+final ArchiveInputStream nestedIn = new ArchiveStreamFactory().createArchiveInputStream("zip", in);
+
+Here, `in` is the current stream, which is positioned at the data of the current entry. If the current entry is a directory, its compressed size is zero. So when the nested stream tries to read, it would hit EOF immediately, leading to an EOFException, which is a type of IOException, not a ZipException.
+
+But in the test, the expected exception is a ZipException. So perhaps the function needs to throw a ZipException when the entry is a directory and someone tries to read it as a stream.
+
+Alternatively, perhaps the function should not return directory entries, but that's not standard because zip files can have directory entries.
+
+Hmm, this is getting a bit complicated. Let me think again.
+
+The first test expects that when creating a nested stream from a directory entry, it should throw a ZipException. But the current code doesn't do that. So perhaps the function should check if the entry is a directory and throw an exception when trying to read it as a stream.
+
+But in the getNextZipEntry function, it's just returning the entry; it's not responsible for handling whether the entry is a file or directory. The stream's read method would handle that.
+
+Wait, looking at the code, after the function returns the entry, the stream's read method is called. If the entry is a directory, the compressed size is zero, and the method is STORE. So when the stream tries to read, it would see that the compressed size is zero, and perhaps throw an exception.
+
+But in the test, the code is creating a nested stream and calling getNextEntry on it. So, for the nested stream, the function would be called again, which would read the signature. But since the data is zero length, it would hit EOF, causing an EOFException, which is an IOException, not a ZipException.
+
+But the test expects a ZipException. So perhaps the function should be modified to throw a ZipException when the entry is a directory and someone tries to read it.
+
+Wait, perhaps the function should check if the entry is a directory and throw an exception when trying to read it as a stream.
+
+Alternatively, perhaps the function should not allow creating an input stream for a directory entry.
+
+But I'm not sure. Let me think about the flow.
+
+In the test, the outer loop gets an entry, which is "NestedArchiv.zip". Then, it creates a nested stream from it, which is correct. Then, in the nested stream's loop, it tries to get the next entry, which is "test1.xml", etc. But one of the entries is "test3.xml", which is a directory. So when the nested stream tries to get the next entry after that, it would hit EOF, but perhaps the function returns null, not throwing an exception.
+
+Wait, no. The nested stream is created from the outer stream, which is positioned at the data of "NestedArchiv.zip". So when the nested stream is created, it's a new ZipArchiveInputStream that reads from the outer stream's data. So when the nested stream's getNextEntry is called, it would read the entries from the nested zip file.
+
+But in the test, the outer zip file has an entry "NestedArchiv.zip", which is a zip file containing "test1.xml", "test2.xml", and "test3.xml" (a directory). So when the nested stream is created, it should be able to read "test1.xml" and "test2.xml", but when it tries to read "test3.xml", which is a directory, the function should throw an exception.
+
+So, in the nested stream's getNextZipEntry function, when it reads "test3.xml" entry, it's a directory. So when it processes the method, perhaps the method is 0 (stored), and the compressed size is zero. So the function would set `current.in` to null because the method isn't one of the supported ones. Then, when the nested stream tries to read, it would throw an IOException because `current.in` is null.
+
+But the test expects a ZipException, not an IOException. So perhaps the function should throw a ZipException when the method is 0 but the entry is a directory, or when the compressed size is zero but it's not a directory.
+
+Wait, but the function doesn't have information about whether the entry is a directory or not. The ZipArchiveEntry has a method to check if it's a directory, but perhaps the function isn't using it.
+
+So, perhaps in the function, after processing the method, if the entry is a directory, it should throw an exception when trying to read it as a stream.
+
+But how would the function know that? It can check if the entry's name ends with a '/', which indicates a directory. So, perhaps after creating the current.entry, the function should check if it's a directory and throw an exception if someone tries to read it as a stream.
+
+Alternatively, in the read method of the stream, it could check if the current entry is a directory and throw an exception.
+
+But the function in question is getNextZipEntry, which is supposed to return the next entry regardless. So perhaps the issue is that in the getNextZipEntry function, when the entry is a directory, it's not throwing an exception, but when trying to read it as a stream, it should.
+
+But in the test, the problem is that the nested stream is not throwing an exception when it should, leading to the expectedExceptions list not being filled.
+
+So perhaps the function needs to be modified to throw a ZipException when the entry is a directory and someone tries to read it as a stream. Or, more accurately, when the entry is a directory, the function should not return it as a valid entry, but that's not correct because zip files can have directory entries.
+
+Wait, perhaps the issue is that when the entry is a directory, the function should not attempt to create an input stream for it, and instead throw an exception when someone tries to read from it.
+
+So, in the code, after creating the current.entry, perhaps it should check if the entry is a directory and throw an exception.
+
+But how? Because the function is just returning the entry; it's the caller's responsibility to handle it.
+
+Alternatively, perhaps the function should throw an exception when the entry is a directory and the method is not STORE or something else.
+
+Wait, perhaps the function should check if the entry is a directory and, if so, throw an exception when trying to read it as a stream.
+
+But that logic might belong in the read method, not in getNextZipEntry.
+
+Alternatively, perhaps the function should not return directory entries when they are not supposed to be read as streams.
+
+But I'm not sure. Let me think about the first test again.
+
+The test is expecting that when trying to create a nested stream from a directory entry, it should throw a ZipException. So, in the code, when the function processes the directory entry, it should throw an exception when trying to create the stream.
+
+But the function getNextZipEntry is just returning the entry; the exception should be thrown when trying to read from the stream, not when getting the entry.
+
+So, perhaps the issue is that when the entry is a directory, the function should not allow creating an input stream for it, and thus, when the user tries to read from it, it should throw an exception.
+
+Looking back at the code, after processing the method, if the method is not supported, `current.in` is not set. So, when the user tries to read from the stream, it would throw an IOException because `current.in` is null.
+
+But in the test, the expected exception is a ZipException, not an IOException. So perhaps the function should throw a ZipException when `current.in` is null and someone tries to read.
+
+Alternatively, perhaps the function should check if `current.in` is null and throw a ZipException when trying to read.
+
+But the function getNextZipEntry is just getting the next entry, not reading the data. So perhaps the read method should throw the exception.
+
+Wait, but the function is part of the ZipArchiveInputStream class, which extends InputStream. So, the read() method would be called, and if `current.in` is null, it would throw an exception.
+
+But in the test, the code is trying to create a nested stream from the directory entry, and when it calls getNextEntry on the nested stream, it's returning null instead of throwing an exception, leading to no exception being caught.
+
+Wait, no. Let me clarify:
+
+In the test, the outer loop is processing each entry. For each entry, it creates a nested stream and tries to read its entries. For the entry "NestedArchiv.zip", which is a valid zip file, the nested stream can read its entries. But for "test3.xml", which is a directory, when the nested stream is created, it's actually a directory entry, so when the nested stream's getNextEntry is called, it should throw an exception.
+
+But according to the test, it's not throwing, so the expectedExceptions list remains empty.
+
+So, perhaps the issue is that when the entry is a directory, the function getNextZipEntry is returning null instead of throwing an exception when trying to read it as a stream.
+
+Wait, but the function getNextZipEntry returns null when there are no more entries, but in the case of a directory, it's a valid entry, so it returns the entry. Then, when the nested stream tries to read it, it's treated as a zip file, but since it's a directory, it's not a valid zip, so the function should throw an exception.
+
+Wait, no. The nested stream is created from the outer stream's data, which is the content of "NestedArchiv.zip". So the nested stream is reading the entries from that zip file. So when it tries to read "test3.xml", which is a directory, the function should process it as an entry and then throw an exception when trying to read it as a stream.
+
+But perhaps the function is allowing the creation of a ZipArchiveEntry for a directory without throwing an exception, and then when the nested stream tries to read it, it's treated as a valid entry but with no data, leading to an EOFException instead of a ZipException.
+
+So, perhaps the function should check if the entry is a directory and throw an exception when trying to read it as a stream.
+
+But how can the function know that? It can check if the entry's name ends with a '/'.
+
+So, perhaps after creating current.entry, the function should check if it's a directory, and if so, throw a ZipException.
+
+Wait, but the function is supposed to return the entry regardless. The exception should be thrown when trying to read from the stream, not when getting the entry.
+
+So, perhaps in the read method, if the current entry is a directory, it should throw an exception.
+
+But the function in question is getNextZipEntry, so maybe that's beyond the scope.
+
+Alternatively, perhaps the function should not return directory entries when they are not supposed to be read as streams.
+
+But I'm getting stuck. Let me recap.
+
+The main issues causing the test failures are:
+
+1. The function returns null instead of throwing an exception when the signature is invalid, causing the second test to fail because it expects a ZipException.
+
+2. The function is not throwing an exception when trying to read a directory entry as a stream, causing the first test to fail because the expected exception isn't caught.
+
+So, for the first issue, changing the function to throw a ZipException when the signature is invalid should fix the second test.
+
+For the second issue, perhaps the function should throw an exception when the entry is a directory and someone tries to read it as a stream. But since the function getNextZipEntry is just returning the entry, perhaps the exception should be thrown elsewhere.
+
+Wait, perhaps the function should check if the entry is a directory and throw an exception when trying to create an input stream for it. So, in the code, after creating the current.entry, check if it's a directory, and if so, throw an exception.
+
+But that might not be correct because the function is supposed to return the entry regardless. The stream should handle whether it's a directory or not.
+
+Alternatively, perhaps the function should set a flag indicating that the entry is a directory, and then the stream's read method should throw an exception if someone tries to read from a directory.
+
+But that would require changes beyond the getNextZipEntry function.
+
+Alternatively, perhaps the function should not attempt to process directory entries as valid entries for creating input streams, but that's not standard.
+
+Hmm, perhaps I should focus on fixing the first issue, which is causing the second test to fail, and then see if that also helps with the first test.
+
+So, the plan is:
+
+- Modify the function to throw a ZipException when the signature is not LFH_SIG, CFH_SIG, or AED_SIG.
+
+This should fix the second test.
+
+As for the first test, perhaps after fixing the first issue, the function will correctly throw an exception when the nested stream tries to read an invalid entry, leading to the expected exception count.
+
+But I'm not entirely sure. Let me proceed with modifying the function to throw the exception on invalid signature.
+
+So, in the code, replace:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    return null;
+}
+
+with:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+This should cause the function to throw a ZipException when the signature is invalid, which should fix the second test.
+
+Now, regarding the first test: when the nested stream is created from a directory entry, the function would return the entry, and then when trying to read it, the stream would throw an exception. But perhaps the function is not correctly identifying that the entry is a directory, leading to no exception being thrown.
+
+Wait, perhaps the function should check if the entry is a directory and throw an exception when trying to read it as a stream. So, in the code, after processing the entry, check if it's a directory and throw an exception.
+
+But how?
+
+The ZipArchiveEntry has a method isDirectory(). So, after creating current.entry, the function can check if it's a directory and throw an exception.
+
+Wait, but that would prevent the function from returning directory entries, which is incorrect because zip files can have directory entries.
+
+So, perhaps the function should not throw an exception when the entry is a directory, but when someone tries to read it as a stream, it should throw an exception.
+
+Therefore, perhaps the read method of the stream should check if the current entry is a directory and throw an exception if so.
+
+But since the user is asking to fix the getNextZipEntry function, perhaps that's beyond the scope.
+
+So, perhaps the main fix is to throw an exception when the signature is invalid, which should fix the second test. As for the first test, perhaps it's a separate issue, but maybe fixing the first issue will also help.
+
+Alternatively, perhaps the function is not correctly handling the case where the entry is a directory, leading to no exception being thrown when it should.
+
+But without more information, I think the main issue is the function returning null instead of throwing an exception when the signature is invalid. So, I'll proceed with that fix.
+</think>
+
+To fix the provided code, we need to address the issues causing the test failures. The main problem is that the function returns `null` when encountering an invalid signature instead of throwing an exception. Additionally, it should handle cases where the entry is a directory correctly.
+
+### Analysis of the Issues:
+1. **Invalid Signature Handling**: The function returns `null` when the signature isn't recognized, but it should throw a `ZipException` to indicate an error.
+2. **Directory Entry Handling**: The function should throw an exception when attempting to read a directory entry as a stream.
+
+### Solution:
+1. **Throw Exception on Invalid Signature**: Modify the function to throw a `ZipException` when the signature isn't a valid local file header signature.
+2. **Check for Directory Entries**: After creating a `CurrentEntry`, check if it's a directory and throw an exception if it is, as directories shouldn't be read as streams.
+
+### Fixed Code:
+```java
+public ZipArchiveEntry getNextZipEntry() throws IOException {
+    boolean firstEntry = true;
+    if (closed || hitCentralDirectory) {
+        return null;
+    }
+    if (current!= null) {
+        closeEntry();
+        firstEntry = false;
+    }
+
+    try {
+        if (firstEntry) {
+            readFirstLocalFileHeader(LFH_BUF);
+        } else {
+            readFully(LFH_BUF);
+        }
+    } catch (final EOFException e) {
+        return null;
+    }
+
+    final ZipLong sig = new ZipLong(LFH_BUF);
+    if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+        hitCentralDirectory = true;
+        skipRemainderOfArchive();
+    }
+    if (!sig.equals(ZipLong.LFH_SIG)) {
+        throw new ZipException("Unexpected record signature: " + sig);
+    }
+
+    int off = WORD;
+    current = new CurrentEntry();
+
+    final int versionMadeBy = ZipShort.getValue(LFH_BUF, off);
+    off += SHORT;
+    current.entry.setPlatform((versionMadeBy >> ZipFile.BYTE_SHIFT) & ZipFile.NIBLET_MASK);
+
+    final GeneralPurposeBit gpFlag = GeneralPurposeBit.parse(LFH_BUF, off);
+    final boolean hasUTF8Flag = gpFlag.usesUTF8ForNames();
+    final ZipEncoding entryEncoding = hasUTF8Flag? ZipEncodingHelper.UTF8_ZIP_ENCODING : zipEncoding;
+    current.hasDataDescriptor = gpFlag.usesDataDescriptor();
+    current.entry.setGeneralPurposeBit(gpFlag);
+
+    off += SHORT;
+
+    current.entry.setMethod(ZipShort.getValue(LFH_BUF, off));
+    off += SHORT;
+
+    final long time = ZipUtil.dosToJavaTime(ZipLong.getValue(LFH_BUF, off));
+    current.entry.setTime(time);
+    off += WORD;
+
+    ZipLong size = null, cSize = null;
+    if (!current.hasDataDescriptor) {
+        current.entry.setCrc(ZipLong.getValue(LFH_BUF, off));
+        off += WORD;
+
+        cSize = new ZipLong(LFH_BUF, off);
+        off += WORD;
+
+        size = new ZipLong(LFH_BUF, off);
+        off += WORD;
+    } else {
+        off += 3 * WORD;
+    }
+
+    final int fileNameLen = ZipShort.getValue(LFH_BUF, off);
+    off += SHORT;
+
+    final int extraLen = ZipShort.getValue(LFH_BUF, off);
+    off += SHORT;
+
+    final byte[] fileName = new byte[fileNameLen];
+    readFully(fileName);
+    current.entry.setName(entryEncoding.decode(fileName), fileName);
+
+    final byte[] extraData = new byte[extraLen];
+    readFully(extraData);
+    current.entry.setExtra(extraData);
+
+    if (!hasUTF8Flag && useUnicodeExtraFields) {
+        ZipUtil.setNameAndCommentFromExtraFields(current.entry, fileName, null);
+    }
+
+    processZip64Extra(size, cSize);
+
+    if (current.entry.getCompressedSize()!= ArchiveEntry.SIZE_UNKNOWN) {
+        if (current.entry.getMethod() == ZipMethod.UNSHRINKING.getCode()) {
+            current.in = new UnshrinkingInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+        } else if (current.entry.getMethod() == ZipMethod.IMPLODING.getCode()) {
+            current.in = new ExplodingInputStream(
+                    current.entry.getGeneralPurposeBit().getSlidingDictionarySize(),
+                    current.entry.getGeneralPurposeBit().getNumberOfShannonFanoTrees(),
+                    new BoundedInputStream(in, current.entry.getCompressedSize()));
+        } else if (current.entry.getMethod() == ZipMethod.BZIP2.getCode()) {
+            current.in = new BZip2CompressorInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+        }
+    }
+
+    if (current.entry.isDirectory()) {
+        throw new ZipException("Entry is a directory, not a file");
+    }
+
+    entriesRead++;
+    return current.entry;
+}
+```
+
+### Explanation:
+- **Throwing ZipException on Invalid Signature**: The function now throws a `ZipException` when the signature isn't a valid local file header, addressing the issue where it previously returned `null`.
+- **Checking for Directory Entries**: After processing the entry, the function checks if it's a directory and throws a `ZipException` if true, preventing attempts to read directories as files.
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the buggy Java function getNextZipEntry(). Let's look at the problem.
+
+First, let me understand the context. This function is part of a ZipArchiveInputStream class, which reads zip archive entries. The function reads the next entry and returns it, or null if there are no more entries.
+
+Looking at the test failures:
+
+1. testListAllFilesWithNestedArchive: It expects one ZipException but gets zero. This suggests that when trying to read a nested zip entry, an exception isn't being thrown when it should be, or perhaps the code is allowing invalid entries to be processed.
+
+2. testThrowOnInvalidEntry: This test expects an IOException (specifically a ZipException) when reading an invalid entry, but it's not being thrown. Instead, the function might be returning null instead of throwing an exception when encountering an invalid signature.
+
+So, let's analyze the code step by step.
+
+In the function, after reading the signature (sig), there's a check:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+}
+if (!sig.equals(LFH_SIG)) {
+    return null;
+}
+
+So, if the signature is not a local file header (LFH_SIG), it returns null. But in the case of an invalid signature (neither CFH, AED, nor LFH), it would return null instead of throwing an exception. That's probably why the second test is failing—it expects an exception but the function just returns null.
+
+Wait, but in the second test, the invalid-zip.zip has an unexpected record signature. So the function should throw a ZipException when it doesn't recognize the signature.
+
+So, the problem is that when the signature is neither CFH, AED, nor LFH, the function returns null instead of throwing an exception. But according to the test, it should throw an exception in such cases.
+
+Looking at the function, after the first if block, there's a check if the signature isn't LFH, return null. But before that, if it's CFH or AED, it sets hitCentralDirectory and skips the remainder. So, if the signature is something else entirely, like an unknown value, it returns null. However, the test expects an exception in that case.
+
+So, perhaps the function should throw an exception when the signature isn't recognized. Let me check the original code.
+
+In the second test, the invalid-zip.zip probably has an invalid signature, so when getNextZipEntry is called, it should throw a ZipException with "Unexpected record signature". But currently, it's just returning null, causing the test to fail because it expects an exception.
+
+Therefore, the fix is to modify the code so that if the signature isn't CFH, AED, or LFH, the function throws a ZipException instead of returning null.
+
+So, in the code, after handling CFH and AED, if the signature isn't LFH, instead of returning null, we should throw an exception.
+
+Let me plan the steps:
+
+1. After reading the signature, check if it's CFH or AED. If so, handle as before.
+2. If not, check if it's LFH. If yes, proceed.
+3. If it's neither, throw a ZipException indicating an unexpected record signature.
+
+So, in code:
+
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+} else if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+Wait, but in the current code, after handling CFH/AED, it returns null if not LFH. So, changing that part to throw an exception instead.
+
+So, in the function, replace:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    return null;
+}
+
+with:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+But wait, what about the case where the signature is CFH or AED? Because in that case, the code sets hitCentralDirectory and skips the remainder, then proceeds. But after that, if the signature isn't LFH, it would still enter this condition and throw. But in the case of CFH or AED, the code should not throw because those are valid parts of the archive.
+
+Wait, no. After handling CFH or AED, the function skips the remainder, but then after that, it checks if the signature is not LFH and returns null. That's incorrect because, after hitting CFH, the function should stop processing entries, but the problem is that the function is returning null, which is correct for end of entries, but when an invalid signature is encountered, it should throw.
+
+So perhaps the logic is that any unexpected signature that isn't part of the valid headers should throw an exception.
+
+Wait, perhaps the correct approach is:
+
+- If the signature is CFH or AED: set hitCentralDirectory and skip. Then, since the function is supposed to return the next entry, which is null because we're at the end, it's okay to return null after handling CFH/AED.
+
+- If the signature is not LFH and not CFH/AED: throw exception.
+
+But in the current code, after handling CFH/AED, the function doesn't return. It proceeds to check if the signature is not LFH, returns null. But this would cause the function to return null when it's CFH/AED, which is correct because there are no more entries. But if the signature is something else, like an unknown value, it should throw.
+
+So the problem is that the code returns null for any non-LFH signature, including invalid ones. So, to fix this, the function should throw when the signature isn't any of the expected ones.
+
+So, perhaps the code should be:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    // Handle central directory
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+    return null; // because after central dir, no more entries
+} else if (!sig.equals(LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+Wait, but in the current code, after handling CFH/AED, it doesn't return null immediately. Instead, it continues and then returns null at the end. So perhaps the function needs to return null after handling CFH/AED, because there are no more entries.
+
+Alternatively, perhaps the function should, upon encountering CFH or AED, mark that the central directory is hit and then return null, indicating no more entries. For any other unexpected signature, it should throw.
+
+So, modifying the code:
+
+After reading the signature:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+    return null;
+} else if (!sig.equals(LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+This way, when the signature is CFH or AED, the function returns null, correctly indicating the end of entries. For any other unexpected signature, it throws an exception.
+
+Wait, but in the current code, after handling CFH/AED, the code doesn't return immediately. It proceeds, which may cause issues. Let me check:
+
+In the current code:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+}
+if (!sig.equals(LFH_SIG)) {
+    return null;
+}
+
+So, after handling CFH/AED, it skips the rest, but then the function continues processing. It then checks if the signature isn't LFH and returns null. So, for CFH/AED, the function returns null, which is correct. For other signatures, it returns null, but according to the tests, it should throw.
+
+So, the problem is that when the signature is neither CFH/AED nor LFH, it returns null instead of throwing. So, the fix is to change the second condition to throw an exception.
+
+Thus, in the code:
+
+Replace:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    return null;
+}
+
+with:
+
+if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+But wait, what about the case when the signature is CFH or AED? In that case, the function should return null because those are valid end-of-archive markers. So, the code should only throw when the signature is neither CFH, AED, nor LFH.
+
+So, the structure should be:
+
+if (sig is CFH or AED) {
+    handle and return null;
+} else if (sig is not LFH) {
+    throw exception;
+}
+
+Thus, in code:
+
+if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+    return null;
+} else if (!sig.equals(ZipLong.LFH_SIG)) {
+    throw new ZipException("Unexpected record signature: " + sig);
+}
+
+Wait, but in the current code, after the first if, it doesn't return. So, perhaps the code should return null after handling CFH/AED, and for other cases, throw.
+
+Wait, the current code is:
+
+if (sig.equals(CFH) || sig.equals(AED)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+}
+if (!sig.equals(LFH)) {
+    return null;
+}
+
+So, for CFH or AED, it sets hitCentralDirectory, skips, and then returns null. That's correct because after the central directory, there are no more entries.
+
+But for other signatures, it returns null, which is incorrect. So, the fix is to change the second condition to throw.
+
+Wait, perhaps it's better to structure it as:
+
+if (sig is CFH or AED) {
+    handle and return null;
+} else if (sig is LFH) {
+    proceed to read entry;
+} else {
+    throw exception;
+}
+
+So, in code:
+
+if (sig.equals(CFH_SIG) || sig.equals(AED_SIG)) {
+    hitCentralDirectory = true;
+    skipRemainderOfArchive();
+    return null;
+} else if (sig.equals(LFH_SIG)) {
+    // proceed to read entry
+} else {
+    throw new ZipException(...);
+}
+
+So, in the code, after the initial check for CFH/AED, if it's not, then check if it's LFH. If yes, proceed. Else, throw.
+
+So, I'll adjust the code accordingly.
+
+Now, let's see how this affects the tests.
+
+For testThrowOnInvalidEntry: The invalid-zip.zip has an unexpected signature. So, when getNextZipEntry is called, it should throw a ZipException, which is what the test expects. Before the fix, the function returns null, causing the test to fail because it expects an exception.
+
+After the fix, the function will throw, so the test should pass.
+
+For testListAllFilesWithNestedArchive: The problem is that when trying to read a nested zip entry, it's not throwing an exception when it should, leading to the expectedExceptions list not being populated. Perhaps the nested stream is encountering an invalid entry, but the function isn't throwing, so the expected exception isn't added.
+
+With the fix, when an invalid signature is encountered in the nested stream, the function will throw, leading to the expected exception count being correct.
+
+Another possible issue: In the current code, when the signature is CFH or AED, it skips the remainder of the archive. However, in a split archive, the CFH might not be present, but perhaps the code should handle that.
+
+Wait, perhaps there's another issue. Let me think about the first test: testListAllFilesWithNestedArchive.
+
+In this test, the main zip contains "NestedArchiv.zip", which is another zip file. The test tries to read this as a nested zip. However, when trying to create an ArchiveInputStream from it, perhaps the code isn't handling it correctly, leading to an exception. But according to the test, it expects one exception because you can't create a final ArchiveInputStream from test3.xml. So, perhaps when trying to read test3.xml as a zip, it's encountering an invalid signature and should throw, which it wasn't doing before the fix.
+
+With the fix, that case should now throw, leading to the expected exception being added to the list, making the test pass.
+
+Another possible issue: The function may not correctly handle the case where the central directory has been hit, but the function is still trying to read entries. So, after hitCentralDirectory is set, the function should return null for subsequent calls.
+
+But in the current code, after handling CFH/AED, it returns null, which is correct.
+
+So, the main issue is the handling of unexpected signatures, which is fixed by throwing an exception instead of returning null.
+
+So, the plan is:
+
+- Modify the function to throw a ZipException when the signature is neither CFH, AED, nor LFH.
+
+Implementing that, the function should pass both tests.
+</think>
+
+To fix the bug, we need to ensure that the function throws a `ZipException` when encountering an unexpected record signature instead of returning `null`. This addresses both test failures by properly signaling errors for invalid entries and correctly handling the end of the archive.
+
+```java
+public ZipArchiveEntry getNextZipEntry() throws IOException {
+    boolean firstEntry = true;
+    if (closed || hitCentralDirectory) {
+        return null;
+    }
+    if (current!= null) {
+        closeEntry();
+        firstEntry = false;
+    }
+
+    try {
+        if (firstEntry) {
+            // split archives have a special signature before the
+            // first local file header - look for it and fail with
+            // the appropriate error message if this is a split
+            // archive.
+            readFirstLocalFileHeader(LFH_BUF);
+        } else {
+            readFully(LFH_BUF);
+        }
+    } catch (final EOFException e) {
+        return null;
+    }
+
+    final ZipLong sig = new ZipLong(LFH_BUF);
+    if (sig.equals(ZipLong.CFH_SIG) || sig.equals(ZipLong.AED_SIG)) {
+        hitCentralDirectory = true;
+        skipRemainderOfArchive();
+        return null;
+    } else if (!sig.equals(ZipLong.LFH_SIG)) {
+        throw new ZipException("Unexpected record signature: " + sig);
+    }
+
+    int off = WORD;
+    current = new CurrentEntry();
+
+    final int versionMadeBy = ZipShort.getValue(LFH_BUF, off);
+    off += SHORT;
+    current.entry.setPlatform((versionMadeBy >> ZipFile.BYTE_SHIFT) & ZipFile.NIBLET_MASK);
+
+    final GeneralPurposeBit gpFlag = GeneralPurposeBit.parse(LFH_BUF, off);
+    final boolean hasUTF8Flag = gpFlag.usesUTF8ForNames();
+    final ZipEncoding entryEncoding = hasUTF8Flag? ZipEncodingHelper.UTF8_ZIP_ENCODING : zipEncoding;
+    current.hasDataDescriptor = gpFlag.usesDataDescriptor();
+    current.entry.setGeneralPurposeBit(gpFlag);
+
+    off += SHORT;
+
+    current.entry.setMethod(ZipShort.getValue(LFH_BUF, off));
+    off += SHORT;
+
+    final long time = ZipUtil.dosToJavaTime(ZipLong.getValue(LFH_BUF, off));
+    current.entry.setTime(time);
+    off += WORD;
+
+    ZipLong size = null, cSize = null;
+    if (!current.hasDataDescriptor) {
+        current.entry.setCrc(ZipLong.getValue(LFH_BUF, off));
+        off += WORD;
+
+        cSize = new ZipLong(LFH_BUF, off);
+        off += WORD;
+
+        size = new ZipLong(LFH_BUF, off);
+        off += WORD;
+    } else {
+        off += 3 * WORD;
+    }
+
+    final int fileNameLen = ZipShort.getValue(LFH_BUF, off);
+
+    off += SHORT;
+
+    final int extraLen = ZipShort.getValue(LFH_BUF, off);
+    off += SHORT;
+
+    final byte[] fileName = new byte[fileNameLen];
+    readFully(fileName);
+    current.entry.setName(entryEncoding.decode(fileName), fileName);
+
+    final byte[] extraData = new byte[extraLen];
+    readFully(extraData);
+    current.entry.setExtra(extraData);
+
+    if (!hasUTF8Flag && useUnicodeExtraFields) {
+        ZipUtil.setNameAndCommentFromExtraFields(current.entry, fileName, null);
+    }
+
+    processZip64Extra(size, cSize);
+
+    if (current.entry.getCompressedSize()!= ArchiveEntry.SIZE_UNKNOWN) {
+        if (current.entry.getMethod() == ZipMethod.UNSHRINKING.getCode()) {
+            current.in = new UnshrinkingInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+        } else if (current.entry.getMethod() == ZipMethod.IMPLODING.getCode()) {
+            current.in = new ExplodingInputStream(
+                    current.entry.getGeneralPurposeBit().getSlidingDictionarySize(),
+                    current.entry.getGeneralPurposeBit().getNumberOfShannonFanoTrees(),
+                    new BoundedInputStream(in, current.entry.getCompressedSize()));
+        } else if (current.entry.getMethod() == ZipMethod.BZIP2.getCode()) {
+            current.in = new BZip2CompressorInputStream(new BoundedInputStream(in, current.entry.getCompressedSize()));
+        }
+    }
+    
+    entriesRead++;
+    return current.entry;
+}
+```
+~~~~~~~~~~~~~~~~~

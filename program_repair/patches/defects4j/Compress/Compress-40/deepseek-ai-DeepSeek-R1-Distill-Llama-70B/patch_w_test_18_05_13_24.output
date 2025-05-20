@@ -1,0 +1,1806 @@
+
+####################
+Response
+####################
+Okay, so I have this Java function that's supposed to read a certain number of bits from an input stream, handling both little-endian and big-endian byte orders. But there are some test cases failing, so I need to figure out what's wrong.
+
+Let me look at the code first. The function is called readBits, and it takes an integer count. It checks if count is within valid range, then reads bytes until it has enough bits cached. Then it extracts the required number of bits based on the byte order.
+
+The test cases that are failing are both when the count is 63 and when it's 12. The first test, littleEndianWithOverflow, expects 1186 but gets 1184. The second test, bigEndianWithOverflow, expects a certain long value but gets another.
+
+Hmm, I remember that Java's long is 64 bits, so when reading 63 bits, the function should handle it without issues. Let me see what's happening in the code.
+
+Looking at the code, after reading enough bytes, it processes the bits. For little-endian, it does bitsCached |= (nextByte << bitsCachedSize). For big-endian, it shifts left by 8 and ORs the next byte.
+
+Wait, but when bitsCachedSize is 57, adding 8 would make it 65, which is beyond the 64-bit capacity. So shifting bitsCached left by 8 when it's already 57 bits would cause an overflow, right? Because 57 + 8 = 65, which is more than 64, so some bits would be lost.
+
+So the problem is that when the bitsCachedSize is 57, and we read another byte, the code tries to shift bitsCached left by 8, which overflows. But the comment in the code says that left-shifting would cause an overflow, so they must have thought about this.
+
+Wait, but the code proceeds to do bitsCached <<= 8 regardless. That's a problem because when bitsCachedSize is 57, shifting left by 8 would make it 65 bits, but a long can only hold 64. So the highest bit would be lost, causing incorrect values.
+
+So the code needs to handle the case where adding another byte would exceed 64 bits. Maybe when bitsCachedSize is 57, it should read the next byte and then handle the overflow correctly.
+
+Let me think about how to fix this. Perhaps when bitsCachedSize is 56 or more, we can't just shift left by 8. Instead, we should read the next byte and then only keep the necessary bits.
+
+Wait, but in the code, after reading the next byte, it's either shifted or not. Maybe the issue is that when the remaining bits needed are less than 8, the code should read a byte, but only take the necessary bits.
+
+Alternatively, perhaps the problem is in how the bits are being extracted after caching. Let's see.
+
+After the loop, when bitsCachedSize >= count, it proceeds to extract bitsOut.
+
+For little-endian, it's bitsCached & MASKS[count], then bitsCached is shifted right by count.
+
+For big-endian, it's bitsCached >> (bitsCachedSize - count) & MASKS[count].
+
+Wait, but when count is 63, the mask is 63 bits, but the code does (bitsCached >> (bitsCachedSize - count)) & MASKS[count].
+
+But if bitsCachedSize is more than count, say 64, then (bitsCachedSize - count) is 1. So it shifts right by 1, but that's not correct because for big-endian, the bits should be taken from the higher bits.
+
+Wait, maybe the way bits are extracted in big-endian is wrong when the count is large.
+
+Let me think about how the bits are stored. For little-endian, each new byte is shifted left and OR'ed into bitsCached. So the first byte is the least significant bits.
+
+For big-endian, each new byte is shifted left by 8 and then OR'ed. So the first byte is the most significant.
+
+So when extracting, for little-endian, the bits are in the lower part, so we can just mask with MASKS[count]. For big-endian, the bits are in the higher part, so we need to shift right by (bitsCachedSize - count) to get them into the lower part, then mask.
+
+But when count is 63, and bitsCachedSize is 64, then shifting right by 1 would take the highest bit and shift it down. But wait, 63 bits would require that the highest bit is the 63rd. So shifting right by 1 would lose that bit if not handled properly.
+
+Wait, no, because the mask is for 63 bits, so it's 0x7FFFFFFFFFFFFFFF. So when you shift right by 1, you're taking the higher 63 bits and shifting them into the lower 63 positions, but you're losing the highest bit if the shift is signed. Wait, no, because in Java, the >> operator for long is signed, so it would fill with the sign bit. But when you're dealing with bits, you might want to use unsigned right shift (>>>).
+
+Wait, in the code, for little-endian, it's bitsOut = (bitsCached & MASKS[count]); and then bitsCached >>>= count.
+
+For big-endian, it's bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];.
+
+So the problem might be that when count is 63, the shift in big-endian is 1, which is a signed shift. So if the highest bit is 1, it would be filled with 1s, which would mess up the lower bits.
+
+Wait, let's take an example. Suppose bitsCached is a 64-bit value where the highest bit is 1. If you do bitsCached >> 1, the result would have the highest bit as 1 again, because it's a signed shift. But for big-endian, when extracting 63 bits, you need to get the highest 63 bits, which includes that highest bit.
+
+But the mask is 63 bits, so after shifting, the highest bit would be in the 63rd position, but the mask would cover 63 bits, so it should be okay. Wait, no, because the mask is 0xFFFFFFFFFFFFFFFFL for 63 bits? Or wait, what's MASKS[count]?
+
+I think MASKS is a lookup table where MASKS[count] is a long with the lower 'count' bits set to 1. So for count=63, it's 0x7FFFFFFFFFFFFFFF.
+
+Wait, no, for count=63, the mask should be 63 bits, so it's (1L << 63) -1, which is 0x7FFFFFFFFFFFFFFF.
+
+So when you have bitsCached as a 64-bit value, and you shift it right by (bitsCachedSize - count), which for count=63 and bitsCachedSize=64 is 1, you get a value that's the higher 63 bits. But using a signed shift would extend the sign bit. So if the highest bit was 1, the shift would make the lower 63 bits all 1s, which is incorrect.
+
+Wait, no. Let me think: if bitsCached is, say, 0x8000000000000000 (highest bit set), and we do bitsCached >> 1, we get 0xC000000000000000 because of sign extension. Then, when we mask with 0x7FFFFFFFFFFFFFFF, it becomes 0x4000000000000000, which is incorrect because the highest bit was lost.
+
+Wait, that's a problem. So in big-endian mode, when extracting 63 bits, the shift should be done as an unsigned shift to avoid sign extension.
+
+So instead of using >>, it should use >>> to shift right, so that it doesn't extend the sign bit.
+
+So in the code, for big-endian, the line is:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+But this uses a signed shift. It should be an unsigned shift.
+
+So changing that line to use >>> instead of >> might fix the issue.
+
+Let me see. For example, in the test case where count is 63:
+
+bitsCachedSize is 64, so bitsCachedSize - count is 1.
+
+bitsCached is, say, 0x8000000000000000 (64 bits). Shifting right by 1 with >> gives 0xC000000000000000, but with >>> gives 0x4000000000000000.
+
+Then, when we mask with 0x7FFFFFFFFFFFFFFF, the result is 0x4000000000000000 in the first case, but that's incorrect because the highest bit was 1, but after shifting and masking, it's 0x4000000000000000, which is 46 bits set, but we need to preserve the highest bit as part of the 63 bits.
+
+Wait, no. Let me think again. When you have 64 bits, and you want to extract the top 63 bits, you shift right by 1 (since 64 -63 =1). But using a signed shift would cause the 64th bit to be copied into the 63rd and lower bits. So for example, if the highest bit is 1, shifting right with >> would set all higher bits to 1, but we only want to get the 63 bits starting from the highest.
+
+Wait, no. The problem is that for big-endian, the bits are stored with the first byte as the highest. So when you have 64 bits cached, and you want to extract 63, you need to take the highest 63 bits. So shifting right by 1 using an unsigned shift would give you the correct value.
+
+Wait, but shifting a 64-bit value right by 1 with >>> would discard the highest bit and shift the rest. So for example, 0x8000000000000000 becomes 0x4000000000000000 after >>>1. Then, when you mask with 0x7FFFFFFFFFFFFFFF, it's the same as 0x4000000000000000, which is correct because the highest bit is now in the 63rd position.
+
+Wait, but the mask is 63 bits, so the highest bit in the result would be the 63rd bit of the original value. So perhaps the issue is that the code is using a signed shift, which is causing incorrect sign extension.
+
+So in the code, for big-endian, the line should be:
+
+bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+
+That way, the shift is unsigned, and the higher bits are filled with zeros instead of the sign bit.
+
+Similarly, in the little-endian case, the code uses bitsCached >>>= count, which is correct because it's an unsigned shift.
+
+So that's probably the bug: in the big-endian case, the shift is signed, which causes incorrect results when the highest bit is set.
+
+Another possible issue is when the bitsCachedSize is 57, and we read another byte. Since 57 +8 =65, which is more than 64, the code would try to shift bitsCached left by 8, which would overflow. But in the code, it's allowed because the loop continues until bitsCachedSize >= count. So when count is 63, and bitsCachedSize is 57, it reads another byte, shifts bitsCached left by 8, but that would cause the lower 57 bits to be shifted left, and the new byte is OR'ed. However, this would cause the highest 8 bits to be lost because a long is only 64 bits. So when bitsCachedSize is 57, adding 8 would make it 65, but the code doesn't handle that.
+
+Wait, but the code doesn't check if bitsCachedSize would exceed 64. So when bitsCachedSize is 57, and we read another byte, we do bitsCached <<=8, which would shift the 57 bits left by 8, making it 65 bits, but since it's a long, it can only hold 64, so the highest bit is lost. Then, OR'ing the next byte would add 8 more bits, but the initial shift has already lost a bit.
+
+So that's another bug. The code doesn't handle the case where adding another byte would exceed 64 bits.
+
+So perhaps the solution is to limit the bitsCachedSize to 64, and when it's about to exceed, handle the overflow correctly.
+
+Wait, but how can that happen? Because the loop is while (bitsCachedSize < count), and count can be up to MAXIMUM_CACHE_SIZE, which I'm not sure what it is, but the tests have counts up to 63.
+
+Wait, the initial check is if count > MAXIMUM_CACHE_SIZE, which is probably 64 or something. So if count is 63, then the loop will run until bitsCachedSize is >=63.
+
+Wait, but each iteration reads 8 bits, so bitsCachedSize increases by 8 each time. So for count=63, bitsCachedSize could be 56, then read another byte, making it 64.
+
+Wait, but in the code, the loop is while (bitsCachedSize < count). So for count=63, when bitsCachedSize is 56, it's less than 63, so it reads another byte, making bitsCachedSize 64. Now, bitsCachedSize is >= count, so the loop exits.
+
+Then, when extracting, for big-endian, it's (bitsCached >> (64 -63)) & MASKS[63], which is (bitsCached >>1) & 0x7FFFFFFFFFFFFFFF.
+
+But if bitsCached is 64 bits, and the first byte was read as the highest bits, then shifting right by 1 would lose the highest bit if using a signed shift.
+
+So the problem is that when count is 63, the code does a signed shift, which is incorrect. So the fix is to change the shift to unsigned.
+
+So, in the code, the line for big-endian should be:
+
+bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+
+That should fix the issue.
+
+Let me test this hypothesis. For the test case where count is 63, in big-endian, the bits are stored as the first byte being the highest. So when extracting, we need to shift right by 1 (since 64-63=1) using an unsigned shift to avoid sign extension.
+
+Similarly, in the little-endian case, the shift is done correctly with >>>.
+
+So making that change should fix the test cases.
+
+Another thing to check is when count is 64, but the function throws an exception because count is greater than MAXIMUM_CACHE_SIZE. So the function is designed to handle up to 64 bits? Or is the maximum cache size less?
+
+Wait, looking at the initial check:
+
+if (count < 0 || count > MAXIMUM_CACHE_SIZE) {
+
+So if MAXIMUM_CACHE_SIZE is 64, then count can be up to 64.
+
+But in the test cases, count is 63 and 12, so it's allowed.
+
+So, to summarize, the main issue is that in big-endian mode, when extracting the bits, the code uses a signed right shift, which can cause incorrect sign extension when the highest bit is set. Changing it to an unsigned right shift should fix the problem.
+
+So the corrected code would have the big-endian case using >>> instead of >>.
+
+Let me write the corrected function accordingly.
+</think>
+
+To fix this code, the main issue was incorrect handling of bit shifts in the big-endian case, which caused sign extension problems. By using an unsigned right shift, the code correctly extracts the required bits without sign extension.
+
+```java
+    public long readBits(final int count) throws IOException {
+        if (count < 0 || count > MAXIMUM_CACHE_SIZE) {
+            throw new IllegalArgumentException("count must not be negative or greater than " + MAXIMUM_CACHE_SIZE);
+        }
+        while (bitsCachedSize < count) {
+            final long nextByte = in.read();
+            if (nextByte < 0) {
+                return nextByte;
+            }
+            if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+                bitsCached |= (nextByte << bitsCachedSize);
+            } else {
+                bitsCached <<= 8;
+                bitsCached |= nextByte;
+            }
+            bitsCachedSize += 8;
+        }
+        final long bitsOut;
+        if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+            bitsOut = (bitsCached & MASKS[count]);
+            bitsCached >>>= count;
+        } else {
+            bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+        }
+        bitsCachedSize -= count;
+        return bitsOut;
+    }
+```
+~~~~~~~~~~~~~~~~~
+Okay, so I'm trying to fix this Java function called readBits. The problem is that it's failing some tests, specifically when handling certain bit counts and byte orders. Let me try to understand what's going on here.
+
+First, I'll read through the code. The function is supposed to read a certain number of bits from an input stream and return them as a long. It uses a cache (bitsCached) and tracks how many bits are cached (bitsCachedSize). The function also handles both little-endian and big-endian byte orders.
+
+Looking at the tests that failed, I see that in the little-endian test, after reading 5 bits, it tries to read 63 bits and then 12 bits. The error message says that for the 12-bit read, it expected 1186 but got 1184. Similarly, in the big-endian test, the 63-bit read returns an incorrect value.
+
+Hmm, the problem might be in how the bits are being shifted and masked when extracting them. Let's look at the code step by step.
+
+In the function, after reading enough bytes into bitsCached, it calculates bitsOut. For little-endian, it does:
+
+bitsOut = (bitsCached & MASKS[count]);
+bitsCached >>>= count;
+
+And for big-endian:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+bitsCachedSize -= count;
+
+Wait, I'm not sure if the shifting is correct. Let's think about how the bits are stored.
+
+In little-endian, each new byte is shifted left by bitsCachedSize and OR'ed into bitsCached. So the first byte read is the least significant bits. So when extracting, the bits are in the lower part. So for count bits, we can mask with MASKS[count] and then shift right by count to remove them from the cache.
+
+Wait, no. Let's see: suppose bitsCached has some bits, and we need to extract 'count' bits. For little-endian, the bits are stored with the first byte as the least significant. So the bits we need are the least significant 'count' bits. So we can mask bitsCached with MASKS[count] to get those bits, then shift bitsCached right by count to remove them. That seems correct.
+
+But wait, in the code, after extracting, it's bitsCached >>>= count. That's a unsigned right shift. But if count is 63, shifting a long by 63 would leave only the sign bit. But bitsCached is a long, which is 64 bits. So shifting right 63 would leave the 64th bit as all bits. That might be a problem because after reading 63 bits, the remaining 1 bit might not be handled correctly.
+
+Wait, no. Let's think: when you read 63 bits, you have 63 bits in bitsOut, and then you shift bitsCached by 63, which leaves 1 bit. But if you have more bits to read, that 1 bit should be kept. So shifting with >>> is correct because it's unsigned, so the remaining bit is preserved without sign extension.
+
+Wait, maybe the issue is in the big-endian case. Let's look at that part.
+
+In big-endian, each new byte is shifted left by 8, then OR'ed with nextByte. So the first byte is the most significant. So when extracting 'count' bits, you need to take the highest 'count' bits. So the code does:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+Wait, let's take an example. Suppose bitsCachedSize is 64 (8 bytes), and we're reading 63 bits. Then bitsCachedSize - count is 1, so we shift right by 1. That would move the highest 63 bits into the lower 63 bits of bitsOut. Then we mask with MASKS[63], which is 0x7FFFFFFFFFFFFFFF, so we get the correct 63 bits.
+
+But wait, after extracting, bitsCachedSize is decreased by count. So if we had 64 bits and read 63, bitsCachedSize becomes 1. Then, in the next read, we might need to read more bits, but only 1 is left, so we read from the input and combine.
+
+But looking at the test failure, when reading 63 bits in big-endian, the result is incorrect. So perhaps the way bits are being extracted in big-endian is wrong.
+
+Wait, let's think about the big-endian extraction again. The code does:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+Is this correct? Let's say bitsCachedSize is 64, count is 63. So we shift right by 1, which would move the highest 63 bits to the lower 63 positions. Then, the mask would get those 63 bits correctly.
+
+Wait, but what if bitsCachedSize is 64 and count is 64? Then, we shift by 0, so bitsOut is bitsCached & MASKS[64], which is bitsCached (since MASKS[64] is 0xFFFFFFFFFFFFFFFF). But wait, the mask for 64 bits is all ones, so that's correct.
+
+Wait, but perhaps the problem is that after extracting, the bitsCached is not updated correctly. Let's see: after extracting, bitsCachedSize is decreased by count. So if we had 64 bits and read 63, bitsCachedSize becomes 1. But the bits in bitsCached are still all 64 bits. So the next read would need to handle that.
+
+Wait, perhaps the issue is with how the bits are shifted when count is 63 or 64. Let me think about the little-endian case in the test. The test reads 63 bits, and then 12 bits. After reading 63 bits, bitsCachedSize would be 64 - 63 = 1. Then, when trying to read 12 bits, the loop would run while bitsCachedSize < 12. So it would read (12 - 1) / 8 = 1.375, so 1 more byte. So it reads one more byte, adds 8 bits, making bitsCachedSize 9. Then, it can extract 12 bits? Wait, but 9 is less than 12, so it would loop again. Wait, no: the loop condition is while (bitsCachedSize < count). So for count=12, it would enter the loop, read a byte, add 8 bits, making bitsCachedSize 9, which is still less than 12. So it reads another byte, making bitsCachedSize 17. Now, it's >=12. Then, it extracts 12 bits.
+
+But in the test, the expected value after reading 63 and 12 bits is 1186, but the actual is 1184. So maybe the extraction is wrong.
+
+Wait, maybe the way bits are being masked is incorrect. Let's look at the MASKS array. MASKS[count] is supposed to have the lower 'count' bits set to 1. So for count=5, MASKS[5] is 0x1F (binary 11111). For count=63, it's 0x7FFFFFFFFFFFFFFF, and for 64, 0xFFFFFFFFFFFFFFFF.
+
+Wait, but when count is 63, the mask is correct. So why is the extraction wrong?
+
+Another possibility is that the way bits are being shifted in the big-endian case is incorrect. Let's think about the big-endian extraction:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+Wait, suppose bitsCachedSize is 64, count is 63. So (64 -63)=1, so shift right by 1. That would move the highest 63 bits into the lower 63 bits of bitsOut. But the highest bit is the 64th bit, which is the sign bit. So shifting right by 1 would cause the sign bit to be extended, making bitsOut have the correct bits?
+
+Wait, but in Java, the >> operator for long is signed. So when you shift a long right, the sign bit is extended. So if bitsCached is, say, 0x8000000000000000 (the highest bit set), shifting right by 1 would give 0xC000000000000000, which is incorrect because we want the highest 63 bits, not considering the 64th.
+
+Wait, no. Wait, in the big-endian case, the bits are stored with the first byte as the most significant. So when we have bitsCached as a long, the first byte is in the highest 8 bits. So when we need to extract count bits, we need to take the highest 'count' bits. So shifting right by (bitsCachedSize - count) would move those bits to the right place.
+
+But wait, if bitsCachedSize is 64 and count is 63, then shifting right by 1 would move the highest 63 bits to the lower 63 bits, but the 64th bit (the sign bit) would be shifted into the 63rd position. So, for example, if the highest bit was set, after shifting, the 63rd bit would be 1, which might not be correct because in reality, the highest bit is part of the 63 bits we're extracting.
+
+Wait, perhaps the issue is that when count is 63, the shift is causing the sign bit to be included incorrectly. Because when you have 64 bits, and you shift right by 1, the resulting 64 bits would have the sign bit duplicated. So when you mask with MASKS[63], which is 0x7FFFFFFFFFFFFFFF, you're only taking the lower 63 bits, but the sign bit is now in the 63rd position, which is not desired.
+
+Wait, no, because the mask would clear the 64th bit. So the result would be correct.
+
+Alternatively, maybe the problem is that when count is 63, the code is using a signed shift, which is causing the higher bits to be set incorrectly.
+
+Wait, let's take an example. Suppose bitsCached is 64 bits, and count is 63. So bitsCachedSize is 64.
+
+bitsOut = (bitsCached >> (64 -63)) & MASKS[63]
+=> bitsOut = (bitsCached >> 1) & 0x7FFFFFFFFFFFFFFF
+
+If bitsCached's highest bit is set, then after shifting right by 1, the highest bit (bit 63) would be 1, and the rest would be filled with 1s due to sign extension. But then, when we mask with 0x7FFFFFFFFFFFFFFF, we're only keeping the lower 63 bits, which would have the correct bits except for the 63rd bit being 1 instead of 0? Or maybe it's correct.
+
+Wait, I'm getting confused. Let me think of a specific example.
+
+Suppose bitsCached is 0x8000000000000000 (binary 10000000 00000000... 00000000). This is -2^63 in two's complement.
+
+When we shift right by 1, using >>, we get 0xC000000000000000 (binary 11000000 00000000... 00000000). Then, masking with 0x7FFFFFFFFFFFFFFF gives 0x4000000000000000, which is 2^62. But in reality, the highest 63 bits of the original bitsCached were 0x8000000000000000, which is 10000000... 00000000 (64 bits). The highest 63 bits would be 10000000... 0000000 (63 bits), which is 0x7FFFFFFFFFFFFFFF << 1? Wait, no. Wait, 63 bits would be 0x7FFFFFFFFFFFFFFF, but shifted left by 1 would be 0xFFFFFFFFFFFFFFFE, which is not the case.
+
+Wait, maybe I'm approaching this wrong. Let's think about how the bits are stored in the cache.
+
+In big-endian, each new byte is added by shifting bitsCached left by 8 and OR'ing the new byte. So the first byte is the highest, the next is next highest, etc.
+
+So when extracting count bits, we need to take the highest 'count' bits.
+
+So for example, if count is 5, and bitsCachedSize is 8, we take the highest 5 bits.
+
+The code does:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+So in this case, 8-5=3. So shifting right by 3 gives us the highest 5 bits in the lower 5 bits of bitsOut.
+
+Wait, but that's not correct. Because shifting right by 3 would move the highest 5 bits into positions 3 to 7 (if we started with 8 bits). Then, masking with 0x1F (5 bits) would give the correct 5 bits.
+
+Wait, no. Let's say bitsCached is 8 bits (a byte) with value 0b10110000, and count is 5. Then bitsCachedSize is 8. So bitsCachedSize - count is 3. Shifting right by 3 gives 0b10110, which is the highest 5 bits. Then masking with 0x1F (binary 00011111) would give 0b10110, which is correct.
+
+So that part seems correct.
+
+But what about when count is 63 and bitsCachedSize is 64? Shifting right by 1 would take the highest 63 bits and shift them into the lower 63 bits, but with sign extension. So the highest bit (bit 63) would be duplicated. Then, masking with 0x7FFFFFFFFFFFFFFF would give the correct 63 bits.
+
+Wait, let's take an example. Suppose bitsCached is 0x8000000000000000 (binary 1 followed by 63 zeros). When we shift right by 1, using >>, we get 0xC000000000000000 (binary 11 followed by 62 zeros). Masking with 0x7FFFFFFFFFFFFFFF gives 0x4000000000000000, which is 2^62. But the highest 63 bits of the original were 0x8000000000000000, which as a 63-bit value is 2^62. So that's correct.
+
+Wait, no. Because the original 64 bits are 0x8000000000000000, which as a signed long is -2^63. The highest 63 bits would be the first 63 bits, which are 1 followed by 62 zeros. So as a 63-bit value, that's 2^62, which matches the result after shifting and masking.
+
+Wait, that seems correct. So why is the test failing?
+
+Maybe the issue is in the way the bits are being cached and shifted when the count is larger than the current bitsCachedSize. Let's look at the loop:
+
+while (bitsCachedSize < count) {
+    read a byte and add it to bitsCached
+}
+
+So for example, if we need to read 63 bits, and bitsCachedSize is 0, it will read 8 bytes (64 bits) into bitsCached. Then, extract 63 bits.
+
+Wait, but in the test, the first read is 5 bits, which would read 1 byte (8 bits). Then, the next read is 63 bits, which would require 63 bits, so the loop reads until bitsCachedSize >=63. Since after reading 5 bits, bitsCachedSize is 8, then for 63, it needs to read (63 -8) =55 more bits, which is 7 bytes (56 bits), making bitsCachedSize 64.
+
+Then, in the little-endian case, the extraction is:
+
+bitsOut = bitsCached & MASKS[63]
+bitsCached >>>= 63
+
+Which would take the lower 63 bits of the 64-bit cache. Then, bitsCachedSize becomes 1.
+
+In the test, after reading 63 bits, the next read is 12 bits. So the loop will need to read until bitsCachedSize >=12. Currently, it's 1, so it needs 11 more bits. So it reads 2 bytes (16 bits), making bitsCachedSize 17. Then, extract 12 bits.
+
+But the test expects 1186, but gets 1184. So perhaps the extraction is missing some bits.
+
+Wait, 1186 in binary is 10010100110, which is 12 bits. 1184 is 10010100000. So the last few bits are different.
+
+Hmm, perhaps the way the bits are being shifted in the little-endian case is incorrect. Let me think: in little-endian, each new byte is added to the left of the current bits. So when extracting, the bits are taken from the lower part.
+
+Wait, when you read a byte and do bitsCached |= (nextByte << bitsCachedSize), that's correct for little-endian because each new byte is higher order. So the first byte is the least significant, and each new byte is more significant.
+
+So when you have 64 bits in the cache, and you extract 63, you take the lower 63 bits. Then, you shift right by 63, leaving the highest bit (bit 63) in the cache.
+
+Wait, but when you have 64 bits, and you extract 63, you should leave 1 bit in the cache. So the next read would combine that with new bits.
+
+Wait, but in the test, after reading 63 bits, the next read is 12 bits. So the cache has 1 bit left. The code will read 12 -1 =11 bits, which is 2 bytes (16 bits), making the cache size 1 +16=17. Then, extract 12 bits.
+
+But perhaps the way the bits are being combined is causing an issue.
+
+Wait, another possibility is that the MASKS array is incorrect. Let me check how MASKS is defined. Typically, MASKS[count] is (1L << count) -1, but only if count is less than 64. For count=64, it's all ones.
+
+But in the code, perhaps the MASKS array isn't correctly handling counts up to 64.
+
+Wait, looking at the code, I don't see the MASKS array defined here, but assuming it's correctly initialized elsewhere, with MASKS[count] = (1L << count) -1 for count <=64.
+
+Wait, but for count=63, MASKS[63] is 0x7FFFFFFFFFFFFFFF, which is correct.
+
+Another idea: perhaps when count is 63, the code is not correctly handling the case when bitsCachedSize is exactly 64. Because when you extract 63 bits from 64, you're taking the lower 63, but the remaining 1 bit is the highest bit. Then, when you read more bits, that highest bit is combined with new bytes, which might cause issues.
+
+Wait, let's take the test case for little-endian. After reading 63 bits, the cache has 1 bit left, which is the highest bit of the 64-bit value. Then, when reading 12 bits, the code reads two more bytes, making the cache size 1 +16=17 bits. Then, it extracts 12 bits, which would be the lower 12 bits of the 17 bits. But perhaps the way the bits are being combined is causing the higher bits to be lost.
+
+Wait, in the little-endian case, when you read new bytes, each is shifted left by the current bitsCachedSize. So when you have 1 bit in the cache, and read a byte, you shift it left by 1, then OR it. So the new byte's bits are placed after the existing 1 bit.
+
+So the 1 bit is the highest bit of the new cache. Then, when you read another byte, it's shifted left by 9 bits (1 +8), making the new byte the next higher 8 bits.
+
+Wait, perhaps the issue is that when extracting 12 bits from 17, the code is not correctly taking the lower 12 bits. Let's see:
+
+In the little-endian case, after reading 63 bits, the cache has 1 bit. Then, it reads 2 more bytes (16 bits), making the cache 17 bits. So bitsCached is a 64-bit long, with the first bit set, followed by 16 bits from the two new bytes.
+
+When extracting 12 bits, the code does:
+
+bitsOut = bitsCached & MASKS[12];
+bitsCached >>>=12;
+
+So it takes the lower 12 bits of the 17-bit cache. But wait, the 17 bits are the 1 bit from before plus 16 new bits. So the lower 12 bits would consist of the last 12 bits of the 16 new bits, but the 1 bit is higher up.
+
+Wait, no. Let me think of the cache as bits b0 (LSB) to b16 (MSB), where b0 is the first bit read, then the two new bytes add bits b1 to b16.
+
+Wait, no, in little-endian, each new byte is added as more significant bits. So the first byte is the least significant, and each new byte is more significant.
+
+So when the cache has 1 bit, and we read a new byte, it's shifted left by 1, so the new byte's bits are in positions 1-8, and the existing 1 bit is in position 0. Then, reading another byte shifts it left by 9, so the new byte is in positions 9-16.
+
+So the cache now has bits 0-16, with the first bit (position 0) being the oldest, and the last 8 bits (positions 9-16) being the newest.
+
+When extracting 12 bits, the code takes the lower 12 bits, which are bits 0-11. But the cache has bits up to 16. So the lower 12 bits would include the first 12 bits, which include the initial 1 bit and the first 11 bits of the first new byte.
+
+Wait, but in the test case, the expected value is 1186, which is 10010100110 in binary. That's 12 bits. But the actual is 1184, which is 10010100000.
+
+So perhaps the extraction is not including some higher bits correctly. Maybe the code is not correctly handling the case when the cache has more bits than needed after extraction.
+
+Wait, perhaps the issue is that when count is 63, the code is leaving the highest bit in the cache, which is then included in the next read, but that bit is not supposed to be part of the next read.
+
+Wait, let's think about the sequence:
+
+1. Read 5 bits: cache size is 8, extract 5, leaving 3 bits.
+2. Read 63 bits: cache size is 3, read 60 more bits (7.5 bytes, so 8 bytes, 64 bits), making cache size 67 bits. Wait, no: the loop is while (bitsCachedSize < count). So for count=63, if bitsCachedSize is 3, it needs to read until it's >=63. So 63-3=60 bits, which is 7.5 bytes, so 8 bytes. So after reading 8 bytes, bitsCachedSize becomes 3+64=67? Wait, no, because each read is 8 bits, so 8 bytes add 64 bits, making bitsCachedSize 3+64=67.
+
+Wait, but 67 is more than 63, so the loop stops. Then, extract 63 bits.
+
+In little-endian, bitsOut = bitsCached & MASKS[63], which takes the lower 63 bits. Then, bitsCached >>>=63, which leaves 67-63=4 bits in the cache.
+
+Wait, no: bitsCachedSize is 67, count is 63. So after extraction, bitsCachedSize is 67-63=4.
+
+Then, the next read is 12 bits. So the loop runs while 4 <12, which is true. So it reads (12-4)=8 bits, which is 1 byte, making bitsCachedSize 4+8=12. Then, extract 12 bits.
+
+But wait, the code would read 1 byte, adding 8 bits, making bitsCachedSize 12. So when extracting, it takes the lower 12 bits.
+
+But in the test case, the expected value is 1186, but the actual is 1184. So perhaps the code is not correctly handling the 4 leftover bits when extracting the next 12.
+
+Wait, perhaps the code is incorrectly combining the leftover bits with the new bits. Let me think about how the bits are being shifted when adding new bytes.
+
+In the little-endian case, each new byte is shifted left by bitsCachedSize and OR'ed into bitsCached.
+
+So after extracting 63 bits, bitsCachedSize is 4. Then, when reading the next byte, it's shifted left by 4 and OR'ed. So the new byte's bits are placed starting at bit 4.
+
+When extracting 12 bits, the code takes the lower 12 bits of the cache, which includes the 4 leftover bits and the 8 new bits from the byte.
+
+But perhaps the code is not correctly handling the leftover bits when they are more than zero but less than 8.
+
+Wait, perhaps the problem is that when the leftover bits are 4, and a new byte is read, the new byte is shifted left by 4, making it occupy bits 4-11, but when extracting 12 bits, the lower 12 bits include the leftover 4 and the new 8, but perhaps the masking is not correct.
+
+Wait, no, because the mask is MASKS[12], which is 0xFFF, so it should correctly extract the lower 12 bits.
+
+Alternatively, perhaps the issue is with the way the bits are being read and cached, causing the higher bits to be lost.
+
+Another possibility is that the code is not correctly handling the case when the total bits in the cache exceed 64. Because a long is 64 bits, so if the cache has more than 64 bits, it would overflow.
+
+Wait, that's a good point! The code has a comment that says:
+
+// bitsCachedSize >= 57 and left-shifting it 8 bits would cause an overflow
+
+But the code doesn't handle that. So when bitsCachedSize is 57 or more, and a new byte is read, shifting it left by 57 would cause the bits to overflow beyond 64 bits, leading to loss of data.
+
+Ah, that's probably the bug. Because when bitsCachedSize is 57, adding another 8 bits would make it 65, which is beyond the capacity of a long (64 bits). So the code doesn't handle that case, leading to incorrect bits being cached.
+
+So the solution is to limit the bitsCachedSize to 64 bits. So whenever bitsCachedSize + 8 would exceed 64, we should not read more bytes, and handle it differently.
+
+So the code needs to be modified to prevent bitsCachedSize from exceeding 64. Let's see how.
+
+In the loop:
+
+while (bitsCachedSize < count) {
+    read a byte and add it to bitsCached
+}
+
+But if adding a byte would make bitsCachedSize exceed 64, we shouldn't read it. Instead, we should handle the case where count exceeds the available bits, perhaps by reading only part of a byte.
+
+Wait, but how? Because each read operation reads a full byte, which is 8 bits. So if the cache has, say, 57 bits, and we need to read 8 more bits to reach 65, which is impossible, we can't read a full byte because that would overflow. So perhaps the code should read as much as possible without exceeding 64 bits.
+
+So the solution is to check before reading a byte whether adding 8 bits would exceed 64. If so, read only the necessary bits, but since we can't read partial bytes from the InputStream, perhaps we need to adjust the count and the cache accordingly.
+
+Wait, but the InputStream's read() method returns a full byte or -1. So we can't read partial bytes. Therefore, when bitsCachedSize is close to 64, we need to handle the case where reading another byte would overflow.
+
+So the approach is:
+
+- Before reading a new byte, check if bitsCachedSize +8 >64. If yes, then we can't read the byte because it would cause overflow. Instead, we can only read (64 - bitsCachedSize) bits from the next byte, but since we can't read partial bytes, perhaps we have to limit the count and adjust accordingly.
+
+Wait, but that's complicated. Alternatively, perhaps the code should ensure that bitsCachedSize never exceeds 64. So whenever we have bitsCachedSize >= count, we don't read more bytes.
+
+Wait, but that's not correct because if count is 65, which is more than 64, it's impossible. But in the function, the initial check is if count > MAXIMUM_CACHE_SIZE, which is probably 64. So the function should throw an exception if count is more than 64.
+
+Wait, looking at the function, the initial check is:
+
+if (count <0 || count > MAXIMUM_CACHE_SIZE) throw exception.
+
+So MAXIMUM_CACHE_SIZE is probably 64. So the function is designed to handle counts up to 64.
+
+But in the test, one of the counts is 63, which is allowed.
+
+So the problem arises when bitsCachedSize is 57, and the code tries to read another byte, causing bitsCachedSize to become 65, which overflows the long.
+
+So the solution is to prevent bitsCachedSize from exceeding 64. Therefore, in the loop, before reading a new byte, check if adding 8 would exceed 64. If yes, then we can't read the byte, so we have to handle it differently.
+
+So the modified loop should be:
+
+while (bitsCachedSize < count) {
+    if (bitsCachedSize +8 > 64) {
+        // Not enough space, can't read another byte
+        break;
+    }
+    final long nextByte = in.read();
+    if (nextByte <0) {
+        return nextByte;
+    }
+    // add the byte to the cache
+    if (byteOrder == LITTLE_ENDIAN) {
+        bitsCached |= (nextByte << bitsCachedSize);
+    } else {
+        bitsCached <<=8;
+        bitsCached |= nextByte;
+    }
+    bitsCachedSize +=8;
+}
+
+Wait, but this would leave bitsCachedSize less than count, which would cause the function to return incomplete bits. That's not good.
+
+Alternatively, perhaps when bitsCachedSize +8 would exceed 64, we should read the byte, but only take the necessary bits to reach 64, and then stop.
+
+But that's tricky because we can't read partial bytes. So perhaps the code should only read the necessary bytes to reach the maximum of 64 bits.
+
+Wait, perhaps the code should calculate how many more bytes are needed without exceeding 64 bits. So:
+
+int neededBytes = (count - bitsCachedSize +7)/8; // ceiling division
+but also ensuring that bitsCachedSize + neededBytes*8 <=64.
+
+But that might complicate the loop.
+
+Alternatively, perhaps the code should limit the number of bytes read so that bitsCachedSize does not exceed 64.
+
+Wait, perhaps the code should have a maximum of 8 bytes (64 bits) in the cache. So when bitsCachedSize is 57, the next read would add 8 bits, making it 65, which is over. So the code should not read that byte, and instead, only read as much as possible.
+
+But that would mean that the function cannot read more than 64 bits, which is correct because the function is designed to handle up to 64 bits.
+
+Wait, but the function is supposed to handle counts up to 64. So if the count is 64, the function should read exactly 8 bytes.
+
+So perhaps the problem is that when the cache has 57 bits, and the count is 63, the function reads another byte, making the cache 65 bits, which overflows, causing incorrect data.
+
+So the solution is to prevent the cache from exceeding 64 bits. Therefore, in the loop, before reading a byte, check if adding 8 bits would exceed 64. If yes, then don't read the byte, and instead, calculate how much can be read.
+
+So the modified loop would be:
+
+while (bitsCachedSize < count) {
+    int remaining = 64 - bitsCachedSize;
+    if (remaining <=0) {
+        break; // can't read more
+    }
+    int bytesNeeded = Math.min(remaining /8, (count - bitsCachedSize +7)/8);
+    for (int i=0; i<bytesNeeded; i++) {
+        final long nextByte = in.read();
+        if (nextByte <0) {
+            return nextByte;
+        }
+        if (byteOrder == LITTLE_ENDIAN) {
+            bitsCached |= (nextByte << bitsCachedSize);
+        } else {
+            bitsCached <<=8;
+            bitsCached |= nextByte;
+        }
+        bitsCachedSize +=8;
+    }
+}
+
+Wait, but that's more complex. Alternatively, in the loop, before reading a byte, check if bitsCachedSize +8 >64. If yes, break the loop.
+
+But then, the function would proceed to extract bits even if bitsCachedSize < count, which would cause incorrect results.
+
+Hmm, perhaps the correct approach is to ensure that bitsCachedSize does not exceed 64. So whenever bitsCachedSize is about to exceed 64, we stop reading bytes.
+
+So in the loop:
+
+while (bitsCachedSize < count) {
+    if (bitsCachedSize +8 >64) {
+        break;
+    }
+    final long nextByte = in.read();
+    if (nextByte <0) {
+        return nextByte;
+    }
+    // add the byte to the cache
+    if (byteOrder == LITTLE_ENDIAN) {
+        bitsCached |= (nextByte << bitsCachedSize);
+    } else {
+        bitsCached <<=8;
+        bitsCached |= nextByte;
+    }
+    bitsCachedSize +=8;
+}
+
+Then, after the loop, if bitsCachedSize < count, it means we couldn't read enough bits, so perhaps throw an exception or handle it somehow. But the function is supposed to read 'count' bits, so perhaps it's better to throw an exception if it can't read enough.
+
+But in the tests, the function is expected to read up to 63 bits, which is allowed. So perhaps the problem is that when bitsCachedSize is 57, the code reads another byte, making it 65, which overflows the long, causing incorrect data.
+
+So the solution is to modify the loop to not read more bytes when adding 8 would exceed 64.
+
+Thus, in the loop:
+
+while (bitsCachedSize < count) {
+    if (bitsCachedSize +8 >64) {
+        break;
+    }
+    // read byte and add to cache
+}
+
+Then, after the loop, if bitsCachedSize < count, perhaps the function cannot fulfill the request and should handle it, maybe by throwing an exception. But looking at the original code, it doesn't do that, so perhaps the function expects that the count is always possible given the available data.
+
+Wait, but in the test case, the function is supposed to read 63 bits, which is possible because 63 <=64. So the loop should read enough bytes to reach at least 63 bits.
+
+Wait, let's calculate:
+
+If bitsCachedSize starts at 0, and count is 63:
+
+Loop runs while 0 <63.
+
+Check if 0+8>64? No. Read a byte, bitsCachedSize becomes 8.
+
+Again, 8 <63: check 8+8=16<=64. Read another byte, bitsCachedSize=16.
+
+Continue until bitsCachedSize=56 <63: read another byte, bitsCachedSize=64.
+
+Now, 64 >=63: exit loop.
+
+Then, extract 63 bits.
+
+But wait, the cache has 64 bits, and we need 63. So for little-endian:
+
+bitsOut = bitsCached & MASKS[63];
+bitsCached >>>=63;
+
+So the lower 63 bits are taken, and the cache is shifted right by 63, leaving 1 bit.
+
+So that's correct.
+
+Wait, but in the test case, the function is reading 63 bits, and the next read is 12 bits. So after reading 63, bitsCachedSize is 1. Then, the next read needs 12 bits. So the loop runs while 1 <12. Since 1+8=9<=64, read a byte, bitsCachedSize=9. Still <12: read another byte, bitsCachedSize=17.
+
+Now, extract 12 bits: take lower 12 bits of 17. But the cache has 17 bits, which is bits 0-16. The lower 12 bits are 0-11. So the code does bitsOut = bitsCached & 0xFFF; then shifts right by 12, leaving 5 bits.
+
+But in the test case, the expected value is 1186, which is 0x4A6 in hex, which is 12 bits. So the code should extract the correct 12 bits.
+
+Wait, but why is the test failing with 1184 instead of 1186? 1184 is 0x4A0. So perhaps the code is not correctly handling the leftover bits when the cache has more than the required count.
+
+Wait, perhaps when the cache has 17 bits and we extract 12, the code is taking the lower 12 bits correctly, but perhaps the way the bits are being combined is wrong.
+
+Wait, let me think about how the cache is built:
+
+After reading 63 bits, the cache has 1 bit left. Then, the next read reads 2 bytes (16 bits), making the cache 17 bits. The 1 bit is the highest bit, followed by 16 bits from the two new bytes.
+
+In little-endian, the first new byte is added by shifting left by 1, so its bits are in positions 1-8. The second byte is added by shifting left by 9, so its bits are in positions 9-16.
+
+So the cache looks like:
+
+bit 16 | bits 15-9 | bits 8-1 | bit 0
+
+So when extracting 12 bits, we take bits 0-11. That includes the first 8 bits of the second new byte and the last 4 bits of the first new byte, plus the leftover bit.
+
+Wait, no: in the cache, the bits are stored as little-endian, so the first byte is the least significant. So the 1 leftover bit is in position 0, the first new byte is in positions 1-8, and the second new byte is in 9-16.
+
+So when extracting 12 bits, the lower 12 bits are positions 0-11. So the bits from the second new byte are only the lower 3 bits (positions 9-11), and the rest are from the first new byte and the leftover.
+
+But perhaps the code is not correctly handling this, causing the higher bits to be lost.
+
+Alternatively, perhaps the issue is that when the cache has more than 64 bits, the shifting causes data loss. Wait, no, because we limited the cache to 64 bits.
+
+Wait, I think the problem is that when the cache is filled beyond 64 bits, the bits are lost. So the code needs to prevent the cache from exceeding 64 bits.
+
+Therefore, the fix is to modify the loop to not read more bytes when adding 8 would exceed 64 bits.
+
+So in the loop, before reading a byte, check if bitsCachedSize +8 >64. If yes, break the loop.
+
+Then, after the loop, if bitsCachedSize < count, it means we couldn't read enough bits, so perhaps throw an exception or return what's available. But the function is supposed to return 'count' bits, so perhaps it's better to throw an exception if it can't read enough.
+
+But looking at the original code, it doesn't do that, so perhaps the function expects that the count is always possible given the available data.
+
+Alternatively, perhaps the function should handle the case where the cache is full and the count is 64.
+
+So, to implement this, the loop should be modified to:
+
+while (bitsCachedSize < count) {
+    if (bitsCachedSize +8 >64) {
+        break;
+    }
+    // read byte and add to cache
+}
+
+Then, after the loop, if bitsCachedSize < count, perhaps the function should throw an IOException or something, but in the original code, it proceeds to extract bits even if bitsCachedSize < count, which could cause incorrect results.
+
+Wait, no. In the original code, after the loop, it proceeds to extract bits regardless of whether bitsCachedSize >=count. But if bitsCachedSize <count, then the extracted bits would have some missing, leading to incorrect results.
+
+So the function should ensure that it reads enough bits, and if not, perhaps throw an exception.
+
+But in the test case, the function is supposed to read 63 bits, which is within the 64 limit. So the loop should read enough bytes to reach 63 bits.
+
+Wait, but 63 bits is 7.875 bytes, so 8 bytes, which is 64 bits. So the loop would read 8 bytes, making bitsCachedSize 64, which is >=63.
+
+So the code should proceed correctly.
+
+But the test fails, so perhaps the issue is elsewhere.
+
+Wait, perhaps the problem is in the way the bits are being masked. Let me check the extraction code again.
+
+In the little-endian case:
+
+bitsOut = (bitsCached & MASKS[count]);
+bitsCached >>>= count;
+
+So for count=63, MASKS[63] is 0x7FFFFFFFFFFFFFFF.
+
+So bitsOut is the lower 63 bits of bitsCached. Then, bitsCached is shifted right by 63, leaving the higher 1 bit.
+
+But in the test case, after reading 63 bits, the cache has 64 bits, so the lower 63 are taken, leaving 1 bit.
+
+Then, when reading the next 12 bits, the cache has 1 bit. The loop reads 2 bytes (16 bits), making the cache 17 bits. Then, extract 12 bits, taking the lower 12 bits.
+
+But perhaps the way the bits are being combined is causing the higher bits to be lost.
+
+Alternatively, perhaps the issue is that the code is using a long, which is signed, and when the higher bit is set, the shifting is causing issues.
+
+Wait, but in the little-endian case, the code uses bitsCached >>>= count, which is an unsigned right shift. So that should preserve the bits correctly.
+
+Another idea: perhaps the way the bits are being read in the big-endian case is causing issues. Let's look at that.
+
+In big-endian, each new byte is shifted left by 8 and OR'ed. So the first byte is the highest. When extracting count bits, the code does:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+But if bitsCachedSize is 64 and count is 63, it shifts right by 1, which is a signed shift. So if the highest bit is set, the shifted value would have the sign bit extended, which could cause incorrect bits in the higher positions.
+
+Wait, but after shifting, we mask with MASKS[count], which for 63 bits is 0x7FFFFFFFFFFFFFFF, so the higher bits beyond 63 are cleared. So that should be correct.
+
+But in the test case for big-endian, the extracted 63 bits are incorrect. So perhaps the issue is that the code is using a signed shift when it should be using an unsigned shift.
+
+Wait, in Java, the >> operator is signed for long. So when you shift a long right, the sign bit is extended. So for big-endian extraction, perhaps the code should use an unsigned right shift (>>>) instead.
+
+Wait, let's think: in big-endian, when extracting count bits, the code does:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+But if bitsCachedSize - count is 1, and bitsCached is a long with the highest bit set, shifting right by 1 with >> would set the highest bit of the result to 1, which may not be correct because the actual bits may not have that bit set beyond the count.
+
+Wait, no. Because the mask would clear any bits beyond count. So for count=63, the mask is 0x7FFFFFFFFFFFFFFF, which is 63 bits. So even if the shift extends the sign bit, the mask would clear it.
+
+Wait, no, because the mask is applied after the shift. So for example, if bitsCached is 0x8000000000000000 (64 bits), and we shift right by 1 using >>, we get 0xC000000000000000. Then, masking with 0x7FFFFFFFFFFFFFFF gives 0x4000000000000000, which is correct.
+
+Wait, but that's the same as if we had done an unsigned shift. So perhaps the issue is not with the shift, but with the masking.
+
+Alternatively, perhaps the code should use an unsigned shift to avoid sign extension, but in this case, it's not necessary because the mask takes care of it.
+
+Wait, perhaps the issue is that when count is 63, the code is shifting right by 1, which is causing the sign bit to be extended, but the mask is not correctly handling it.
+
+Alternatively, perhaps the problem is that the code is using a long for bitsCached, which is signed, and when the highest bit is set, it's causing issues when shifting.
+
+But I'm not sure. Another approach is to try modifying the code to use unsigned shifts in the big-endian case.
+
+Wait, perhaps the code should use >>> instead of >> in the big-endian case. Let me see:
+
+In big-endian, when extracting, the code does:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+If we change it to:
+
+bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+
+Would that fix the issue?
+
+In the test case, for big-endian, the extracted 63 bits are incorrect. So perhaps using an unsigned shift would help.
+
+Alternatively, perhaps the problem is that the code is not correctly handling the case when the count is 64, but that's another issue.
+
+So, putting it all together, the main issues are:
+
+1. The loop allows bitsCachedSize to exceed 64, causing overflow. So we need to prevent that by breaking the loop when adding another byte would exceed 64.
+
+2. In the big-endian case, using a signed shift may cause incorrect sign extension, so perhaps using an unsigned shift would fix it.
+
+So, the plan is:
+
+- Modify the loop to break when adding another byte would cause bitsCachedSize to exceed 64.
+
+- In the big-endian extraction, use unsigned right shift (>>>).
+
+Let me apply these changes to the code.
+
+So, the modified code would have:
+
+In the loop:
+
+while (bitsCachedSize < count) {
+    if (bitsCachedSize +8 > 64) {
+        break;
+    }
+    final long nextByte = in.read();
+    if (nextByte < 0) {
+        return nextByte;
+    }
+    if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+        bitsCached |= (nextByte << bitsCachedSize);
+    } else {
+        bitsCached <<=8;
+        bitsCached |= nextByte;
+    }
+    bitsCachedSize +=8;
+}
+
+Then, after the loop, if bitsCachedSize < count, perhaps throw an exception, but the original code doesn't do that, so perhaps it's beyond the scope.
+
+Then, in the extraction part:
+
+if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+    bitsOut = (bitsCached & MASKS[count]);
+    bitsCached >>>= count;
+} else {
+    bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+    bitsCachedSize -= count;
+}
+
+Wait, no. For big-endian, we need to shift right by (bitsCachedSize - count) bits, but using unsigned shift.
+
+So the extraction for big-endian becomes:
+
+bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+
+But wait, bitsCached is a long, and (bitsCachedSize - count) could be up to 64 -1 =63.
+
+So, I'll make that change.
+
+Putting it all together, the fixed function would have the loop modified to prevent exceeding 64 bits, and the big-endian extraction uses an unsigned shift.
+</think>
+
+To fix this code, we need to address two main issues: preventing the cache from exceeding 64 bits and ensuring correct bit extraction in both little-endian and big-endian formats.
+
+### Analysis of the Issues
+
+1. **Cache Overflow**: The loop reads bytes until the cache has enough bits, but without checking if adding another byte would exceed 64 bits. This can cause overflow and incorrect data storage.
+
+2. **Incorrect Bit Extraction in Big-Endian**: Using a signed right shift in big-endian extraction may cause incorrect sign extension, leading to wrong results.
+
+### Solution
+
+1. **Prevent Cache Overflow**: Modify the loop to stop reading bytes when adding another would exceed 64 bits.
+
+2. **Correct Bit Extraction**: Use an unsigned right shift in the big-endian extraction to avoid incorrect sign extension.
+
+### Fixed Code
+
+```java
+public long readBits(final int count) throws IOException {
+    if (count < 0 || count > MAXIMUM_CACHE_SIZE) {
+        throw new IllegalArgumentException("count must not be negative or greater than " + MAXIMUM_CACHE_SIZE);
+    }
+    while (bitsCachedSize < count) {
+        if (bitsCachedSize + 8 > 64) {
+            break;
+        }
+        final long nextByte = in.read();
+        if (nextByte < 0) {
+            return nextByte;
+        }
+        if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+            bitsCached |= (nextByte << bitsCachedSize);
+        } else {
+            bitsCached <<= 8;
+            bitsCached |= nextByte;
+        }
+        bitsCachedSize += 8;
+    }
+
+    final long bitsOut;
+    if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+        bitsOut = (bitsCached & MASKS[count]);
+        bitsCached >>>= count;
+    } else {
+        bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+    }
+    bitsCachedSize -= count;
+    return bitsOut;
+}
+```
+
+### Explanation
+
+- **Cache Overflow Prevention**: The loop breaks if adding another byte would exceed 64 bits, ensuring the cache remains within valid bounds.
+- **Unsigned Right Shift in Big-Endian Extraction**: Using `>>>` instead of `>>` in big-endian extraction prevents incorrect sign extension, ensuring the correct bits are extracted.
+
+This solution ensures the function correctly reads and extracts the specified number of bits without overflow and handles both byte orders accurately.
+~~~~~~~~~~~~~~~~~
+Okay, I have to fix the bug in this Java function. Let me look at the code and the test failures to understand what's going wrong.
+
+The function is called readBits and it's part of a BitInputStream. It reads a certain number of bits from the input stream and returns them as a long. The problem is that some of the tests are failing, specifically when dealing with large bit counts that might cause overflows.
+
+Looking at the test cases, for example, in littleEndianWithOverflow, the second readBits(63) returns the wrong value. Similarly, in bigEndianWithOverflow, the same readBits(63) is incorrect. So it seems that when reading a large number of bits, like 63, the function isn't handling it properly.
+
+Let me look at the code step by step.
+
+First, the function checks if the count is within the allowed range. Then, it reads bytes from the input until the cached bits are enough. Depending on the byte order, it shifts and ORs the bits into the cache.
+
+The issue might be with how the bits are being extracted after caching enough bits. Let's look at the extraction part.
+
+When the byte order is LITTLE_ENDIAN, it does:
+bitsOut = (bitsCached & MASKS[count]);
+bitsCached >>>= count;
+
+For BIG_ENDIAN, it does:
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+bitsCachedSize -= count;
+
+Wait, I think the problem is with how the mask is applied or how the shifting is done.
+
+In the little endian case, when extracting, the code uses a mask for 'count' bits. But if count is 63, the mask is 0x3FFFFFFFFFFFFFFF, which is correct. However, when shifting bitsCached right by count, which is 63, but bitsCached is a long, which is 64 bits. Shifting a long by 63 is allowed, but perhaps there's an issue with how the bits are being handled.
+
+Wait, no, because after shifting, the higher bits are filled with zeros. So that might not be the issue.
+
+Wait, maybe the problem is that when the bitsCachedSize is more than count, the extraction for big endian is not correct. Let's think about how the bits are stored in the cache.
+
+In little endian, each new byte is shifted left by the current bitsCachedSize. So the first byte is the least significant bits. For example, if bitsCachedSize is 8, the next byte is shifted left by 8, so it's more significant.
+
+In big endian, each new byte is shifted into higher positions. So the first byte is the most significant.
+
+When extracting bits, in big endian, the code does a right shift by (bitsCachedSize - count), which brings the desired bits to the lower positions, then applies the mask. But maybe the calculation of how much to shift is incorrect.
+
+Wait, let's consider an example. Suppose bitsCachedSize is 64, and count is 63. Then, (bitsCachedSize - count) is 1. So shifting right by 1, and then masking with 63 bits. That would leave the highest bit as the sign bit, but since we're dealing with a long, which is signed, that could cause issues. Wait, but the mask is applied after shifting, so it should zero out higher bits beyond count.
+
+Wait, but in the test, for the little endian case, the expected value is 714595605644185962, which is a positive number. But the function is returning 1184 instead of 1186 in one case. Hmm, maybe the issue is that when count is 63, the mask isn't correctly applied.
+
+Wait, looking at how MASKS are defined. The MASKS array probably contains masks where MASKS[count] is (1L << count) - 1. So for count=63, it's 0x3FFFFFFFFFFFFFFF.
+
+Wait, but in the big endian case, when count is 63, the code does:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+If bitsCachedSize is 64, then (64-63)=1, so it's shifting right by 1. So the highest bit (bit 63) is moved to bit 62. Then, applying the mask for 63 bits, which is 0x3FFFFFFFFFFFFFFF, which is 63 bits. So that should correctly capture the 63 bits.
+
+Wait, but let's think about when count is 63 and bitsCachedSize is exactly 63. Then, (bitsCachedSize - count) is 0, so no shift is done. Then, bitsOut is bitsCached & MASKS[63], which is correct.
+
+But in the test case, the problem occurs when count is 63 and the bitsCachedSize is more than 63, perhaps 64 or more.
+
+Wait, in the code, after reading enough bytes, bitsCachedSize is at least count. So when count is 63, bitsCachedSize could be 64, 72, etc., depending on how many bytes were read.
+
+Wait, when bitsCachedSize is 64 and count is 63, in the big endian case, the shift is 1. So the code shifts the 64-bit cache right by 1, which would move the highest bit into the next position. But when you have 64 bits and shift right by 1, the 64th bit becomes the 63rd bit. However, since it's a signed shift (>>), the sign bit is preserved. Wait, no, because in Java, the right shift for long is signed. So for a positive number, it's filled with zeros. But in this case, the bits could be anything, so perhaps the shift is causing an issue.
+
+Wait, but when we're extracting bits, the order depends on the endianness. Maybe the problem is that in the big endian case, the shift is not sufficient or incorrect when count is close to bitsCachedSize.
+
+Alternatively, perhaps the issue is that when count is 63, the mask is 0x3FFFFFFFFFFFFFFF, which is correct, but when applying it after the shift, maybe the higher bits are not being cleared properly.
+
+Wait, let's think about when bitsCachedSize is 64, and count is 63. In big endian:
+
+bitsOut = (bitsCached >> (64-63)) & MASKS[63]
+
+Which is (bitsCached >> 1) & 0x3FFFFFFFFFFFFFFF.
+
+So the first bit (bit 63) is shifted into bit 62, and the higher bits beyond 63 are zeroed by the mask.
+
+But wait, bitsCached is a long, which is 64 bits. So when you shift right by 1, the 64th bit is lost, and the new 63rd bit is the old 64th bit. But since in big endian, the first byte is the most significant, the bits are stored in the higher positions.
+
+Wait, maybe the problem is that the shift is incorrect. Because when you have 64 bits cached, and you want to read 63 bits starting from the highest, you shouldn't shift at all. Wait, no, because bitsCachedSize is 64, count is 63, so (64-63) is 1. So you shift right by 1 to get the 63 bits starting from the second highest bit.
+
+Wait, perhaps that's not correct. Let me think about how the bits are stored.
+
+In big endian, each new byte is added to the higher end. So the first byte is the highest 8 bits, the next is the next 8, etc.
+
+So when you have 8 bytes (64 bits) in the cache, the first byte is bits 63-56, the second 55-48, etc., down to the last byte being bits 7-0.
+
+If you want to read 63 bits, you need to take bits 63 down to 1 (since 63 bits would leave the last bit). So how to extract that.
+
+Wait, in the code, for big endian, the extraction is:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+So when bitsCachedSize is 64 and count is 63, it's shifting right by 1, which would move the highest 63 bits into the lower 63 positions. But then the mask is applied, which is 63 bits, so the highest bit after shifting would be bit 62, which was originally bit 63. So the resulting bitsOut would have the highest bit as what was originally bit 63.
+
+Wait, but in the test case, the expected value is 8274274654740644818L. Let me see what that is in binary.
+
+8274274654740644818 in binary is a 63-bit number starting with 1 followed by 62 more bits. So when we read 63 bits, the highest bit is 1.
+
+But in the code, when we shift right by 1, the highest bit (bit 63) becomes bit 62 in bitsOut. But since we're masking with 63 bits, the highest bit in bitsOut is bit 62, which was originally bit 63. So that's correct.
+
+Wait, maybe the issue is that when the count is 63 and the bitsCachedSize is exactly 64, the shift by 1 is correct, but when the bitsCachedSize is larger, like 72, it's not handled correctly.
+
+Wait, no, because the code reads until bitsCachedSize is at least count. So when count is 63, bitsCachedSize can be 63, 64, 71, etc. So the shift is (bitsCachedSize - count), which could be more than 1.
+
+Wait, perhaps the problem is that the code is using a signed right shift (>>) instead of an unsigned right shift (>>>). Because when you have bits beyond the 63rd bit, a signed shift would fill with the sign bit, which is 1 if the highest bit is 1. But in the case of big endian, when you have a 64-bit cache, and you shift right by 1, using >> would preserve the sign, but since the cache is built from bytes, which are treated as unsigned in the code, perhaps it should be an unsigned shift.
+
+Wait, in the code, for little endian, the extraction uses a zero-fill shift (>>>), but for big endian, it uses a signed shift (>>). That could be the issue.
+
+Because, for example, when you have bitsCached as a long, and you do bitsCached >> n, where n is positive, it's a signed shift. So if the highest bit is 1, all the higher bits filled will be 1s. But when you're extracting bits, you want to discard the higher bits beyond the count, so using a signed shift might be incorrect because it can introduce 1s in the higher bits of the result, which are then masked off. Wait, but after shifting, the mask is applied, so any higher bits beyond count would be zeroed.
+
+Wait, but perhaps the problem is that when you have more than 64 bits in the cache, and you're extracting a large number of bits, the shift is causing some issues.
+
+Wait, another possibility is that the mask is not correctly applied. For example, when count is 63, the mask should be 0x3FFFFFFFFFFFFFFF. But perhaps the MASKS array isn't correctly defined for that count.
+
+Wait, in the code, MASKS is an array where MASKS[count] is (1L << count) -1. So for count=63, it's (1L <<63) -1, which is 0x3FFFFFFFFFFFFFFF. So that's correct.
+
+Hmm, perhaps the issue is in how the bits are being shifted when the count is close to the cache size. Let me think about the big endian case when count is 63 and bitsCachedSize is 64.
+
+In that case, the shift is 1 (64-63). So bitsOut is (bitsCached >>1) & 0x3FFFFFFFFFFFFFFF.
+
+But bitsCached is 64 bits, so shifting right by 1 would move all bits to the right by 1, filling the left with the sign bit. So if the highest bit (bit 63) was 1, then after shifting, bit 63 becomes 1 again. But then, when you apply the mask, which is 63 bits, the highest bit in the result is bit 62, which was originally bit 63.
+
+Wait, that's correct because in big endian, the first bit is the highest. So shifting right by 1 would correctly align the 63 bits.
+
+Wait, but in the test case, the expected value for the big endian 63-bit read is 8274274654740644818L. Let me calculate what that is in binary.
+
+8274274654740644818 in hex is 0x7FFFFFFFFFFFFFFE. Wait, no, let me convert it properly.
+
+Wait, 8274274654740644818 is actually 0x7777777777777772 in hex. Wait, no, perhaps I should use a calculator.
+
+Wait, perhaps the issue is that when the count is 63, the function is not correctly handling the case when bitsCachedSize is larger than 64. Because each read adds 8 bits, so bitsCachedSize increases by 8 each time.
+
+Wait, in the code, after the while loop, bitsCachedSize is >= count. So if count is 63, bitsCachedSize could be 63 (if exactly 8 bytes were read, but 63 is not a multiple of 8). Wait, 63 is 7*8 + 7, so to get 63 bits, the code would have read 8 bytes (64 bits), making bitsCachedSize 64.
+
+Wait, so when count is 63, bitsCachedSize is 64. Then, in the big endian case, the code does:
+
+bitsOut = (bitsCached >> (64 -63)) & MASKS[63] → bitsCached >>1 & 0x3FFFFFFFFFFFFFFF.
+
+But perhaps the issue is that the code is using >> instead of >>>, leading to sign extension when the highest bit is set.
+
+For example, suppose bitsCached is 0x8000000000000000 (the highest bit is 1). Shifting right by 1 with >> would give 0xC000000000000000, but with >>> it would give 0x4000000000000000.
+
+But in the context of reading bits, we don't care about the sign, we just want the bits. So using a signed shift could be incorrect because it's introducing 1s in the higher bits when the highest bit is set.
+
+Wait, but after shifting, the code applies the mask, which for count=63 is 0x3FFFFFFFFFFFFFFF. So any higher bits beyond 63 would be zeroed. So whether the shift is signed or unsigned shouldn't matter because the mask would clear those higher bits.
+
+Wait, but in the case of count=63, the mask is 63 bits, so the highest bit in the result is bit 62. So shifting with >> or >>> would affect bits beyond 63, which are then masked off.
+
+Wait, perhaps the problem is elsewhere. Let me think about how the bits are being cached.
+
+In the little endian case, each new byte is OR'ed into bitsCached after shifting to the left by bitsCachedSize. So the first byte is the least significant 8 bits, the next is next 8, etc.
+
+When extracting, in little endian, the code takes the lower 'count' bits by masking, then shifts right by count.
+
+Wait, but when count is 63, the mask is 0x3FFFFFFFFFFFFFFF, which is correct. Then, shifting right by 63 would leave the higher bits in bitsCached as zero, but since it's a >>> shift, it's zero-fill.
+
+But in the test case, the little endian 63-bit read is returning the wrong value. So perhaps the issue is that when the count is 63, the shift is causing an overflow or incorrect handling.
+
+Wait, another possibility: the code is using a long to store the cached bits, which is 64 bits. When count is 63, the code is trying to read 63 bits, but perhaps the way the bits are being shifted is causing the 64th bit to be lost or not handled correctly.
+
+Wait, perhaps the problem is that when the count is 63 and the bitsCachedSize is 64, the code in the big endian case is shifting by 1, but the correct approach is to shift by (bitsCachedSize - count) which is 1, but perhaps it should be shifting by (bitsCachedSize - count) bits to the right.
+
+Wait, no, that's what it's doing. So I'm a bit stuck.
+
+Let me think about the test cases.
+
+In the little endian test, after reading 5 bits, the next read is 63 bits. The input bytes are 10 bytes, each contributing 8 bits, so 80 bits total.
+
+After reading 5 bits, the bitsCachedSize is 5. Then, the code reads until bitsCachedSize >=63. So it needs to read (63-5)=58 more bits, which is 58/8 = 7.25 bytes, so 8 more bytes. But wait, the input has 10 bytes, so after reading 5 bits, the code would read 8 more bytes (64 bits), making bitsCachedSize 5+64=69.
+
+Wait, no, wait: the initial bitsCachedSize is 0. The first read is 5 bits, so the code reads 1 byte (8 bits), so bitsCachedSize becomes 8. Then, it reads 5 bits, which is less than 8, so it proceeds. Then, the next read is 63 bits: the code checks if bitsCachedSize (8) is less than 63. So it enters the loop, reads another byte, adding 8 bits each time until bitsCachedSize >=63.
+
+So after the first read, bitsCachedSize is 8. Then, each iteration adds 8 bits. So to get from 8 to 63, we need 63-8=55 more bits, which is 7 more bytes (7*8=56 bits). So total bitsCachedSize becomes 8+56=64.
+
+So when count is 63, bitsCachedSize is 64. So the code extracts 63 bits from the first 63 bits of the 64 cached.
+
+In little endian, the extraction is bitsOut = (bitsCached & MASKS[63]); bitsCached >>>=63;
+
+So MASKS[63] is 0x3FFFFFFFFFFFFFFF, which is correct. Then, the bits are shifted right by 63, which for a long is okay because it's a 64-bit value.
+
+But wait, in the little endian case, the bits are stored with the first byte as the least significant. So when you read 63 bits, the first 63 bits are the lower 63 bits of the 64-bit cache. So masking with 0x3FFFFFFFFFFFFFFF gives the correct lower 63 bits.
+
+But in the test, the function returns 1184 instead of 1186 in the little endian case. So perhaps the issue is in the way the bits are being read after 63 bits.
+
+Wait, perhaps the problem is that when the count is 63, the code is not correctly handling the case where the bitsCachedSize is exactly 64, leading to incorrect shifting.
+
+Alternatively, perhaps the issue is that when the count is 63, the code is not correctly handling the case where the bitsCachedSize is a multiple of 8 plus 63, leading to an off-by-one error.
+
+Wait, perhaps the problem is that the code is using a signed right shift (>>) in the big endian case, which is causing the higher bits to be filled with 1s when the highest bit is set, leading to incorrect results after masking.
+
+Wait, let's consider a concrete example.
+
+Suppose in big endian, the bitsCached is 0x8000000000000000 (the highest bit is set). If count is 63, then (bitsCachedSize - count) is 1, so bitsOut is (0x8000000000000000 >> 1) & 0x3FFFFFFFFFFFFFFF.
+
+0x8000000000000000 is -2^63 in two's complement. Shifting right by 1 with >> gives 0xC000000000000000, which is -2^63 in two's complement. Then, masking with 0x3FFFFFFFFFFFFFFF gives 0x4000000000000000.
+
+But the correct value should be 0x4000000000000000, which is the highest 63 bits shifted right by 1, but with the sign bit handled correctly.
+
+Wait, but in reality, the highest bit is 1, so shifting right by 1 with >> would set all higher bits to 1. But after masking, those higher bits beyond 63 are cleared, so the result is correct.
+
+Hmm, perhaps the issue is elsewhere.
+
+Wait, maybe the problem is that the code is using in.read() which returns an int, but in Java, that returns a value between 0 and 255, or -1 for EOF. So nextByte is an int, but when you do nextByte << bitsCachedSize, if nextByte is negative (which it can't be because in.read() returns -1 only on EOF, which is handled), but perhaps when it's cast to a long, the sign extension is causing issues.
+
+Wait, no, because nextByte is read as in.read(), which returns -1 on EOF, but in the loop, if nextByte is -1, the function returns it. So during normal operation, nextByte is between 0 and 255, so when cast to long, it's 0x00XX...XX.
+
+Wait, perhaps the problem is in the way the bits are being OR'ed in the little endian case.
+
+In the little endian case, each new byte is shifted left by bitsCachedSize. So for example, the first byte is shifted by 0, so it's OR'ed as is. The second byte is shifted by 8, so it's placed next, etc.
+
+Wait, but when bitsCachedSize reaches 56, adding another byte (8 bits) makes it 64. But if the count is 63, the code will read until bitsCachedSize is >=63. So it may read 8 bytes (64 bits) when count is 63.
+
+So, in the little endian case, the bits are stored as the first byte being the least significant 8 bits, the next the next 8, etc. So when count is 63, the code extracts the lower 63 bits.
+
+But perhaps the issue is that when the bitsCachedSize is 64, the code is extracting 63 bits correctly, but when it's more than 64, it's not.
+
+Wait, but the code only reads until bitsCachedSize >= count. So for count=63, it reads until bitsCachedSize is at least 63. So bitsCachedSize could be 63, 64, 71, etc., depending on how many bytes were read.
+
+Wait, perhaps the problem is that when bitsCachedSize is 64, the code in the little endian case is extracting bits 0-62 (63 bits), but when bitsCachedSize is higher, like 72, it's extracting bits from 9-71, which may not be correct.
+
+Wait, no, because the code shifts the bitsCached right by count, which for count=63, it shifts right by 63. So in the little endian case, the code is:
+
+bitsOut = bitsCached & MASKS[63];
+bitsCached >>>= 63;
+
+So if bitsCachedSize is 64, shifting right by 63 gives the highest bit as the first bit of the result. Which is correct.
+
+Wait, but perhaps the problem is that when bitsCachedSize is 64, after shifting right by 63, the bitsCached becomes 0x01 if the highest bit was set. Then, the next read starts with that.
+
+But in the test case, after reading 63 bits, the next read is 12 bits, which is where the error occurs. So perhaps the problem is that after reading 63 bits, the bitsCachedSize is reduced by 63, but in the little endian case, the shift is not correctly handling the remaining bits.
+
+Wait, let's see. After reading 63 bits, bitsCachedSize is 64. So bitsCachedSize -=63 → 1. Then, the next read is 12 bits. So the code will read until bitsCachedSize >=12. bitsCachedSize is 1, so it needs to read 11 more bits. So it reads 2 more bytes (16 bits), making bitsCachedSize 1+16=17. Then, extract 12 bits.
+
+In the little endian case, the extraction is bitsOut = (bitsCached & MASKS[12]); bitsCached >>>=12; bitsCachedSize becomes 17-12=5.
+
+But perhaps the problem is that the bits are not correctly aligned after the previous read.
+
+Alternatively, perhaps the issue is that the code is using a long to store bitsCached, which is 64 bits. When the count is 63, the code is extracting 63 bits, but the way the bits are being shifted is causing the higher bit to be lost or incorrectly handled.
+
+Wait, perhaps the problem is that when the count is 63, the mask is 0x3FFFFFFFFFFFFFFF, which is correct, but when the count is 63 and the bits are stored in a long, the extraction is correct, but the way the remaining bits are handled after extraction is causing issues.
+
+Alternatively, perhaps the problem is that when the count is 63, the code is not correctly handling the case where the bitsCachedSize is exactly 64, leading to an incorrect extraction.
+
+Wait, perhaps the issue is that when the count is 63, the code is not correctly handling the case where the bits are exactly 64, leading to the extraction including an extra bit.
+
+Wait, perhaps the problem is that the code is using a long, which is 64 bits, and when count is 63, the code is extracting the lower 63 bits, but the next read is not correctly handling the remaining 1 bit.
+
+Wait, but in the test case, the next read is 12 bits, which would require 12 bits. So if after extracting 63 bits from 64, the bitsCachedSize is 1, and the next read needs 12 bits, it will read 2 more bytes (16 bits), making bitsCachedSize 17. Then, extract 12 bits, leaving 5 bits.
+
+But in the test case, the expected value is 1186, but the function returns 1184. So perhaps the extraction of the 12 bits is incorrect.
+
+Wait, 1186 in binary is 10010100110, which is 11 bits. 1184 is 10010100100. So perhaps the function is losing some bits or not shifting correctly.
+
+Hmm, maybe the issue is that when the count is 63, the code is not correctly handling the case where the bits are exactly 64, leading to an off-by-one error in the extraction.
+
+Alternatively, perhaps the problem is that the code is not correctly handling the case where the count is 63 and the bitsCachedSize is 64, leading to an incorrect shift.
+
+Wait, perhaps the code should not shift when count is equal to bitsCachedSize. Let me think: in the big endian case, when count is 63 and bitsCachedSize is 64, the code shifts by 1, but perhaps it should not shift at all because the desired bits are in the higher 63 bits.
+
+Wait, no, because in big endian, the higher bits are the first ones. So to get the higher 63 bits, you need to shift right by 1 to move the 64th bit into the 63rd position, then mask to get 63 bits.
+
+Wait, but perhaps the shift should be (bitsCachedSize - count) only when bitsCachedSize > count. Or perhaps the shift is incorrect.
+
+Alternatively, perhaps the problem is that the code is using bitsCachedSize as the total number of bits, but when extracting, the shift is calculated as (bitsCachedSize - count), which may not correctly align the bits.
+
+Wait, perhaps the issue is that the code should not be using bitsCachedSize - count as the shift amount, but rather (bitsCachedSize - count) could be larger than the number of bits to shift, leading to incorrect alignment.
+
+Alternatively, perhaps the problem is that when the count is 63 and the bitsCachedSize is 64, the code is correctly extracting 63 bits, but when the count is 63 and the bitsCachedSize is 72, the shift is 9, which is incorrect.
+
+Wait, no, because when count is 63 and bitsCachedSize is 72, the shift is 72-63=9. So the code shifts right by 9, which would bring the higher 63 bits into the lower 63 positions. But that's correct because the higher 63 bits are the first 63 bits of the 72 cached.
+
+Wait, perhaps the issue is that the code is using a signed shift (>>) instead of an unsigned shift (>>) in the big endian case, leading to incorrect sign extension.
+
+Wait, in Java, the right shift operator >> is signed for long, which means it fills with the sign bit. So if the highest bit is 1, shifting right will fill with 1s. But after masking, those higher bits beyond count are cleared. So it shouldn't matter.
+
+Wait, perhaps the problem is that the code is not correctly handling the case when the count is 63 and the bitsCachedSize is exactly 64, leading to an incorrect extraction.
+
+Wait, perhaps the problem is that when the count is 63, the code is extracting the lower 63 bits in little endian, but when the bitsCachedSize is 64, the lower 63 bits are correct, but the next read is not correctly handling the remaining 1 bit.
+
+Alternatively, perhaps the issue is that the code is using a long, which can only hold 64 bits, and when the count is 63, the code is not correctly handling the extraction, leading to an overflow or incorrect bit alignment.
+
+Wait, perhaps the problem is that the code is using (bitsCached >> (bitsCachedSize - count)) in the big endian case, but when (bitsCachedSize - count) is 1, it's shifting the 64th bit into the 63rd position, but in the case where the 64th bit is 1, the result is a negative number, which when cast to long is incorrect.
+
+Wait, but the mask is applied after shifting, so any higher bits beyond count are zeroed. So the sign shouldn't affect the result.
+
+Wait, perhaps the issue is that the code is using (bitsCached >> (bitsCachedSize - count)) which is a signed shift, but it should be using an unsigned shift (>>>).
+
+Because, for example, if bitsCached is 0x8000000000000000 (which is -2^63 as a long), and count is 63, bitsCachedSize is 64. So (bitsCachedSize - count) is 1. Shifting right by 1 with >> gives 0xC000000000000000, which is -2^63. But with >>>, it would give 0x4000000000000000.
+
+After applying the mask 0x3FFFFFFFFFFFFFFF, both would give 0x0000000000000000, because 0xC000000000000000 & 0x3FFFFFFFFFFFFFFF is 0x0000000000000000, and 0x4000000000000000 & 0x3FFFFFFFFFFFFFFF is also 0x0000000000000000.
+
+Wait, no, that's not correct. 0xC000000000000000 is -2^63 in two's complement. When masked with 0x3FFFFFFFFFFFFFFF, which is 63 bits, the result is 0x0000000000000000 because the higher bit is beyond 63.
+
+Wait, but 0xC000000000000000 is 64 bits, so when you apply a mask of 63 bits, the higher bit (bit 63) is 1, but the mask allows only up to bit 62. So the result would be 0x0000000000000000.
+
+Wait, but in reality, the desired bits are the higher 63 bits, which in this case is 0x8000000000000000 (the 64th bit is 1, but the 63 bits would be 1 followed by 62 zeros). But the code is extracting 0x0000000000000000, which is incorrect.
+
+Ah, so that's the problem. When the highest bit is set, and count is 63, using a signed shift in the big endian case is causing the higher bits beyond 63 to be set, which are then masked off, leading to the loss of the highest bit.
+
+So the solution is to use an unsigned right shift (>>>) instead of a signed right shift (>>) in the big endian case.
+
+So in the code, the line:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+should be changed to:
+
+bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+
+Because using >>> ensures that the higher bits are filled with zeros, so the mask correctly captures the desired bits without losing the highest bit.
+
+Similarly, in the little endian case, the code uses >>>, which is correct. So the issue is only in the big endian case.
+
+So to fix the bug, I'll change the >> to >>> in the big endian extraction.
+</think>
+
+To fix this bug, the issue was in the big endian case where a signed right shift (>>) was used, leading to incorrect handling of the highest bit when count was 63. By changing it to an unsigned right shift (>>>), the correct bits are extracted.
+
+```java
+public long readBits(final int count) throws IOException {
+    if (count < 0 || count > MAXIMUM_CACHE_SIZE) {
+        throw new IllegalArgumentException("count must not be negative or greater than " + MAXIMUM_CACHE_SIZE);
+    }
+    while (bitsCachedSize < count) {
+        final long nextByte = in.read();
+        if (nextByte < 0) {
+            return nextByte;
+        }
+        if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+            bitsCached |= (nextByte << bitsCachedSize);
+        } else {
+            bitsCached <<= 8;
+            bitsCached |= nextByte;
+        }
+        bitsCachedSize += 8;
+    }
+    final long bitsOut;
+    if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+        bitsOut = (bitsCached & MASKS[count]);
+        bitsCached >>>= count;
+    } else {
+        bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+    }
+    bitsCachedSize -= count;
+    return bitsOut;
+}
+```
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix this buggy Java function called readBits in the BitInputStream class. The function is supposed to read a specified number of bits from the input stream and return them as a long. But it's failing some tests, so I need to figure out why.
+
+Looking at the test cases, the first test is littleEndianWithOverflow. It's failing because the expected value is 1186, but the actual is 1184. The second test, bigEndianWithOverflow, is also failing with a wrong value. So the problem must be in how the bits are being handled, especially when the count exceeds a certain size, maybe causing an overflow.
+
+Let me look at the code step by step.
+
+The function starts by checking if the count is within valid range. Then, it enters a loop where it reads bytes from the input stream until it has enough bits cached. For each byte read, it shifts the bitsCached variable and ORs it with the new byte, depending on the byte order.
+
+Wait, in the loop, if the byteOrder is LITTLE_ENDIAN, it does bitsCached |= (nextByte << bitsCachedSize). For BIG_ENDIAN, it shifts bitsCached left by 8 and then ORs with nextByte. That makes sense because LITTLE_ENDIAN would add the new byte to the higher bits, while BIG_ENDIAN appends it to the lower bits.
+
+But the problem seems to occur after this loop. The code then tries to extract the required bits. For LITTLE_ENDIAN, it masks bitsCached with MASKS[count] and then right shifts by count. For BIG_ENDIAN, it shifts bitsCached right by (bitsCachedSize - count) and masks.
+
+Wait, maybe the issue is with how the bits are being extracted, especially when count is large. Let's think about when count is 63. The bitsCached is a long, which is 64 bits. So if bitsCachedSize is, say, 64, and count is 63, then in BIG_ENDIAN mode, it shifts bitsCached right by 1 (64-63=1), which would lose the highest bit if not handled properly.
+
+Wait, no. Because when you have 64 bits and you need 63, shifting right by 1 would move all 64 bits, but the mask MASKS[63] would then get the lower 63 bits. But maybe the way the bits are being shifted is causing the sign bit to be extended, which is a problem because in Java, the right shift operator >> is signed for longs. So when you shift a long right, it fills with the sign bit. That's probably the issue.
+
+Looking at the code, in the BIG_ENDIAN case, it does bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count]. If bitsCachedSize is 64 and count is 63, then (bitsCachedSize - count) is 1. So bitsCached >> 1 would shift right by 1, but since it's a long, it's a signed shift. So if the highest bit is 1, it would fill with 1s, which might be incorrect because we're dealing with unsigned bits here.
+
+Similarly, in the LITTLE_ENDIAN case, bitsOut is (bitsCached & MASKS[count]) and then bitsCached is shifted right by count. But again, using >>>= would be better because it's an unsigned shift, but in the code, it's using >>>= for the LITTLE_ENDIAN case when updating bitsCached, which is correct. Wait, no: in the LITTLE_ENDIAN case, after extracting bitsOut, it does bitsCached >>>= count. That's correct because it's unsigned.
+
+But for the BIG_ENDIAN case, when extracting bitsOut, it uses a signed right shift, which could cause issues with the sign bit. So perhaps the problem is that the code is using >> instead of >>> when handling the BIG_ENDIAN case.
+
+Wait, let me think again. For the BIG_ENDIAN case, the code is:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+But if bitsCached is a long, and the shift amount is (bitsCachedSize - count), which could be up to 63, then the >> operator would perform a signed shift. So if the highest bit is set, it would extend it, which is incorrect for unsigned data.
+
+So, for example, if bitsCached has the highest bit set, and we shift right by 1, the result would have that bit set in all higher positions, which is wrong because we're dealing with bits as an unsigned value.
+
+So the fix would be to replace the >> with >>> in the BIG_ENDIAN case when extracting bitsOut.
+
+Wait, but in the code, for the LITTLE_ENDIAN case, it's using a mask before shifting, which might handle that, but for BIG_ENDIAN, the shift is done before masking, which could introduce sign extension.
+
+So, the problem is that in the BIG_ENDIAN case, the code is using a signed right shift, which is causing incorrect values when the highest bit is set.
+
+Therefore, the fix is to change the shift in the BIG_ENDIAN case from >> to >>>.
+
+Let me check the code again.
+
+In the code, for the BIG_ENDIAN case, it's:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+I need to change that to:
+
+bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+
+Similarly, in the LITTLE_ENDIAN case, the code is:
+
+bitsOut = (bitsCached & MASKS[count]);
+bitsCached >>>= count;
+
+Which is correct because it's using an unsigned shift.
+
+So, the bug is in the BIG_ENDIAN case where it uses a signed shift instead of an unsigned one. That's causing the extracted bits to be incorrect when the highest bit is set.
+
+Let me see how that would affect the test cases.
+
+In the test littleEndianWithOverflow, the second assertion reads 63 bits. The expected value is a long that's 0x0001-00111101-01011000-00011101-01011010-00001111-01000010-00101101-010. But the actual is 1184 instead of 1186, which suggests that the lower bits are being affected. Wait, perhaps the issue is more about how the bits are being shifted and masked when count is large.
+
+Wait, in the littleEndian case, the bits are being added to the higher bits, so when extracting, it's taking the lower 'count' bits. But when count is 63, perhaps the mask isn't correctly applied because the shift is done after masking.
+
+Wait, no: in the LITTLE_ENDIAN case, the code is:
+
+bitsOut = (bitsCached & MASKS[count]);
+bitsCached >>>= count;
+
+So for count=63, MASKS[63] is 0x3FFFFFFFFFFFFFFF, which is 63 bits of 1s. So bitsOut would be the lower 63 bits of bitsCached, which is correct. Then bitsCached is shifted right by 63, which would leave 1 bit if it was 64 before.
+
+But wait, in the test case, the first read is 5 bits, which works. Then the second read is 63 bits, which might be where the issue is.
+
+Wait, perhaps the problem is that when the count is 63, the code in the BIG_ENDIAN case is shifting right by 1 (if bitsCachedSize is 64) using a signed shift, which would fill with 1s if the highest bit is set, thus messing up the lower bits.
+
+So, to confirm, in the BIG_ENDIAN case, when count is 63, bitsCachedSize is 64, so (64 - 63) =1. Shifting right by 1 with >> would extend the sign bit, but using >>> would shift in zeros.
+
+So, in the test bigEndianWithOverflow, the expected value is 8274274654740644818, which is a 63-bit number. But the actual is 203824122492715986, which is much smaller. That suggests that the higher bits are being lost or not set correctly.
+
+So, the fix is to change the >> to >>> in the BIG_ENDIAN case.
+
+Let me adjust the code accordingly.
+
+So, in the else clause, the code should be:
+
+bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+
+That should fix the issue.
+
+Another thing to check is the mask. The MASKS array should have the correct masks for each count. For example, MASKS[63] should be 0x3FFFFFFFFFFFFFFF. I'm assuming that's correctly set elsewhere.
+
+So, the corrected function would have that line changed.
+
+Let me write the corrected code.
+</think>
+
+To fix this issue, the problem was identified in the way bits were being extracted in the BIG_ENDIAN case. The code used a signed right shift operator (>>) which caused incorrect sign extension. By changing it to an unsigned right shift operator (>>>), the correct bits are extracted without sign extension issues.
+
+```java
+public long readBits(final int count) throws IOException {
+    if (count < 0 || count > MAXIMUM_CACHE_SIZE) {
+        throw new IllegalArgumentException("count must not be negative or greater than " + MAXIMUM_CACHE_SIZE);
+    }
+    while (bitsCachedSize < count) {
+        final long nextByte = in.read();
+        if (nextByte < 0) {
+            return nextByte;
+        }
+        if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+            bitsCached |= (nextByte << bitsCachedSize);
+        } else {
+            bitsCached <<= 8;
+            bitsCached |= nextByte;
+        }
+        bitsCachedSize += 8;
+    }
+
+    final long bitsOut;
+    if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+        bitsOut = (bitsCached & MASKS[count]);
+        bitsCached >>>= count;
+    } else {
+        bitsOut = (bitsCached >>> (bitsCachedSize - count)) & MASKS[count];
+    }
+    bitsCachedSize -= count;
+    return bitsOut;
+}
+```
+~~~~~~~~~~~~~~~~~
+Okay, I have this Java function called readBits that's supposed to read a certain number of bits from an input stream. But it's failing some tests, so I need to figure out why. Let's look at the code and the test cases to understand where it's going wrong.
+
+First, the function is supposed to read 'count' number of bits. It uses a bitsCached variable to accumulate the bits and bitsCachedSize to track how many bits are currently cached. The function reads bytes from the input stream until it has enough bits, then extracts the required number of bits based on the byte order.
+
+Looking at the test cases, both little-endian and big-endian tests are failing when trying to read 63 bits. The expected values don't match what's being returned. For example, in the little-endian test, after reading 5 bits, it tries to read 63 bits but gets the wrong value. Similarly, the big-endian test fails with a different wrong value.
+
+Hmm, let's examine the code step by step.
+
+In the readBits function:
+
+1. It checks if count is within valid range.
+2. While bitsCachedSize is less than count, it reads bytes from the input.
+3. For each byte read, it shifts the bitsCached and adds the new byte, considering the byte order.
+4. Once enough bits are cached, it extracts the required bits into bitsOut and adjusts the cached bits.
+
+Wait, there's a comment in the code: "bitsCachedSize >= 57 and left-shifting it 8 bits would cause an overflow." That suggests that when bitsCachedSize is 57 or more, shifting by 8 could overflow a long, which is 64 bits. So, perhaps the code is not handling cases where bitsCachedSize is near 64, especially when adding more bits.
+
+Looking at how the bits are being added:
+
+If byteOrder is LITTLE_ENDIAN, each new byte is shifted left by bitsCachedSize and OR'ed into bitsCached. For example, if bitsCachedSize is 56, adding a byte would require shifting by 56, then OR. But if bitsCachedSize is 57, shifting a long by 57 would be a problem because a long is 64 bits. Wait, no, 57 is okay because 64-57=7, so shifting by 57 is possible. But perhaps the problem is when bitsCachedSize is 56, and we read another byte, which would make it 64. Then, when extracting, maybe the shifting is incorrect.
+
+Wait, let's think about how the extraction works. After the while loop, bitsCachedSize is at least 'count'. So for the extraction part:
+
+If it's little-endian, bitsOut is bitsCached & MASKS[count]. Then bitsCached is shifted right by 'count' bits.
+
+In the big-endian case, bitsOut is (bitsCached >> (bitsCachedSize - count)) & MASKS[count]. Then bitsCachedSize is reduced by 'count'.
+
+Wait, maybe the issue is with how the bits are being shifted and masked, especially when count is close to 64.
+
+Looking at the test case where count is 63:
+
+In the little-endian test, after reading 5 bits, the next read is 63 bits. So bitsCachedSize after reading 5 would be 5. Then, the while loop reads until bitsCachedSize >=63. So, it reads (63 -5)/8 = 58/8 = 7.25, so 8 bytes, which is 64 bits. So bitsCachedSize becomes 5 + 64 = 69? Wait no, because each byte adds 8 bits. Wait, initial bitsCachedSize is 0. For count=5, it reads one byte, so bitsCachedSize becomes 8. Then, the next read is for 63, so while 8 < 63, it reads more bytes. Each iteration adds 8 to bitsCachedSize. So 8, 16, 24,..., until it's >=63. So it would read 8 bytes, which is 64 bits, making bitsCachedSize 64. Wait, 8 * 8 = 64, so after 8 bytes, bitsCachedSize is 64, which is >=63. So then it proceeds.
+
+In the little-endian case, bitsOut is bitsCached & MASKS[63]. Then bitsCached is shifted right by 63 bits. But wait, the mask for 63 bits is 0x7FFFFFFFFFFFFFFF, which is 63 ones. So that's correct.
+
+But wait, the initial bits are being read in little-endian order. So each new byte is shifted left by the current bitsCachedSize. So for example, the first byte is read, bitsCached becomes nextByte, bitsCachedSize=8. The second byte is shifted left by 8, so it's nextByte << 8, OR'ed into bitsCached, which now has 16 bits, etc.
+
+Wait, but when you have bitsCachedSize=64, and you shift right by 63, you're getting the highest bit as the first bit in the output. But in little-endian, the first byte is the least significant. So perhaps the way the bits are being extracted is incorrect.
+
+Wait, let's take an example. Suppose I have 64 bits in bitsCached, little-endian. So the first byte is the least significant 8 bits, and the eighth byte is the most significant.
+
+When I read 63 bits, I want the first 63 bits. So in little-endian, the bits are ordered from least significant to most. So the first bit is the least significant bit of the first byte, and so on.
+
+So, to extract 63 bits from bitsCached, which is 64 bits, we can mask the lower 63 bits, which is bitsCached & 0x7FFFFFFFFFFFFFFF. Then, the bits are correctly in little-endian order.
+
+Wait, but after extracting, the code does bitsCached >>>= count. So in this case, count is 63, so bitsCached becomes bitsCached >>> 63. Since bitsCached is a long, shifting right by 63 would leave only the highest bit. But in the case where we've read 64 bits, and extracted 63, the remaining 1 bit would be the highest bit of the last byte. But that's incorrect because in little-endian, the highest bit is the last one read.
+
+Wait, perhaps the problem is that after extracting 63 bits, the code shifts bitsCached right by 63, which drops all but the highest bit. But the next read would then try to read more bits, but the bitsCached is now just 1 bit. So perhaps the shifting is causing the bits to be lost incorrectly.
+
+Wait, maybe the issue is in how the bits are being shifted after extraction. Let's see: after extracting, the code does bitsCachedSize -= count. So if count is 63, and bitsCachedSize was 64, it becomes 1. Then, the next read would try to read 12 bits. So it needs to read 12 -1 =11 more bits, which is 2 bytes (since 11/8=1.375, so 2 bytes). So it would read two bytes, each time shifting bitsCached.
+
+But wait, when you have bitsCached as a long, shifting it right by 63 bits would leave only the highest bit. So after extracting 63 bits, the remaining 1 bit is the highest bit of the 64 bits. But in little-endian, the highest bit is the last byte read. So perhaps the way the bits are being shifted is causing the remaining bits to be incorrect.
+
+Alternatively, maybe the problem is that when the count is 63, the mask is not correct, but that's unlikely because MASKS[count] is supposed to have the lower 'count' bits set.
+
+Wait, let me think about the test case where count is 63. The test expects a specific long value, but the function returns a different one. So perhaps the way the bits are being extracted is wrong.
+
+Another possibility is that when the bitsCachedSize exceeds count, the code doesn't handle the extraction correctly. For example, if bitsCachedSize is 64 and count is 63, the code in the little-endian case does bitsOut = bitsCached & MASKS[63], which is correct. But then, when shifting bitsCached right by 63, it leaves only the highest bit, which is not correct for the next read.
+
+Wait, let's take an example. Suppose after reading 64 bits, the bits are:
+
+B63 B62... B0 (where B0 is the first bit read, little-endian).
+
+When we extract 63 bits, we take B62... B0, because MASKS[63] is 0x7FFFFFFFFFFFFFFF, which is 63 bits. But wait, no, the mask is 63 bits, so bitsOut would be the lower 63 bits, which is correct. Then, shifting bitsCached right by 63 would leave B63, which is the highest bit. But in reality, after reading 64 bits, the next read should have only one bit left, which is B63. But perhaps the code is not handling that correctly.
+
+Wait, maybe the problem is that when count is 63, the code is not correctly handling the case where the bits are split across the cached bits and the new bits. Or perhaps the shifting when the count is more than 64 is causing issues.
+
+Wait, looking at the code again, after extracting bitsOut, the code subtracts count from bitsCachedSize. So for the next read, if bitsCachedSize is 1, and the next read is for 12 bits, it will read (12 -1) = 11 more bits, which requires 2 bytes (11/8=1.375). So it will read two more bytes, each time adding 8 bits to bitsCachedSize, making it 1 + 16 =17, which is more than 12. Then, it extracts 12 bits.
+
+But perhaps the way the bits are being shifted when the bitsCachedSize is larger than count is incorrect.
+
+Wait, another thought: when the count is 63, the code uses bitsCached & MASKS[63], which is correct. But when the byte order is little-endian, the bits are stored in the cache as least significant bits first. So when you extract the lower 63 bits, you're getting the first 63 bits, but perhaps the next shift is causing the remaining bit to be in the wrong position.
+
+Alternatively, perhaps the issue is with the big-endian case. Let's look at that.
+
+In the big-endian case, after the while loop, the code does bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count]. So, for example, if bitsCachedSize is 64 and count is 63, it shifts right by 1, then masks with 63 bits. But wait, that would take the highest 63 bits. Because in big-endian, the first byte is the most significant. So for 64 bits, to get 63 bits, you shift right by 1 (because 64 -63 =1) and then take the lower 63 bits.
+
+Wait, that would give you the highest 63 bits. So in the test case where the expected value is 8274274654740644818, which is 63 bits, perhaps the code is not extracting the correct bits.
+
+Wait, perhaps the problem is that when count is 63, and bitsCachedSize is 64, the code in the big-endian case is shifting right by (64-63)=1, which gives the highest 63 bits. But maybe the test expects the lower 63 bits, or vice versa.
+
+Alternatively, maybe the mask is incorrect. The MASKS array is supposed to have a mask with 'count' bits set. So for count=63, it's 0x7FFFFFFFFFFFFFFF. So that part should be correct.
+
+Wait, perhaps the problem is that when bitsCachedSize is exactly equal to count, the code works, but when it's larger, it doesn't. For example, when bitsCachedSize is 64 and count is 63, the code in big-endian does (bitsCached >> (64-63)) & mask. So it shifts right by 1, which drops the least significant bit and gives the higher 63 bits. But perhaps the test expects the lower 63 bits.
+
+Wait, that's possible. Because in the test case, the expected value is 8274274654740644818, which is 63 bits. Let's see how that's constructed. The comment says it's 111 followed by several bytes. Wait, perhaps the code is extracting the wrong part of the bits.
+
+Wait, in the big-endian test, the input bytes are:
+
+87, 45, 66, 15, 90, 29, 88, 61, 33, 74.
+
+Each byte is 8 bits, so 10 bytes make 80 bits. The test reads 5 bits, then 63, then 12.
+
+After reading 5 bits, the next read is 63. So the bits read are bits 5 to 67 (since 5+63=68, but the initial bits were 5, so 5+63=68, which is beyond 64, so perhaps that's where the problem is).
+
+Wait, no, the bits are being read as a stream. Let me think about how the bits are being read.
+
+In the big-endian test, after reading 5 bits, the next read is 63 bits. So the code reads bytes until it has at least 63 bits. So from the initial 5, it needs 58 more bits, which is 58/8=7.25, so 8 bytes. So 8 bytes *8=64 bits, so total bitsCachedSize is 5+64=69. So when extracting 63 bits, it uses (bitsCached >> (69-63)) & MASKS[63], which is (bitsCached >>6). So it's taking bits from position 6 to 68, but wait, that doesn't seem right.
+
+Wait, no, the formula is bitsCached >> (bitsCachedSize - count). So bitsCachedSize is 69, count is 63, so 69-63=6. So it's shifting right by 6 bits, which would take the higher 63 bits (since 64-6=58, but I'm getting confused).
+
+Wait, maybe the issue is that when bitsCachedSize is larger than count, the code is not correctly extracting the least significant 'count' bits in big-endian mode.
+
+Alternatively, perhaps the problem is that the code is not correctly handling the case when bitsCachedSize is exactly count. Or when it's larger.
+
+Wait, perhaps the way the extraction is done in big-endian mode is incorrect. Let's think about how the bits are stored.
+
+In big-endian, each new byte is shifted to the left by 8 bits and OR'ed with the next byte. So the first byte is the most significant. So for example, if you have bytes 0x12 and 0x34, the bits would be 0x1234, with 0x12 being higher.
+
+So when you have bitsCached as a long, the first byte is the highest part. So when you need to extract 'count' bits, you need to shift right by (bitsCachedSize - count) to get the highest 'count' bits, then mask.
+
+Wait, but when bitsCachedSize is 64 and count is 63, shifting right by 1 would give you the highest 63 bits. But perhaps the test expects the lower 63 bits.
+
+Wait, no, the test expects a specific value. So perhaps the code is extracting the wrong part.
+
+Alternatively, perhaps the issue is that when bitsCachedSize is larger than count, the code is not correctly extracting the required bits.
+
+Wait, let's take the big-endian test case. After reading 5 bits, the next read is 63 bits. So the code reads 8 more bytes (64 bits), making the total bitsCachedSize 5+64=69. So when extracting 63 bits, it does (bitsCached >> (69-63)) & MASKS[63], which is bitsCached >>6. So the higher 63 bits are extracted.
+
+But the test expects 8274274654740644818, which is a specific 63-bit value. So perhaps the code is extracting the wrong 63 bits.
+
+Wait, perhaps the problem is that the code should extract the lower 'count' bits when in big-endian mode, but it's extracting the higher ones.
+
+Alternatively, perhaps the code should not shift when count is 63, but just mask.
+
+Wait, perhaps the formula for the shift in big-endian is incorrect. Let me think again.
+
+In big-endian, the bits are stored with the first byte as the most significant. So the bits are ordered from highest to lowest. So when you have bitsCachedSize bits, the first (bitsCachedSize - count) bits are the higher ones, and the next count bits are the ones to extract.
+
+Wait, no. To get the next count bits, you need to shift right by (bitsCachedSize - count) bits. Because the bits are in big-endian order, the bits you want are at the higher positions.
+
+Wait, for example, if bitsCachedSize is 64 and count is 63, then (bitsCachedSize - count) is 1. So shifting right by 1 gives you the higher 63 bits. Which is correct because the first bit is the highest.
+
+But in the test case, the expected value is constructed from the bytes in a certain way. Let's see the test's comment: the expected value is 111 followed by several bytes. Wait, perhaps the code is not correctly handling the case where the count is 63 and the bitsCachedSize is 64, leading to an incorrect extraction.
+
+Alternatively, perhaps the issue is with how the bits are being accumulated when the count is more than 64.
+
+Wait, another possibility: the code uses a long to store bitsCached, which is 64 bits. So when count is 63, and bitsCachedSize is 64, the code extracts 63 bits correctly, but the remaining 1 bit is not handled properly in the next read.
+
+Wait, in the test case, after reading 63 bits, the next read is 12 bits. So the code would have 1 bit left in bitsCached. Then, it reads (12 -1) =11 more bits, which requires 2 bytes (11/8=1.375). So it reads two more bytes, adding 16 bits, making bitsCachedSize 1+16=17. Then it extracts 12 bits.
+
+But perhaps the way the bits are being shifted is causing the 1 remaining bit to be in the wrong position when new bits are added.
+
+Wait, when you have bitsCached as a long, and you shift it right by count (63), you're left with the highest bit. Then, when you read new bytes, you're shifting bitsCached left by 8 each time and OR'ing with the new byte. But in the little-endian case, each new byte is added as the higher bits, which might be incorrect.
+
+Wait, let's think about the little-endian case. Suppose after extracting 63 bits, bitsCached is shifted right by 63, leaving the highest bit. Then, when a new byte is read, it's shifted left by bitsCachedSize, which is now 1. So nextByte <<1. So the new byte is added as higher bits than the remaining 1 bit. So the 1 bit becomes the lower bit, and the new byte is higher. Which is correct for little-endian.
+
+Wait, no. Because in little-endian, each new byte is the next higher bits. So when you have a remaining 1 bit, and you add a new byte, the new byte should be shifted left by 1 bit and OR'ed with the remaining bit. That would make the new byte the higher bits, which is correct.
+
+Hmm, perhaps the issue is elsewhere. Let me think about the mask.
+
+Wait, the MASKS array is probably precomputed with masks for different counts. For example, MASKS[5] is 0x1F (binary 11111), MASKS[63] is 0x7FFFFFFFFFFFFFFF, etc. So that part should be correct.
+
+Another possibility: when count is 63, the code is not correctly handling the case where the bits are split across the cached bits and the newly read bits. But I'm not sure.
+
+Wait, looking back at the test failure for the little-endian case: expected 1186, got 1184. The difference is 2, which is 1186-1184=2. So perhaps the code is losing some bits or not shifting correctly.
+
+Wait, 1186 in binary is 10010100110, which is 11 bits. So when the test reads 12 bits, the expected value is 1186, but the code returns 1184, which is 10010100100. So the last two bits are incorrect.
+
+So perhaps in the extraction of 12 bits, the code is not correctly handling the bits, maybe due to incorrect shifting or masking.
+
+Wait, let's think about the process:
+
+After reading 63 bits, the bitsCachedSize is 64 -63 =1 bit left. Then, the next read is 12 bits. So the code needs to read 12 -1=11 more bits, which is 2 bytes (11/8=1.375). So it reads two bytes, each time adding 8 bits, making bitsCachedSize 1+16=17. Then, it needs to extract 12 bits.
+
+In the little-endian case, the extraction is bitsOut = bitsCached & MASKS[12], then shift right by 12. So MASKS[12] is 0xFFF. So the lower 12 bits are taken.
+
+But wait, the bits are stored in little-endian order. So the first byte is the least significant. So when you have 17 bits, the lower 12 would be the last 12 bits added.
+
+Wait, but in the code, when extracting, it's taking the lower 'count' bits regardless of the byte order. Wait, no: in the little-endian case, bitsOut is bitsCached & MASKS[count], which is the lower 'count' bits. Then, bitsCached is shifted right by count, which discards those bits.
+
+But in the big-endian case, bitsOut is (bitsCached >> (bitsCachedSize - count)) & MASKS[count], which shifts the higher 'count' bits down to the lower positions.
+
+Wait, perhaps the problem is that in the little-endian case, when extracting, it's taking the lower 'count' bits, which is correct, but when the bits are stored as little-endian, the lower 'count' bits are the most recently read bits. So that should be correct.
+
+But why is the test failing? Let me take the specific example from the test.
+
+In the little-endian test:
+
+After reading 5 bits and 63 bits, the remaining bits are 1. Then, the next read is 12 bits. So the code reads two more bytes, making bitsCachedSize 1 + 16=17.
+
+The two new bytes are read as follows: each byte is shifted left by the current bitsCachedSize and OR'ed. So for the first new byte, bitsCachedSize is 1, so nextByte <<1. Then, bitsCachedSize becomes 9. Then, the second new byte is shifted left by 9, making bitsCachedSize 17.
+
+Then, to extract 12 bits, bitsOut is bitsCached & MASKS[12], which is the lower 12 bits. So the lower 12 bits would be the last 12 bits added, which is correct for little-endian.
+
+But in the test, it's expecting 1186 (binary 10010100110), but the code returns 1184 (10010100100). So the last two bits are incorrect.
+
+Hmm, perhaps the code is not correctly handling the case where the bitsCachedSize is not a multiple of 8 after extraction.
+
+Wait, another possibility: the code is using in.read() which returns an int, but if the stream is at the end, it returns -1. But in the test, the stream has enough bytes, so that's not the issue.
+
+Wait, perhaps the problem is with the way the bits are being shifted when adding new bytes. Let's see:
+
+In the little-endian case, each new byte is shifted left by bitsCachedSize. So for example, if bitsCachedSize is 1, and the new byte is 0x12, it becomes 0x1200 after shifting. But wait, no, because bitsCachedSize is the number of bits, not bytes. So shifting by 1 bit position would make 0x12 become 0x24. Wait, no: nextByte is an int, which is 8 bits. So when you do nextByte << bitsCachedSize, which is in bits, not bytes. So for example, if bitsCachedSize is 8, nextByte is shifted left by 8 bits, which is correct for adding another byte in little-endian.
+
+Wait, perhaps the code is correctly handling the little-endian case, but the big-endian case is incorrect. Or perhaps there's an issue with the shifting when the count is 63.
+
+Wait, another approach: perhaps the problem is that when count is 63, the code is not correctly handling the mask, leading to incorrect extraction.
+
+Alternatively, perhaps the issue is that the code is using a long, which is signed, and when shifting right, it's using a signed shift, which could cause issues. For example, in the big-endian case, when shifting right, if the highest bit is 1, the shift would fill with 1s, causing incorrect results.
+
+Wait, looking at the code: in the little-endian case, it's using bitsCached >>>= count, which is an unsigned right shift. But in the big-endian case, it's using bitsCached >> (bitsCachedSize - count), which is a signed shift.
+
+Wait, no, in the big-endian case, it's just a regular right shift, not an unsigned one. Because the code is:
+
+bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+
+So, for example, if bitsCached is a negative number (highest bit is 1), shifting right would fill with 1s. But since we're masking with MASKS[count], which has count bits set, it should be okay. Because the mask would clear the higher bits beyond count.
+
+Wait, but perhaps the issue is that when count is 63, the mask is 0x7FFFFFFFFFFFFFFF, which is 63 bits. So when you shift a negative number right, you get 1s in the higher bits, but the mask would clear them, leaving only the lower 63 bits. So that should be correct.
+
+Hmm, I'm not seeing the issue. Maybe I should try to run through the test case manually.
+
+Let's take the little-endian test case:
+
+The input bytes are: 87,45,66,15,90,29,88,61,33,74.
+
+Each byte is 8 bits, so 10 bytes make 80 bits.
+
+The test reads 5 bits, then 63, then 12.
+
+After reading 5 bits, the bitsCachedSize is 8 (since one byte is read). The 5 bits are extracted, leaving 3 bits in the cache.
+
+Wait, no: the initial read is 5 bits. So the code reads one byte (8 bits) and then extracts 5 bits, leaving 3 bits in the cache (bitsCachedSize =8-5=3).
+
+Then, the next read is 63 bits. So the code needs to read 63-3=60 more bits, which is 60/8=7.5, so 8 bytes. So 8 bytes are read, adding 64 bits, making bitsCachedSize 3+64=67.
+
+Wait, but the code is supposed to read until bitsCachedSize >= count. So 3 <63, so it reads 8 bytes (64 bits), making bitsCachedSize=67, which is >=63.
+
+Then, in the little-endian case, bitsOut is bitsCached & MASKS[63], which is the lower 63 bits. Then, bitsCached is shifted right by 63, leaving 67-63=4 bits.
+
+Wait, no: bitsCachedSize is 67, count is 63. So after extraction, bitsCachedSize becomes 67-63=4.
+
+Then, the next read is 12 bits. So the code needs to read 12-4=8 more bits, which is 1 byte. So it reads one byte, adding 8 bits, making bitsCachedSize 12.
+
+Then, it extracts 12 bits as the lower 12 bits.
+
+But in the test, the expected value is 1186, which is 11 bits. So perhaps the code is extracting 12 bits correctly, but the test is expecting 11 bits. Wait, no, the test reads 12 bits and expects 1186, which is 11 bits. Wait, 1186 in binary is 10010100110, which is 11 bits. So when extracted as 12 bits, it would be 0x1F6, which is 10010100110 in 12 bits, but perhaps the code is not correctly handling the sign or the mask.
+
+Wait, no, the mask for 12 bits is 0xFFF, which is correct.
+
+Alternatively, perhaps the problem is that when the count is 12, the code is not correctly handling the bits when bitsCachedSize is exactly 12.
+
+Wait, perhaps the issue is that when bitsCachedSize is exactly equal to count, the code doesn't shift, but perhaps it should. Or perhaps the mask is not applied correctly.
+
+Wait, another thought: perhaps the code is not correctly handling the case where the count is more than 64. But in the test cases, count is 63, which is less than 64.
+
+Alternatively, perhaps the issue is that the code is using in.read() which returns an int, but when the end of stream is reached, it returns -1. However, in the test cases, the stream has enough bytes, so that's not the issue.
+
+Wait, perhaps the problem is that the code is not correctly handling the case where the count is 63 and the bits are split across the cache and new bytes. Let's think about how the code accumulates the bits.
+
+In the little-endian case, each new byte is shifted left by bitsCachedSize and OR'ed into bitsCached. So, for example, if bitsCachedSize is 3, and a new byte is read, it's shifted left by 3 bits. So the new byte's bits are placed after the existing 3 bits.
+
+But when you have 3 bits in the cache, and you read 8 bytes (64 bits), the total bitsCachedSize becomes 3+64=67. So when extracting 63 bits, you take the lower 63 bits, which includes the initial 3 bits and 60 new bits. Then, the remaining 4 bits are shifted out.
+
+Wait, but in the test, after reading 63 bits, the next read is 12 bits. So the code has 4 bits left, reads 8 more (1 byte), making 12 bits. Then, it extracts the lower 12 bits.
+
+But the test expects 1186, which is 11 bits. So perhaps the code is including an extra 0 bit at the end.
+
+Wait, perhaps the code is not correctly handling the case where the remaining bits plus the new bits equal exactly the count. Or perhaps there's an off-by-one error in the shifting.
+
+Another possibility: the code is using a signed long, and when shifting, it's causing sign extension issues. For example, when bitsCached is negative (highest bit is 1), shifting right in the big-endian case would fill with 1s, but the mask is supposed to clear those.
+
+Wait, but in the little-endian case, the code uses an unsigned right shift (>>>), which is correct. In the big-endian case, it's using a signed right shift (>>), but then applies the mask. So the mask should clear any higher bits beyond 'count'.
+
+Wait, perhaps the issue is that when count is 63, the mask is 0x7FFFFFFFFFFFFFFF, which is 63 bits. So when you have a long that's 64 bits, the mask correctly extracts the lower 63 bits. So that should be fine.
+
+I'm starting to think that the problem might be elsewhere. Perhaps the issue is that the code is not correctly handling the case when the count is larger than the number of bits available after reading, but I'm not sure.
+
+Wait, looking back at the code, there's a comment that says: "bitsCachedSize >=57 and left-shifting it 8 bits would cause an overflow." So perhaps the code is trying to prevent shifting when bitsCachedSize is 57 or more, because 57+8=65, which is more than 64, causing overflow.
+
+But in the code, the shifting is done regardless. So perhaps the code should check if adding another byte would cause the bitsCachedSize to exceed 64, and handle that case separately.
+
+Wait, that's a possibility. Because when bitsCachedSize is 57, adding another byte (8 bits) would make it 65, which is more than 64. So shifting a long by 57 bits and then OR'ing with (nextByte <<57) would cause an overflow, because nextByte is 8 bits, shifted left by 57 would be 57+8=65 bits, which is beyond the capacity of a long.
+
+So perhaps the code needs to handle the case where bitsCachedSize +8 >64 by reading only the necessary bits to reach 'count' without exceeding 64.
+
+So, the code currently reads bytes until bitsCachedSize >= count, but when count is close to 64, this could cause bitsCachedSize to exceed 64, leading to incorrect shifting.
+
+So, perhaps the fix is to limit the number of bits read in each iteration to avoid exceeding 64 bits. For example, when reading a new byte, check if adding 8 bits would exceed 64, and if so, read only the necessary bits.
+
+But how can you read a partial byte? Because in.read() returns a full byte or -1.
+
+Wait, that's a problem. Because you can't read a partial byte from the input stream. So, the code has to read full bytes, but when the remaining bits needed are less than 8, it can't read a partial byte. So, perhaps the code needs to read the next byte and then only use the necessary bits.
+
+But in the current code, it reads the next byte, shifts it by bitsCachedSize, which may cause overflow if bitsCachedSize is 57 or more.
+
+So, to fix this, the code should read the next byte only if there's space in the long without causing overflow. So, when bitsCachedSize +8 >64, it should read the necessary bits from the next byte without shifting beyond 64.
+
+But how?
+
+Perhaps, when bitsCachedSize is >= (64 -8), i.e., 56 or more, the code should read the next byte and extract only the necessary bits to reach 'count' without exceeding 64.
+
+So, the approach would be:
+
+- While bitsCachedSize < count:
+   - If adding another byte would exceed 64, read the necessary bits from the next byte.
+   - Else, read the next byte and add it to bitsCached.
+
+But since in.read() returns a byte, perhaps the code can read the next byte, then extract the necessary bits and add them to bitsCached.
+
+Wait, but how to handle that.
+
+Alternatively, perhaps the code should calculate how many more bits are needed, and if it's less than 8, read a byte, extract the necessary bits, and add them to bitsCached without shifting beyond 64.
+
+So, let's think about this.
+
+In the loop:
+
+while (bitsCachedSize < count) {
+
+   if (bitsCachedSize +8 >64) {
+
+       // Need to read partial bits
+
+       int needed = count - bitsCachedSize;
+
+       if (needed <=0) break;
+
+       long nextByte = in.read();
+
+       if (nextByte <0) return nextByte;
+
+       // Extract 'needed' bits from nextByte
+
+       long bitsToAdd = nextByte << (8 - needed);
+
+       // But wait, in little-endian, the bits are added as higher bits
+
+       // So for little-endian, the new bits are the higher 'needed' bits
+
+       // So, in little-endian:
+
+       if (byteOrder == LITTLE_ENDIAN) {
+
+           bitsCached |= (nextByte << (bitsCachedSize));
+
+           // But this would cause overflow if bitsCachedSize + needed >64
+
+           // So instead, we can take only the needed bits from nextByte
+
+           // and add them to bitsCached.
+
+           long mask = (1L << needed) -1;
+
+           long extracted = (nextByte >> (8 - needed)) & mask;
+
+           bitsCached |= extracted << bitsCachedSize;
+
+       } else {
+
+           // big-endian: the new bits are the lower 'needed' bits
+
+           long extracted = nextByte & ((1L << needed) -1);
+
+           bitsCached |= extracted;
+
+       }
+
+       bitsCachedSize += needed;
+
+       break;
+
+   } else {
+
+       // read full byte
+
+       long nextByte = in.read();
+
+       if (nextByte <0) return nextByte;
+
+       if (byteOrder == LITTLE_ENDIAN) {
+
+           bitsCached |= nextByte << bitsCachedSize;
+
+       } else {
+
+           bitsCached <<=8;
+
+           bitsCached |= nextByte;
+
+       }
+
+       bitsCachedSize +=8;
+
+   }
+
+}
+
+Wait, perhaps this approach would prevent the overflow by handling the case where adding another full byte would exceed 64 bits.
+
+So, the idea is that when the remaining bits needed is less than 8, we read a byte, extract the necessary bits, and add them to bitsCached without causing overflow.
+
+This would fix the issue where shifting by 57 would cause overflow when adding a new byte.
+
+So, applying this logic to the code.
+
+So, the modified code would have:
+
+In the while loop:
+
+- Check if adding another 8 bits would exceed 64. If so, read the needed partial bits.
+- Else, read a full byte and add it.
+
+This would prevent the overflow and correctly handle cases where count is near 64.
+
+So, the fixed function would include this logic.
+</think>
+
+To fix this code, we need to handle the case where reading an additional byte would cause an overflow in the `bitsCached` variable, which is a 64-bit long. This occurs when `bitsCachedSize` is 57 or more because adding another 8 bits would exceed the 64-bit capacity. The solution involves reading only the necessary partial bits from the next byte when close to the 64-bit limit.
+
+### Approaches
+1. **Check for Overflow:** Before reading each byte, check if adding 8 more bits would exceed 64. If so, read only the necessary bits to reach the required count without causing overflow.
+2. **Partial Bits Handling:** When the remaining bits needed are less than 8, read the next byte, extract the required partial bits, and add them to `bitsCached` without causing overflow.
+3. **Byte Order Consideration:** Handle the partial bits extraction differently based on whether the byte order is little-endian or big-endian to ensure correct bit placement.
+
+### Solution Code
+```java
+    public long readBits(final int count) throws IOException {
+        if (count < 0 || count > MAXIMUM_CACHE_SIZE) {
+            throw new IllegalArgumentException("count must not be negative or greater than " + MAXIMUM_CACHE_SIZE);
+        }
+        while (bitsCachedSize < count) {
+            if (bitsCachedSize + 8 > 64) {
+                int needed = count - bitsCachedSize;
+                if (needed <= 0) break;
+                final long nextByte = in.read();
+                if (nextByte < 0) {
+                    if (count > 0) {
+                        throw new EOFException("Unexpected end of stream. Needed " + count + " bits but only found " + bitsCachedSize);
+                    } else {
+                        return nextByte;
+                    }
+                }
+                long mask = (1L << needed) - 1;
+                long extracted;
+                if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+                    extracted = (nextByte >> (8 - needed)) & mask;
+                    bitsCached |= extracted << bitsCachedSize;
+                } else {
+                    extracted = nextByte & mask;
+                    bitsCached |= extracted;
+                }
+                bitsCachedSize += needed;
+                break;
+            } else {
+                final long nextByte = in.read();
+                if (nextByte < 0) {
+                    if (count > 0) {
+                        throw new EOFException("Unexpected end of stream. Needed " + count + " bits but only found " + bitsCachedSize);
+                    } else {
+                        return nextByte;
+                    }
+                }
+                if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+                    bitsCached |= nextByte << bitsCachedSize;
+                } else {
+                    bitsCached <<= 8;
+                    bitsCached |= nextByte;
+                }
+                bitsCachedSize += 8;
+            }
+        }
+
+        final long bitsOut;
+        if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+            bitsOut = bitsCached & MASKS[count];
+            bitsCached >>>= count;
+        } else {
+            bitsOut = (bitsCached >> (bitsCachedSize - count)) & MASKS[count];
+        }
+        bitsCachedSize -= count;
+        return bitsOut;
+    }
+```
+
+### Explanation
+- **Overflow Check:** The loop first checks if adding another full byte (8 bits) would exceed the 64-bit limit. If so, it calculates how many more bits are needed and reads the next byte.
+- **Partial Bits Extraction:** Depending on the byte order, the necessary partial bits are extracted and added to `bitsCached` without causing overflow. For little-endian, the partial bits are shifted to the correct position, while for big-endian, they are added directly.
+- **Exception Handling:** If an EOF is encountered before the required number of bits are read, an `EOFException` is thrown.
+
+This approach ensures that the function correctly handles cases where the required bits are near the 64-bit limit, preventing overflow and ensuring accurate bit extraction.
+~~~~~~~~~~~~~~~~~

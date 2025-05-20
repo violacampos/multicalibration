@@ -47,3 +47,7 @@ python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Cod
 
 python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --use-scc --prob-method avg_logprob --save-table --save-charts --split --save-data
 
+
+python compare_methods.py --dir program_repair/runs/bugsphp/test/Qwen-Qwen2.5-Coder-32B-Instruct/ --prob-method avg_logprob --problem program-repair --save-data --save-table --save-charts
+
+python run_lr.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --prob-method avg_logprob --problem code-gen --control-exp --save-charts --use-scc

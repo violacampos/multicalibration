@@ -3,7 +3,7 @@ import numpy as np
 
 class chart_creator():
 
-    def __init__(self, run, binning_type,  grid, save_dir, m=None, bin_edges=None):
+    def __init__(self, run, binning_type, grid, save_dir, m=None, bin_edges=None):
         self.run = run
         self.debug = binning_type
         self.save_dir = save_dir
@@ -42,7 +42,6 @@ class chart_creator():
            colors.append((0.0, 0.0, 1.0, x))
 
         return colors
-
 
     def calibration_comparision_chart(self, y1, y2, x1, x2):
         plt.title(self.run+' # Reliability chart on test set', fontsize=7)
@@ -125,18 +124,28 @@ class chart_creator():
         plt.close()
 
     def scatter_plot(self, ax, method, x, y, area):
-        colors = [  
-                    'tab:blue',
-                    'tab:orange',
-                    'tab:green',
-                    'tab:red',
-                    'tab:purple',
-                    'tab:brown',
-                    'tab:pink',
-                    'tab:gray',
-                    'tab:olive',
-                    'tab:cyan'
-                ]
+        if len(x) == 6:
+            colors = [  
+                        'tab:blue',
+                        'tab:orange',
+                        'tab:green',
+                        'tab:red',
+                        'tab:purple',
+                        'tab:brown'
+                    ]
+        else:
+            colors = [  
+                        'tab:blue',
+                        'tab:orange',
+                        'tab:green',
+                        'tab:red',
+                        'tab:purple',
+                        'tab:brown',
+                        'tab:pink',
+                        'tab:gray',
+                        'tab:olive',
+                        'tab:cyan'
+                    ]
 
         scatter = ax.scatter(x, y, s=area, c=colors, alpha=0.7, marker=r'$\odot$')
         ax.set_title(method, fontsize=12)
@@ -187,7 +196,7 @@ class chart_creator():
         plt.savefig(self.save_dir+"calibration_infos.png")
         plt.close() 
 
-        self.calibration_comparision_chart(self.chart_range[total_calibrated != 0], self.chart_range[total_uncalibrated != 0], correctness_calibrated[total_calibrated != 0], correctness_uncalibrated[total_uncalibrated != 0])
+        #self.calibration_comparision_chart(self.chart_range[total_calibrated != 0], self.chart_range[total_uncalibrated != 0], correctness_calibrated[total_calibrated != 0], correctness_uncalibrated[total_uncalibrated != 0])
 
         """self.reset_chart_range()"""
 

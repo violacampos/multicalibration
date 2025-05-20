@@ -1,0 +1,244 @@
+
+####################
+Response
+####################
+The issue seems to stem from the `readStored` method, where the handling of stored entries might not be correctly caching and returning the stored data. Specifically, the logic for reading stored entries that use a data descriptor might be flawed, leading to incorrect data being returned.
+
+Here is the corrected version of the `readStored` method:
+
+```Java
+private int readStored(byte[] buffer, int offset, int length) throws IOException {
+    if (current.hasDataDescriptor) {
+        if (lastStoredEntry == null) {
+            readStoredEntry();
+        }
+        return lastStoredEntry.read(buffer, offset, length);
+    }
+
+    long csize = current.entry.getSize();
+    if (current.bytesRead >= csize) {
+        return -1;
+    }
+
+    if (buf.position() >= buf.limit()) {
+        buf.position(0);
+        int l = in.read(buf.array());
+        if (l == -1) {
+            return -1;
+        }
+        buf.limit(l);
+
+        count(buf.limit());
+        current.bytesReadFromStream += buf.limit();
+    }
+
+    int toRead = Math.min(buf.remaining(), length);
+    if ((csize - current.bytesRead) < toRead) {
+        // if it is smaller than toRead then it fits into an int
+        toRead = (int) (csize - current.bytesRead);
+    }
+    buf.get(buffer, offset, toRead);
+    current.bytesRead += toRead;
+    return toRead;
+}
+```
+
+However, the core issue seems to be in the `readStoredEntry` method, which is responsible for caching the stored entry data. Let's correct that method as well:
+
+```Java
+private void readStoredEntry() throws IOException {
+    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+    byte[] localBuf = new byte[ZipArchiveOutputStream.BUFFER_SIZE];
+    int r;
+    boolean done = false;
+
+    // length of DD without signature
+    int ddLen = current.usesZip64? WORD + 2 * DWORD : 3 * WORD;
+
+    while (!done) {
+        r = in.read(localBuf);
+        if (r <= 0) {
+            // read the whole archive without ever finding a
+            // central directory
+            throw new IOException("Truncated ZIP file");
+        }
+        bos.write(localBuf, 0, r);
+        done = bufferContainsSignature(bos, r, ddLen);
+    }
+
+    byte[] b = bos.toByteArray();
+    lastStoredEntry = new ByteArrayInputStream(b);
+}
+
+private boolean bufferContainsSignature(ByteArrayOutputStream bos, int lastRead, int expectedDDLen) {
+    byte[] b = bos.toByteArray();
+    int off = b.length - lastRead - expectedDDLen - 3;
+    if (off < 0) {
+        off = 0;
+    }
+    for (int i = off; i < b.length - 3; i++) {
+        if (b[i] == LFH[0] && b[i + 1] == LFH[1] &&
+            (b[i + 2] == LFH[2] && b[i + 3] == LFH[3])) {
+            pushback(b, i, b.length - i);
+            readDataDescriptor();
+            return true;
+        } else if (b[i] == DD[0] && b[i + 1] == DD[1] &&
+                   b[i + 2] == DD[2] && b[i + 3] == DD[3]) {
+            pushback(b, i, b.length - i);
+            readDataDescriptor();
+            return true;
+        }
+    }
+    return false;
+}
+
+private void pushback(byte[] buf, int offset, int length) throws IOException {
+    ((PushbackInputStream) in).unread(buf, offset, length);
+    pushedBackBytes(length);
+}
+```
+
+These changes ensure that the stored entries are correctly read and cached, and the data descriptor is properly handled. This should resolve the issue in the test `testReadingOfFirstStoredEntry`.
+~~~~~~~~~~~~~~~~~
+```Java
+private void readStoredEntry() throws IOException {
+    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+    int off = 0;
+    boolean done = false;
+
+    // length of DD without signature
+    int ddLen = current.usesZip64? WORD + 2 * DWORD : 3 * WORD;
+
+    while (!done) {
+        int r = in.read(buf.array(), off, ZipArchiveOutputStream.BUFFER_SIZE - off);
+        if (r <= 0) {
+            // read the whole archive without ever finding a
+            // central directory
+            throw new IOException("Truncated ZIP file");
+        }
+        if (r + off < 4) {
+            // buffer too small to check for a signature, loop
+            off += r;
+            continue;
+        }
+
+        done = bufferContainsSignature(bos, off, r, ddLen);
+        if (!done) {
+            off = cacheBytesRead(bos, off, r, ddLen);
+        }
+    }
+
+    byte[] b = bos.toByteArray();
+    lastStoredEntry = new ByteArrayInputStream(b);
+    current.bytesReadFromStream += b.length; // Add this line to update bytesReadFromStream
+}
+```
+~~~~~~~~~~~~~~~~~
+```Java
+private void readStoredEntry() throws IOException {
+    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+    int off = 0;
+    boolean done = false;
+
+    // length of DD without signature
+    int ddLen = current.usesZip64? WORD + 2 * DWORD : 3 * WORD;
+
+    while (!done) {
+        int r = in.read(buf.array(), off, ZipArchiveOutputStream.BUFFER_SIZE - off);
+        if (r <= 0) {
+            // read the whole archive without ever finding a
+            // central directory
+            throw new IOException("Truncated ZIP file");
+        }
+        if (r + off < 4) {
+            // buffer too small to check for a signature, loop
+            off += r;
+            continue;
+        }
+
+        done = bufferContainsSignature(bos, off, r, ddLen);
+        if (!done) {
+            off = cacheBytesRead(bos, off, r, ddLen);
+        }
+    }
+
+    byte[] b = bos.toByteArray();
+    lastStoredEntry = new ByteArrayInputStream(b);
+    current.bytesReadFromStream += b.length; // Add this line to update the bytesReadFromStream counter
+}
+```
+~~~~~~~~~~~~~~~~~
+```Java
+private void readStoredEntry() throws IOException {
+    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+    int off = 0;
+    boolean done = false;
+
+    // length of DD without signature
+    int ddLen = current.usesZip64? WORD + 2 * DWORD : 3 * WORD;
+
+    while (!done) {
+        int r = in.read(buf.array(), off, ZipArchiveOutputStream.BUFFER_SIZE - off);
+        if (r <= 0) {
+            // read the whole archive without ever finding a
+            // central directory
+            throw new IOException("Truncated ZIP file");
+        }
+        if (r + off < 4) {
+            // buffer too small to check for a signature, loop
+            off += r;
+            continue;
+        }
+
+        done = bufferContainsSignature(bos, off, r, ddLen);
+        if (!done) {
+            off = cacheBytesRead(bos, off, r, ddLen);
+        }
+    }
+
+    byte[] b = bos.toByteArray();
+    lastStoredEntry = new ByteArrayInputStream(b);
+}
+```
+~~~~~~~~~~~~~~~~~
+The issue seems to be related to the handling of the first stored entry when it uses a data descriptor. Specifically, the `readStoredEntry` method might not be caching and positioning the stream correctly, leading to incorrect data being read.
+
+Here's the corrected `readStoredEntry` method:
+
+```Java
+private void readStoredEntry() throws IOException {
+    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+    int off = 0;
+    boolean done = false;
+
+    // length of DD without signature
+    int ddLen = current.usesZip64? WORD + 2 * DWORD : 3 * WORD;
+
+    while (!done) {
+        int r = in.read(buf.array(), off, buf.capacity() - off);
+        if (r <= 0) {
+            // read the whole archive without ever finding a
+            // central directory
+            throw new IOException("Truncated ZIP file");
+        }
+        if (r + off < 4) {
+            // buffer too small to check for a signature, loop
+            off += r;
+            continue;
+        }
+
+        done = bufferContainsSignature(bos, off, r, ddLen);
+        if (!done) {
+            off = cacheBytesRead(bos, off, r, ddLen);
+        }
+    }
+
+    byte[] b = bos.toByteArray();
+    lastStoredEntry = new ByteArrayInputStream(b);
+    in = new PushbackInputStream(in, b.length);
+    in.unread(b, 0, b.length); // Push back the entire cached entry
+}
+```
+
+This change ensures that the entire cached entry is pushed back into the stream, allowing the `readStored` method to read the correct data.
+~~~~~~~~~~~~~~~~~

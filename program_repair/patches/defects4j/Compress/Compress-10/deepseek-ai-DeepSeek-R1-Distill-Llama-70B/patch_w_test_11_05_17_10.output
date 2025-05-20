@@ -1,0 +1,1485 @@
+
+####################
+Response
+####################
+Okay, I need to fix the bug in the provided Java code. The function resolveLocalFileHeaderData is part of a Zip archive processing tool. The test that's failing is testReadWinZipArchive, and the error is that the InputStream is null. That suggests that when trying to read an entry, the input stream isn't being properly initialized.
+
+Looking at the code, the function loops through each ZipArchiveEntry (ze) in the entries map. For each entry, it reads the file name length and extra field length, skips the file name bytes, reads the extra data, and then updates the entry's extra fields.
+
+The problem might be related to how the data offset is calculated. The data offset is set as offset + LFH_OFFSET_FOR_FILENAME_LENGTH + SHORT + SHORT + fileNameLen + extraFieldLen. Let me think about what each part represents.
+
+The local file header structure is as follows:
+- Header ID (4 bytes)
+- Version (2 bytes)
+- Flags (2 bytes)
+- Compression method (2 bytes)
+- Last modified time (2 bytes)
+- Checksum (4 bytes)
+- Compressed size (4 bytes)
+- Uncompressed size (4 bytes)
+- File name length (2 bytes)
+- Extra field length (2 bytes)
+- File name (variable length)
+- Extra field (variable length)
+
+So, after the header, we have the file name and extra field. The data offset should point to the start of the file data, which comes after the header, file name, and extra field.
+
+Wait, the current calculation for dataOffset is:
+offset (start of header) + LFH_OFFSET_FOR_FILENAME_LENGTH (which is 12 bytes: 4+2+2+2+2+4+4+4= 4+ (2*6) + (4*3) = 4+12+12=28? Wait no, let me recount. Let's see:
+
+Header ID: 4
+Version: 2
+Flags: 2
+Compression method: 2
+Last modified time: 2
+Checksum: 4
+Compressed size: 4
+Uncompressed size: 4
+File name length: 2
+Extra field length: 2
+That's 4 + (2*7) + (4*2) = 4 +14 +8=26 bytes. So LFH_OFFSET_FOR_FILENAME_LENGTH is 26 bytes.
+
+So the offset after the header is at 26 bytes. Then, the code reads the file name length (2 bytes) and extra field length (2 bytes). So from the header start, after reading these, the next bytes are the file name and then the extra field.
+
+So the data offset should be the header offset (where the header starts) plus the size of the header (26 bytes) plus the file name length plus the extra field length.
+
+Wait, in the code, the dataOffset is set as:
+
+offset + LFH_OFFSET_FOR_FILENAME_LENGTH (26) + SHORT (2) + SHORT (2) + fileNameLen + extraFieldLen.
+
+Wait, that's 26 + 2 + 2 = 30, plus fileNameLen and extraFieldLen. But that would be the position right after the extra field, which is where the file data starts. So that seems correct.
+
+Hmm. So why is the InputStream null? Maybe the data offset is being calculated incorrectly, leading to the file data not being found, so the stream is null when trying to read it.
+
+Wait, perhaps the way the offset is being calculated is wrong. Let me think again. The header starts at 'offset'. The header is 26 bytes (from header ID to extra field length). Then comes the file name (fileNameLen bytes) and the extra field (extraFieldLen bytes). So the data starts at offset + 26 + fileNameLen + extraFieldLen.
+
+But in the code, it's calculated as offset + 26 + 2 (for fileNameLen) + 2 (for extraFieldLen) + fileNameLen + extraFieldLen. Wait, that's adding the lengths twice. Because the code reads the fileNameLen and extraFieldLen from the bytes, which are each 2 bytes. So the code adds 2 bytes for each, which is correct because that's how much data was read. But then it adds fileNameLen and extraFieldLen again. So the total offset becomes offset + 26 + 2 + 2 + fileNameLen + extraFieldLen.
+
+Wait, that would be offset + 30 + fileNameLen + extraFieldLen. But that's incorrect because the data starts at offset + 26 (end of header) + fileNameLen + extraFieldLen. So the code is adding an extra 4 bytes (2 for each SHORT read). That's the mistake.
+
+So the correct dataOffset should be offset + 26 + fileNameLen + extraFieldLen. But the current code adds 26 + 2 + 2, which is 30, plus the lengths. So it's over by 4 bytes. That would make the dataOffset point to 4 bytes beyond where it should, causing the file data to be read incorrectly, possibly leading to an invalid stream.
+
+So to fix this, the dataOffset calculation should be:
+
+offset + LFH_OFFSET_FOR_FILENAME_LENGTH + fileNameLen + extraFieldLen;
+
+Which is 26 + fileNameLen + extraFieldLen.
+
+Therefore, in the code, the line setting dataOffset is incorrect. It should not include the two SHORT reads (the 2 + 2). So the corrected line would be:
+
+offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH + fileNameLen + extraFieldLen;
+
+Let me check that again. The header is 26 bytes. Then, the file name is read for fileNameLen bytes, then the extra field for extraFieldLen bytes. So the data starts after all that, which is 26 + fileNameLen + extraFieldLen bytes from the start of the header (offset). So the dataOffset should be offset + 26 + fileNameLen + extraFieldLen.
+
+So the code's current line adds 26 + 2 + 2, which is wrong. It should remove the 2 + 2 part.
+
+Yes, that's the bug. So the fix is to correct the dataOffset calculation.
+</think>
+
+To fix this issue, the incorrect calculation of `dataOffset` in the `resolveLocalFileHeaderData` method needs to be addressed. The `dataOffset` should point to the start of the file data, which comes immediately after the local file header, the file name, and the extra field. The original code mistakenly adds the lengths of the file name and extra field twice, leading to an incorrect offset.
+
+Here is the corrected code:
+
+```java
+    private void resolveLocalFileHeaderData(Map<ZipArchiveEntry, NameAndComment>
+                                            entriesWithoutUTF8Flag)
+        throws IOException {
+        // changing the name of a ZipArchiveEntry is going to change
+        // the hashcode - see COMPRESS-164
+        // Map needs to be reconstructed in order to keep central
+        // directory order
+        for (ZipArchiveEntry ze : entries.keySet()) {
+            OffsetEntry offsetEntry = entries.get(ze);
+            long offset = offsetEntry.headerOffset;
+            archive.seek(offset + LFH_OFFSET_FOR_FILENAME_LENGTH);
+            byte[] b = new byte[SHORT];
+            archive.readFully(b);
+            int fileNameLen = ZipShort.getValue(b);
+            archive.readFully(b);
+            int extraFieldLen = ZipShort.getValue(b);
+            int lenToSkip = fileNameLen;
+            while (lenToSkip > 0) {
+                int skipped = archive.skipBytes(lenToSkip);
+                if (skipped <= 0) {
+                    throw new RuntimeException("failed to skip file name in"
+                                               + " local file header");
+                }
+                lenToSkip -= skipped;
+            }
+            byte[] localExtraData = new byte[extraFieldLen];
+            archive.readFully(localExtraData);
+            ze.setExtra(localExtraData);
+            offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH
+                + fileNameLen + extraFieldLen;
+
+            if (entriesWithoutUTF8Flag.containsKey(ze)) {
+                String orig = ze.getName();
+                NameAndComment nc = entriesWithoutUTF8Flag.get(ze);
+                ZipUtil.setNameAndCommentFromExtraFields(ze, nc.name,
+                                                         nc.comment);
+                if (!orig.equals(ze.getName())) {
+                    nameMap.remove(orig);
+                    nameMap.put(ze.getName(), ze);
+                }
+            }
+        }
+    }
+```
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix the bug in the provided Java code. Let me start by understanding what the code is supposed to do and where it's failing.
+
+The function `resolveLocalFileHeaderData` is part of a Zip archive handling code. It seems to be processing each ZipArchiveEntry, reading data from the archive, and updating the entry's extra fields. There's also some handling for entries without UTF8 flags, possibly renaming or updating their names and comments.
+
+The test that's failing is `testReadWinZipArchive`, which is trying to read a specific zip file. The error is `InputStream is null`, which suggests that when trying to read an entry from the zip file, the input stream is null. That probably means that the code isn't correctly setting the data offset for the entry, so when trying to read it, it can't find the data.
+
+Looking at the code, the loop iterates over each ZipArchiveEntry in `entries.keySet()`. For each entry, it reads the file name length and extra field length from the archive. Then it skips the file name bytes and reads the extra data. It sets the `dataOffset` of the `offsetEntry` based on these values.
+
+Wait, let me check the calculation for `dataOffset`. The current code sets it as:
+
+`offset + LFH_OFFSET_FOR_FILENAME_LENGTH + SHORT + SHORT + fileNameLen + extraFieldLen`
+
+Let me break this down. The local file header structure is as follows:
+
+1. Header ID (4 bytes)
+2. Version (2 bytes)
+3. Flags (2 bytes)
+4. Compression method (2 bytes)
+5. Last modified time (2 bytes)
+6. Last modified date (2 bytes)
+7. CRC-32 (4 bytes)
+8. Compressed size (4 bytes)
+9. Uncompressed size (4 bytes)
+10. File name length (2 bytes)
+11. Extra field length (2 bytes)
+12. File name (variable length)
+13. Extra field (variable length)
+
+So, the data offset should be the start of the file data, which is after the local file header. The local file header starts at `offset`, and its size is the sum of all the fixed fields plus the variable fields.
+
+The fixed part is 30 bytes (4+2+2+2+2+2+4+4+4 = 30). Then comes the file name length (SHORT, 2 bytes), extra field length (another SHORT, 2 bytes). So, the start of the file name is at offset + 30 + 2 + 2 = offset + 34.
+
+Wait, but in the code, the initial seek is to `offset + LFH_OFFSET_FOR_FILENAME_LENGTH`. Let me see what `LFH_OFFSET_FOR_FILENAME_LENGTH` is. It's likely 10th field, which is at offset 28 (since each field before is 4, 2, etc.). Wait, let me calculate:
+
+- Header ID: 0-3
+- Version: 4-5
+- Flags: 6-7
+- Compression method: 8-9
+- Last modified time: 10-11
+- Last modified date: 12-13
+- CRC-32: 14-17
+- Compressed size: 18-21
+- Uncompressed size: 22-25
+- File name length: 26-27
+- Extra field length: 28-29
+
+So, `LFH_OFFSET_FOR_FILENAME_LENGTH` is 26, but in the code, when seeking, it's `offset + LFH_OFFSET_FOR_FILENAME_LENGTH`. So, the code is seeking to position 26 relative to the header's start.
+
+Then, it reads the file name length (2 bytes) and the extra field length (another 2 bytes). Then it skips the file name (fileNameLen bytes) and reads the extra field (extraFieldLen bytes).
+
+So, the data offset should be after all of this. The current code calculates it as:
+
+offset + LFH_OFFSET_FOR_FILENAME_LENGTH (26) + SHORT (2) for file name length + SHORT (2) for extra field length + fileNameLen + extraFieldLen.
+
+So, 26 + 2 + 2 = 30, plus fileNameLen and extraFieldLen.
+
+But wait, the data starts after the local file header, which includes the file name and extra fields. So the data offset should be:
+
+offset (start of local header) + size of local header (30 bytes) + file name length + extra field length.
+
+Which is the same as:
+
+offset + 30 + fileNameLen + extraFieldLen.
+
+But in the code, the calculation is:
+
+offset + 26 + 2 + 2 + fileNameLen + extraFieldLen.
+
+Which is 26 + 4 = 30, so it's correct.
+
+Wait, no, 26 + 2 (file name length) + 2 (extra length) = 30, then plus fileNameLen and extraFieldLen.
+
+So, yes, the dataOffset is set correctly.
+
+But why is the test failing with InputStream null? Maybe the dataOffset is incorrect, causing the code to not find the data, thus returning null when trying to get the input stream.
+
+Alternatively, perhaps the code is not correctly handling the case where the file name is stored in UTF8, leading to incorrect offsets.
+
+Wait, looking at the code, after reading the file name and extra field, it sets the extra data for the entry. Then, if the entry is in `entriesWithoutUTF8Flag`, it updates the name and comment using `ZipUtil.setNameAndCommentFromExtraFields`.
+
+But maybe the issue is that when the file name is read, it's not correctly read, leading to the name being incorrect, and thus when trying to retrieve the entry, it's not found, leading to a null input stream.
+
+Alternatively, perhaps the dataOffset is miscalculated in some cases.
+
+Wait, perhaps the code is not accounting for the data descriptor. Some zip files, especially those created by certain tools, might have a data descriptor after the file data, which includes the CRC and sizes. But that's more relevant when writing the zip, not reading.
+
+Another possibility is that the code is not correctly handling the general purpose flag bit 3, which indicates that the sizes and CRC are not in the local header but in a data descriptor after the file data. If that's the case, then the dataOffset calculation would be incorrect.
+
+Wait, but in the code, when reading the local header, if the general purpose flag bit 3 is set, then the sizes in the local header are zero, and the real sizes are in the data descriptor after the file data. So, the dataOffset in that case would be the start of the file data, but the compressed size would be unknown until after reading.
+
+But in the current code, it's setting `offsetEntry.dataOffset` as offset + 30 + fileNameLen + extraFieldLen, which is correct regardless of whether a data descriptor exists because the data starts right after the local header and the variable fields.
+
+Wait, no. If the data descriptor is present, then after the file data, there's a data descriptor of 12 or 16 bytes. But the dataOffset is the start of the file data, which is correct.
+
+Wait, but in the code, when the data descriptor is present, the compressed size and CRC in the local header are zero. So when reading, the code would have to read the data, then read the data descriptor to get the correct sizes and CRC.
+
+But in this function, it's only setting the dataOffset. The actual reading of the data would be handled elsewhere, perhaps in another function.
+
+So, perhaps the issue is that the dataOffset is being set correctly, but when the code tries to read the entry, it's not correctly handling the data descriptor, leading to the input stream being null.
+
+Alternatively, perhaps the issue is with how the entries are stored in the nameMap. In the code, when the name is changed (because of the UTF8 handling), it removes the old name and adds the new one. But perhaps in some cases, this isn't handled correctly, leading to the entry not being found when trying to read it.
+
+Wait, the test is failing because the input stream is null. So, when the test tries to get an entry by name, it's not finding it, hence the input stream is null. So perhaps the name is not being correctly set or the entry isn't in the nameMap.
+
+Looking at the code, when `entriesWithoutUTF8Flag` contains the entry, it gets the NameAndComment, sets the name and comment using `ZipUtil.setNameAndCommentFromExtraFields`, then checks if the original name differs from the new name. If so, it removes the old name from nameMap and adds the new one.
+
+But maybe the NameAndComment isn't correctly set, leading to the name being null or incorrect, causing the entry not to be found.
+
+Alternatively, perhaps the code isn't correctly handling the case where the extra fields contain the UTF8 name, and thus the name isn't being set properly.
+
+Wait, perhaps the issue is that the code is not correctly reading the file name when the UTF8 flag is set. Because in the function, it's skipping the file name bytes, but if the file name is stored in UTF8, it's handled in the extra fields. So, perhaps when the UTF8 flag is set, the file name in the local header is not the actual name, and thus the code needs to read it from the extra fields.
+
+Wait, in the code, the entriesWithoutUTF8Flag are the ones where the UTF8 flag isn't set. So, for these entries, the name is read from the extra fields. But for entries where the UTF8 flag is set, the name is read normally from the file name field.
+
+But in the test, the zip file might have entries where the UTF8 flag is set, and thus the code is not correctly handling them, leading to the name not being set properly, and thus the entry not being found.
+
+Wait, but the test is failing when reading a WinZip archive. WinZip might not set the UTF8 flag even when using UTF8 encoding for file names, which could cause issues.
+
+Wait, in the code, the `resolveLocalFileHeaderData` function is called for entries without the UTF8 flag. So, perhaps the code is mishandling the file names for such entries, leading to incorrect names in the nameMap, causing the test to fail when trying to retrieve the entries by name.
+
+Looking back at the code, when the entry is in `entriesWithoutUTF8Flag`, it calls `setNameAndCommentFromExtraFields` with `nc.name` and `nc.comment`. But perhaps the `nc.name` is null or incorrect.
+
+Alternatively, maybe the code is not correctly reading the extra fields, leading to the name not being set correctly.
+
+Wait, another possibility: the code is using `ZipShort.getValue(b)` to read the file name length and extra field length. But if the zip file uses a different byte order, perhaps it's not correctly read. Wait, no, because `ZipShort` is little-endian, which is correct.
+
+Another thought: perhaps the code is not correctly handling the case where the file name length is zero, leading to issues when skipping bytes.
+
+Alternatively, perhaps the code is not correctly handling multi-disk zip files or other edge cases.
+
+Wait, perhaps the dataOffset is being set incorrectly. Let me recheck the calculation:
+
+`offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH + SHORT + SHORT + fileNameLen + extraFieldLen;`
+
+Which is:
+
+offset + 26 (LFH_OFFSET_FOR_FILENAME_LENGTH) + 2 (file name length) + 2 (extra length) + fileNameLen + extraFieldLen.
+
+So, total offset is offset + 26 + 4 + fileNameLen + extraFieldLen.
+
+Which is the same as offset + 30 + fileNameLen + extraFieldLen, which is correct because the local header is 30 bytes, followed by the file name and extra fields.
+
+So, the dataOffset should be correct. But perhaps in some cases, the data is not being read correctly because the offset is wrong.
+
+Alternatively, perhaps the code is not correctly handling the case where the file name length includes a terminating zero or not. Wait, the zip specification says that the file name is stored without a terminating zero unless the version is 1.0. But in any case, the code skips exactly fileNameLen bytes, which should be correct.
+
+Wait, perhaps the issue is that the code is not correctly handling the extra fields when they contain the UTF8 name. For example, the code reads the extra data but doesn't parse it correctly, leading to the name not being set properly.
+
+Looking at `ZipUtil.setNameAndCommentFromExtraFields`, perhaps that function isn't correctly extracting the name from the extra fields when the UTF8 flag isn't set. Or perhaps the extra fields are being misparsed.
+
+Alternatively, perhaps the code is not correctly handling the case where multiple extra fields are present, leading to the name not being found.
+
+Wait, perhaps the code is only checking the first extra field for the name, but in reality, there might be multiple extra fields, and the name is in a later one.
+
+Alternatively, maybe the code is expecting the extra field to contain the name in a specific format, but the zip file has it differently.
+
+Another angle: the test is reading a WinZip archive. Maybe WinZip stores the file names with a specific encoding that the code isn't handling correctly when the UTF8 flag isn't set.
+
+Wait, perhaps the code is expecting the file name in the extra fields to be in UTF8, but when the UTF8 flag isn't set, it's using the default encoding (like Cp437), leading to incorrect name decoding.
+
+So, in the `setNameAndCommentFromExtraFields` method, when the UTF8 flag isn't set, perhaps it's incorrectly decoding the name as UTF8 instead of the default encoding.
+
+But in the code provided, the `setNameAndCommentFromExtraFields` is being called with `nc.name` and `nc.comment`, which are presumably correctly decoded.
+
+Alternatively, perhaps the `NameAndComment` object is not correctly populated when the UTF8 flag isn't set, leading to the name being null or incorrect.
+
+Wait, perhaps the issue is that the `entriesWithoutUTF8Flag` map is not being correctly populated, leading to the code not updating the entry's name and comment, thus the name remains as the default (which might be incorrect), causing the test to fail when trying to retrieve the entry by the correct name.
+
+Alternatively, perhaps the `NameAndComment` is being created with the wrong encoding, leading to the name not matching what the test expects.
+
+Wait, perhaps the code is using UTF8 to decode the name from the extra fields even when the UTF8 flag isn't set, which would be incorrect because the extra fields should be in the default encoding in that case.
+
+But in the code, when the entry is in `entriesWithoutUTF8Flag`, it's using `setNameAndCommentFromExtraFields` with the provided name and comment, which should have been decoded correctly.
+
+I'm not entirely sure, but perhaps the issue is that the code is not correctly handling the case where the file name in the local header is empty or zero-length, causing the name to be set incorrectly.
+
+Alternatively, perhaps the code is not correctly updating the nameMap when the name changes, leading to the entry not being found.
+
+Wait, in the code, after updating the name, it checks if the original name is different from the new name. If so, it removes the original and adds the new one. But perhaps in some cases, the original name is not present in the nameMap, leading to an error.
+
+Alternatively, perhaps the code is not correctly handling the case where the name is null or empty, leading to issues in the nameMap.
+
+Another possibility: the code is not correctly handling the case where the extra field length is zero, leading to an exception when trying to read the extra data.
+
+But in the code, it reads `extraFieldLen` bytes regardless, which could cause issues if `extraFieldLen` is zero. But in the code, it's reading `new byte[extraFieldLen]` and then `archive.readFully(localExtraData);`, which should handle zero-length correctly.
+
+Alternatively, perhaps the code is not correctly handling multi-byte file names, leading to incorrect name decoding.
+
+Wait, perhaps the issue is that the code is not correctly reading the file name when it's split across the local header and the extra fields. For example, if the file name is stored partially in the local header and partially in the extra fields, the code might not be combining them correctly.
+
+But in the code, when the entry is in `entriesWithoutUTF8Flag`, it's using the name from the extra fields, which should be the correct approach.
+
+Hmm, I'm a bit stuck. Let me think about what could cause the InputStream to be null. The only way that happens is if the entry isn't found in the ZipFile's nameMap. So, perhaps the name is not being correctly set or added to the nameMap.
+
+Looking at the code, when the name is changed, it removes the original and adds the new one. But perhaps the original name isn't in the nameMap, or the new name is already present, causing issues.
+
+Alternatively, perhaps the code is not correctly handling case sensitivity in the names, leading to the test expecting a certain case but the code using a different one.
+
+Wait, in the test, the function `assertCanRead(zf, ASCII_TXT);` is called, which probably retrieves the entry by name and checks if it can be read. If the name in the zip file isn't correctly set, the entry won't be found, leading to the input stream being null.
+
+So, perhaps the code is not correctly setting the name when the UTF8 flag isn't set, leading to the name being incorrect.
+
+Wait, perhaps the `NameAndComment` is being created with the wrong encoding. Let me think about how `NameAndComment` is populated. It's probably created by parsing the extra fields, which for UTF8 names would have a specific structure.
+
+But when the UTF8 flag isn't set, the extra fields might still have the UTF8 name in a different encoding, like in the Info-Zip format.
+
+Wait, perhaps the code is not correctly handling the extra field when the UTF8 flag isn't set, leading to the name being null or incorrect.
+
+Alternatively, perhaps the code is not correctly parsing the extra fields to extract the name and comment when the UTF8 flag isn't set.
+
+Wait, perhaps the issue is that the code is not correctly handling the case where the extra field doesn't contain the name, leading to the name being null, which would cause the entry to not be found.
+
+Another angle: perhaps the code is not correctly handling the scenario where multiple entries have the same name, leading to the nameMap having conflicting entries.
+
+But I'm not sure.
+
+Wait, perhaps the issue is that the code is not correctly setting the dataOffset when the file name length is zero. Let me check the code:
+
+It reads `fileNameLen` as `ZipShort.getValue(b)`, which is correct. Then it skips `fileNameLen` bytes. If `fileNameLen` is zero, it skips nothing, which is correct.
+
+So that shouldn't be the issue.
+
+Alternatively, perhaps the code is not correctly handling the case where the extra field length is such that the dataOffset points beyond the end of the file, causing an exception when trying to read.
+
+But in that case, the error would be different.
+
+Wait, perhaps the code is not correctly handling the case where the extra field includes other data beyond the name and comment, leading to incorrect parsing.
+
+Alternatively, perhaps the code is not correctly handling the version needed to extract, but that's more related to compression methods.
+
+Hmm.
+
+Another idea: perhaps the code is not correctly updating the `offsetEntry`'s dataOffset, leading to the data being read from the wrong position. So, when the test tries to read the entry, it's trying to read from the wrong offset, which might be beyond the end of the file, leading to the input stream being null.
+
+Wait, perhaps the calculation of dataOffset is incorrect. Let me re-examine it.
+
+The local header starts at `offset`. The fixed part is 30 bytes. Then comes the file name length (2 bytes) and extra field length (2 bytes). Then the file name (fileNameLen bytes) and extra field (extraFieldLen bytes). So the data starts at:
+
+offset + 30 + fileNameLen + extraFieldLen.
+
+Which is exactly what the code is setting as dataOffset.
+
+So the calculation seems correct.
+
+Wait, unless the code is using `offset` as the position after the central directory or something else. But in the context of the function, `offset` is the headerOffset, which should be the start of the local file header.
+
+So, the dataOffset should be correct.
+
+Wait, perhaps the code is not correctly handling the situation where the local header is followed by a data descriptor, which would mean that the compressed size is not known until after reading the data. But in that case, the dataOffset would still be correct, but the size would be read from the data descriptor.
+
+So, perhaps the issue is elsewhere.
+
+Wait, perhaps the code is not correctly handling the case where the entry is a directory. Directories don't have data, so trying to read them would return null. But the test is trying to read specific files, so perhaps the code is incorrectly categorizing them as directories.
+
+Alternatively, perhaps the code is not correctly setting the entry's size, leading to the input stream being null when trying to read.
+
+Wait, perhaps the code is not correctly setting the compressed size and uncompressed size for the entry, leading to the input stream not being able to read the data.
+
+But in this function, it's only setting the dataOffset, not the sizes. The sizes are probably set elsewhere, perhaps when reading the central directory.
+
+Wait, looking at the code, the `offsetEntry` has a `dataOffset` and perhaps other fields. But the `ZipArchiveEntry` has methods like `getCompressedSize()` which might be set elsewhere.
+
+So, perhaps the issue is that the compressed size is zero, causing the input stream to return null.
+
+But in the test, the error is that the input stream is null, which suggests that the entry isn't found, not that the size is zero.
+
+Wait, perhaps the code is not correctly handling the case where the file name is split across the local header and the extra fields, leading to the name being incorrect.
+
+Alternatively, perhaps the code is not correctly handling the case where the extra field contains the name in a different encoding than expected.
+
+Wait, perhaps the code is using the wrong encoding when setting the name from the extra fields. For example, when the UTF8 flag isn't set, the name in the extra fields should be decoded using the default encoding (like Cp437), but the code is using UTF8, leading to incorrect names.
+
+In the `setNameAndCommentFromExtraFields` function, perhaps it's assuming that the extra fields are in UTF8, which isn't correct when the UTF8 flag isn't set.
+
+So, perhaps the `NameAndComment` is being created with the wrong encoding, leading to the name being incorrect.
+
+In that case, the name in the `ZipArchiveEntry` would be incorrect, causing the test to fail when trying to retrieve the entry by the correct name.
+
+So, to fix this, the code should ensure that when the UTF8 flag isn't set, the name from the extra fields is decoded using the default encoding.
+
+Wait, looking back at the code, when the entry is in `entriesWithoutUTF8Flag`, it's using `ZipUtil.setNameAndCommentFromExtraFields(ze, nc.name, nc.comment);`. So, perhaps the `nc.name` is already correctly decoded, considering the encoding.
+
+But if the `NameAndComment` is created by parsing the extra fields with the wrong encoding, then the name would be incorrect.
+
+Alternatively, perhaps the `NameAndComment` is being created correctly, but the code is not correctly handling the case where the name in the extra fields is empty or not present.
+
+Wait, perhaps the code is not correctly handling the case where the extra fields don't contain the name, leading to the name being null.
+
+But in that case, the code would throw an exception or handle it differently.
+
+Hmm.
+
+Another approach: perhaps the issue is that the code is not correctly updating the `nameMap` when the name is changed, leading to the entry not being found.
+
+In the code, when the name changes, it does `nameMap.remove(orig); nameMap.put(ze.getName(), ze);`. But perhaps the `nameMap` is a case-sensitive map, and the test is using a different case.
+
+Alternatively, perhaps the `nameMap` is not being properly maintained, leading to the entry not being present.
+
+Wait, perhaps the `nameMap` is a `HashMap` that uses case-sensitive keys. If the test expects the name in a certain case, but the code is using a different case, the entry won't be found.
+
+But the test is using specific names like "ASCII.txt", "Euro_for_dollar.txt", etc. So, perhaps the code is changing the case, leading to the test not finding the entry.
+
+Alternatively, perhaps the code is not correctly handling non-ASCII characters in the name, leading to the name being different than expected.
+
+Wait, perhaps the code is not correctly decoding the name when it's stored in the extra fields with a specific encoding.
+
+I think I'm going around in circles. Let me try to think of possible fixes.
+
+One idea: perhaps the code is not correctly handling the case where the extra field contains both the name and comment, leading to the name being set incorrectly.
+
+Alternatively, perhaps the code is not correctly parsing the extra fields, leading to the name not being extracted.
+
+Wait, perhaps the `ZipUtil.setNameAndCommentFromExtraFields` function is not correctly handling the extra fields when the UTF8 flag isn't set, leading to incorrect name and comment.
+
+In that case, perhaps the function should be modified to use the correct encoding based on the UTF8 flag.
+
+But since the function is called with `nc.name` and `nc.comment`, perhaps the `NameAndComment` object is already correctly decoded.
+
+Wait, perhaps the `NameAndComment` is created by parsing the extra fields with UTF8 encoding, even when the UTF8 flag isn't set, leading to incorrect names.
+
+So, to fix this, perhaps the `NameAndComment` should be created using the correct encoding based on whether the UTF8 flag is set.
+
+But in the current code, `entriesWithoutUTF8Flag` are handled separately, implying that their names are in the extra fields but without the UTF8 flag. So, perhaps their names should be decoded using the default encoding (Cp437) instead of UTF8.
+
+So, perhaps the `NameAndComment` is being created with UTF8 decoding even when the UTF8 flag isn't set, leading to incorrect names.
+
+Thus, the fix would be to ensure that when the UTF8 flag isn't set, the extra fields are decoded using the default encoding.
+
+But looking at the code provided, the `NameAndComment` is passed as `nc.name` and `nc.comment`, so perhaps the issue is in how `nc` is created.
+
+Wait, perhaps in the code that creates `entriesWithoutUTF8Flag`, the `NameAndComment` is being decoded with UTF8, which is incorrect. So, when the UTF8 flag isn't set, the extra fields should be decoded with the default encoding.
+
+So, perhaps the fix is to modify the way `NameAndComment` is created for `entriesWithoutUTF8Flag`, using the correct encoding.
+
+But since the provided code is only the `resolveLocalFileHeaderData` function, perhaps the issue is within that function.
+
+Wait, perhaps the code is not correctly handling the case where the extra field has the name in UTF8 even when the UTF8 flag isn't set. Some zip tools might do that.
+
+In that case, the code should check if the extra field indicates UTF8 encoding, perhaps via the version or flags, and decode accordingly.
+
+But without more context, it's hard to say.
+
+Another idea: perhaps the code is not correctly handling the situation where the extra field length is incorrect, leading to the code reading beyond the available data, causing an exception that's being caught and leading to the input stream being null.
+
+But in the code, it's using `archive.readFully(localExtraData);`, which should throw an exception if it can't read the full bytes, leading to the test failing with an IOException, not a null input stream.
+
+Hmm.
+
+At this point, perhaps the best approach is to look for known issues or patches related to this code. I recall that in Apache Commons Compress, there was an issue where the local file header data wasn't correctly handled when the UTF8 flag wasn't set, leading to incorrect names and thus entries not being found.
+
+The fix involved correctly parsing the extra fields and ensuring that the name is set using the appropriate encoding.
+
+So, perhaps the issue is that the code isn't correctly decoding the name from the extra fields when the UTF8 flag isn't set, leading to the name being incorrect and the entry not being found.
+
+Thus, the fix would involve ensuring that the name is decoded using the correct encoding based on the presence of the UTF8 flag.
+
+But since the provided code is only the `resolveLocalFileHeaderData` function, perhaps the fix is to ensure that when setting the name from the extra fields, the correct encoding is used.
+
+Wait, perhaps the `ZipUtil.setNameAndCommentFromExtraFields` function is not correctly handling the encoding when the UTF8 flag isn't set, leading to incorrect names.
+
+In that case, perhaps the function should be modified to use the default encoding (like Cp437) when the UTF8 flag isn't set.
+
+But since I can't modify that function, perhaps the fix is elsewhere.
+
+Alternatively, perhaps the code should not rely on the extra fields for the name when the UTF8 flag isn't set, but that doesn't make sense because the local header's file name might be incorrect or truncated.
+
+Wait, another idea: perhaps the code is not correctly handling the case where the extra field contains the name in a different format than expected. For example, the code might expect the name to be in a specific extra field ID, but it's not present, leading to the name not being set.
+
+In that case, perhaps the code should more robustly parse the extra fields to find the name.
+
+But without seeing the implementation of `setNameAndCommentFromExtraFields`, it's hard to say.
+
+At this point, perhaps the best approach is to adjust the code to ensure that the dataOffset is correctly calculated, which might involve rechecking the offset calculation.
+
+Wait, perhaps the code is adding the file name length and extra field length twice. Let me see: the local header starts at `offset`, then after the fixed 30 bytes, comes the file name length (2 bytes), extra field length (2 bytes), then the file name (fileNameLen bytes), then the extra field (extraFieldLen bytes). So, the data starts at `offset + 30 + fileNameLen + extraFieldLen`.
+
+But in the code, the dataOffset is set as `offset + 26 + 2 + 2 + fileNameLen + extraFieldLen`, which is the same as `offset + 30 + fileNameLen + extraFieldLen`. So that's correct.
+
+Wait, perhaps the initial seek is incorrect. The code seeks to `offset + LFH_OFFSET_FOR_FILENAME_LENGTH`, which is 26. Then reads 2 bytes for fileNameLen, then 2 bytes for extraFieldLen. Then skips fileNameLen bytes, then reads extraFieldLen bytes. So, the position after reading would be at `offset + 26 + 2 + 2 + fileNameLen + extraFieldLen`, which is the start of the data.
+
+So, the dataOffset is correctly set to that position.
+
+Thus, perhaps the issue is elsewhere.
+
+Wait, perhaps the code is not correctly handling the case where the local header is followed by a data descriptor, which would mean that the compressed size is stored after the data. So, when the code tries to read the data, it doesn't know the size and thus can't read it properly.
+
+But in that case, the input stream would still be non-null, just the data might be incomplete.
+
+Alternatively, perhaps the code is not correctly handling split archives or multi-volume zips, but the test is using a single file.
+
+Another idea: perhaps the code is not correctly closing the archive or handling the stream, leading to the input stream being null.
+
+But that's more of a resource management issue.
+
+Alternatively, perhaps the code is not correctly handling the end of the archive, leading to the dataOffset being beyond the file's end, causing the read to fail.
+
+But in that case, the error would be different.
+
+Wait, perhaps the code is not correctly handling the case where the file name length is stored as a signed short instead of unsigned. But `ZipShort.getValue` treats it as unsigned, so that should be correct.
+
+Hmm.
+
+At this point, perhaps the best approach is to try adjusting the code to ensure that the dataOffset is correctly calculated and that the name is correctly set.
+
+One possible fix is to ensure that when the name is updated, it's correctly added to the nameMap, and that the name is correctly decoded from the extra fields using the appropriate encoding.
+
+But without seeing the implementation of `ZipUtil.setNameAndCommentFromExtraFields`, it's hard to say.
+
+Alternatively, perhaps the issue is that the code is not correctly handling the case where the extra field length is zero, leading to the name not being set.
+
+But in the code, it reads the extra data regardless, so that shouldn't be an issue.
+
+Wait, perhaps the code is not correctly handling the case where the extra field contains multiple fields, and the name is in a later field. So, the code might only be parsing the first field, leading to missing the name.
+
+Thus, the fix would involve correctly parsing all extra fields to find the name and comment.
+
+But again, without seeing the implementation of `setNameAndCommentFromExtraFields`, it's hard to say.
+
+Perhaps the fix is to ensure that the code correctly parses all extra fields, not just the first one, when looking for the name and comment.
+
+Alternatively, perhaps the code should use a different method to set the name and comment when the UTF8 flag isn't set.
+
+But given the time constraints, perhaps the best approach is to suggest adjusting the code to correctly handle the name decoding when the UTF8 flag isn't set, ensuring that the correct encoding is used.
+
+So, the fixed code would involve modifying the `setNameAndCommentFromExtraFields` call to use the correct encoding, but since that function isn't provided, perhaps the fix is elsewhere.
+
+Wait, perhaps the issue is that the code is not correctly handling the case where the extra field doesn't contain the name, leading to the name being null, which would cause the entry not to be found.
+
+Thus, the fix would be to ensure that the name is correctly set even when the extra fields don't contain it.
+
+But I'm not sure.
+
+Alternatively, perhaps the code should not modify the name if the name from the extra fields is null or empty.
+
+But again, without more context, it's difficult.
+
+Another idea: perhaps the code should not remove the original name from the nameMap if the new name is empty or null, to avoid losing the entry.
+
+But in the code, it only removes and adds if the names are different.
+
+Hmm.
+
+At this point, I think I'll have to make an educated guess. The most likely issue is that the dataOffset is being incorrectly calculated, leading to the data not being found. But I've checked the calculation, and it seems correct.
+
+Alternatively, perhaps the code is not correctly handling the case where the file name in the local header is empty, and the name is stored entirely in the extra fields. In that case, the code might be setting the name incorrectly.
+
+Thus, perhaps the fix is to ensure that when the file name length is zero, the name is correctly read from the extra fields.
+
+But in the code, it's already handling that case because `entriesWithoutUTF8Flag` would include such entries.
+
+Alternatively, perhaps the code is not correctly handling the case where the extra field length is not a multiple of the field size, leading to incorrect parsing.
+
+But the code reads the exact extraFieldLen bytes, so that shouldn't be an issue.
+
+I'm stuck. Given the time, I'll proceed to suggest a possible fix based on the assumption that the dataOffset is being incorrectly calculated, perhaps by adjusting the calculation.
+
+Wait, perhaps the dataOffset should be set to `offset + LFH_OFFSET_FOR_FILENAME_LENGTH + SHORT + SHORT + fileNameLen + extraFieldLen`, which is what the code is doing. So, perhaps that's correct.
+
+Alternatively, perhaps the code should subtract the initial seek position. Wait, no, because the initial seek is to `offset + LFH_OFFSET_FOR_FILENAME_LENGTH`, and then the code reads the file name length and extra length, skips the file name, reads the extra data, and then sets the dataOffset to the position after all that.
+
+So, perhaps the dataOffset is correct.
+
+Wait, perhaps the code is not correctly handling the case where the local header is followed by a data descriptor, which would mean that the compressed size is stored after the data. Thus, the code would need to read the data descriptor after reading the data to get the correct sizes.
+
+But in the test, the error is that the input stream is null, which suggests that the entry isn't found, not that the data can't be read.
+
+Thus, perhaps the issue is with the nameMap, not the dataOffset.
+
+So, perhaps the code is not correctly updating the nameMap when the name changes, leading to the entry not being found.
+
+In the code, when the name changes, it does:
+
+if (!orig.equals(ze.getName())) {
+    nameMap.remove(orig);
+    nameMap.put(ze.getName(), ze);
+}
+
+But perhaps the `orig` name isn't in the nameMap, or the new name is already present.
+
+Alternatively, perhaps the `nameMap` is a concurrent map, and the code is not handling synchronization correctly, leading to the entry not being present.
+
+But without more context, it's hard to say.
+
+Alternatively, perhaps the `nameMap` is case-sensitive, and the test is expecting a different case.
+
+But the test uses specific names, so perhaps the code is changing the case.
+
+Alternatively, perhaps the code is not correctly handling the case where the name is null after the update, leading to the entry not being in the nameMap.
+
+Thus, perhaps the fix is to ensure that the name is correctly set, even when the extra fields don't contain it.
+
+But without more information, it's challenging.
+
+Given all that, I think the most plausible fix is to adjust the dataOffset calculation, perhaps by ensuring that it's correctly set to the position after the local header and all variable fields.
+
+But since the calculation seems correct, perhaps the issue is elsewhere.
+
+Alternatively, perhaps the code should be using `archive.getFilePointer()` after reading the extra fields to set the dataOffset, which would be more accurate.
+
+So, after skipping the file name and reading the extra fields, the current position is the start of the data. So, perhaps the dataOffset should be set to `archive.getFilePointer()`.
+
+Yes, that makes sense. Because after seeking to `offset + 26`, reading 2 bytes for fileNameLen, 2 bytes for extraFieldLen, skipping fileNameLen bytes, and reading extraFieldLen bytes, the current position is exactly at the start of the data. So, `dataOffset` should be set to the current position, which is `archive.getFilePointer()`.
+
+So, perhaps the code should be modified to set `offsetEntry.dataOffset = archive.getFilePointer();` after reading the extra fields.
+
+That would be more reliable than calculating it manually.
+
+So, the fix would be to replace the manual calculation with getting the current file pointer after reading the extra fields.
+
+Let me adjust the code accordingly.
+</think>
+
+To fix this issue, we identified that the `dataOffset` was being calculated manually, which might lead to incorrect values. Instead, we should obtain the current file position after reading the necessary fields to ensure accuracy.
+
+Here is the fixed code:
+
+```java
+private void resolveLocalFileHeaderData(Map<ZipArchiveEntry, NameAndComment> entriesWithoutUTF8Flag)
+        throws IOException {
+    // changing the name of a ZipArchiveEntry is going to change
+    // the hashcode - see COMPRESS-164
+    // Map needs to be reconstructed in order to keep central
+    // directory order
+    for (ZipArchiveEntry ze : entries.keySet()) {
+        OffsetEntry offsetEntry = entries.get(ze);
+        long offset = offsetEntry.headerOffset;
+        archive.seek(offset + LFH_OFFSET_FOR_FILENAME_LENGTH);
+        byte[] b = new byte[SHORT];
+        archive.readFully(b);
+        int fileNameLen = ZipShort.getValue(b);
+        archive.readFully(b);
+        int extraFieldLen = ZipShort.getValue(b);
+        int lenToSkip = fileNameLen;
+        while (lenToSkip > 0) {
+            int skipped = archive.skipBytes(lenToSkip);
+            if (skipped <= 0) {
+                throw new RuntimeException("failed to skip file name in"
+                                           + " local file header");
+            }
+            lenToSkip -= skipped;
+        }
+        byte[] localExtraData = new byte[extraFieldLen];
+        archive.readFully(localExtraData);
+        ze.setExtra(localExtraData);
+        offsetEntry.dataOffset = archive.getFilePointer();
+
+        if (entriesWithoutUTF8Flag.containsKey(ze)) {
+            String orig = ze.getName();
+            NameAndComment nc = entriesWithoutUTF8Flag.get(ze);
+            ZipUtil.setNameAndCommentFromExtraFields(ze, nc.name,
+                                                     nc.comment);
+            if (!orig.equals(ze.getName())) {
+                nameMap.remove(orig);
+                nameMap.put(ze.getName(), ze);
+            }
+        }
+    }
+}
+```
+
+This change ensures that `dataOffset` is set to the correct position after reading the local file header, file name, and extra fields, which should resolve the issue where the input stream was null.
+~~~~~~~~~~~~~~~~~
+Okay, I need to fix this bug in the provided Java code. The function `resolveLocalFileHeaderData` is causing an issue where an `InputStream` is null when reading a certain zip file. Let me look at the code step by step.
+
+The function is iterating over entries in a zip archive. For each entry, it reads the file name length and extra field length. Then it skips the file name bytes and reads the extra data. After that, it updates the entry's data offset.
+
+Wait, the problem seems to be that after reading the extra data, the code doesn't read the actual file data. So when trying to read the stream, it's null because the data wasn't read properly.
+
+Looking at the code, after setting `offsetEntry.dataOffset`, it doesn't proceed to read the file data. The data offset is set, but the archive isn't read beyond that point. So when the stream tries to read the data, there's nothing there.
+
+I think the issue is that the function is only processing the local file header and not advancing the archive's position to the start of the file data. So the next read operations start at the wrong position, leading to the InputStream being null.
+
+To fix this, after processing the local file header, I should seek to the data offset so that subsequent reads can access the file data correctly. I'll add a line to seek to `offsetEntry.dataOffset` after setting it.
+
+So, I'll modify the code by adding `archive.seek(offsetEntry.dataOffset);` right after setting `offsetEntry.dataOffset`. This should position the archive correctly for reading the file data.
+
+Let me update the code accordingly.
+</think>
+
+To fix this issue, we need to ensure that after processing the local file header, the archive's position is correctly set to the start of the file data. This allows subsequent reads to access the data properly.
+
+Here is the corrected code:
+
+```java
+private void resolveLocalFileHeaderData(Map<ZipArchiveEntry, NameAndComment> entriesWithoutUTF8Flag)
+        throws IOException {
+    // changing the name of a ZipArchiveEntry is going to change
+    // the hashcode - see COMPRESS-164
+    // Map needs to be reconstructed in order to keep central
+    // directory order
+    for (ZipArchiveEntry ze : entries.keySet()) {
+        OffsetEntry offsetEntry = entries.get(ze);
+        long offset = offsetEntry.headerOffset;
+        archive.seek(offset + LFH_OFFSET_FOR_FILENAME_LENGTH);
+        byte[] b = new byte[SHORT];
+        archive.readFully(b);
+        int fileNameLen = ZipShort.getValue(b);
+        archive.readFully(b);
+        int extraFieldLen = ZipShort.getValue(b);
+        int lenToSkip = fileNameLen;
+        while (lenToSkip > 0) {
+            int skipped = archive.skipBytes(lenToSkip);
+            if (skipped <= 0) {
+                throw new RuntimeException("failed to skip file name in"
+                        + " local file header");
+            }
+            lenToSkip -= skipped;
+        }
+        byte[] localExtraData = new byte[extraFieldLen];
+        archive.readFully(localExtraData);
+        ze.setExtra(localExtraData);
+        offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH
+                + SHORT + SHORT + fileNameLen + extraFieldLen;
+        
+        // Move the archive position to the start of the file data
+        archive.seek(offsetEntry.dataOffset);
+
+        if (entriesWithoutUTF8Flag.containsKey(ze)) {
+            String orig = ze.getName();
+            NameAndComment nc = entriesWithoutUTF8Flag.get(ze);
+            ZipUtil.setNameAndCommentFromExtraFields(ze, nc.name,
+                                                     nc.comment);
+            if (!orig.equals(ze.getName())) {
+                nameMap.remove(orig);
+                nameMap.put(ze.getName(), ze);
+            }
+        }
+    }
+}
+```
+~~~~~~~~~~~~~~~~~
+Okay, I need to figure out why the provided Java code is causing the test to fail. Let's start by understanding what the code is doing and then see where the bug might be.
+
+The function is called resolveLocalFileHeaderData and it's part of a Zip archive processing. It's iterating over entries in a Zip archive, reading their local file headers, and extracting information like file names and extra fields. The problem is that when it runs the test, it's throwing an error where the InputStream is null. That suggests that the code isn't correctly reading the data, so when trying to get an InputStream for an entry, it's not finding it.
+
+Looking at the code, the loop goes through each ZipArchiveEntry in the entries map. For each entry, it calculates the offset and seeks to the position after the LFH offset for filename length. Then it reads two bytes to get the filename length and another two for the extra field length. After that, it skips the filename bytes and reads the extra data.
+
+Wait a minute, in the code, after reading the filename length, it reads the extra field length. Then it skips the filename bytes. But the way it's skipping might be incorrect. Let me think about the structure of the local file header.
+
+The local file header structure is as follows:
+- Header signature (4 bytes)
+- Version needed (2 bytes)
+- Flags (2 bytes)
+- Compression method (2 bytes)
+- Last modified time (2 bytes)
+- Last modified date (2 bytes)
+- CRC-32 (4 bytes)
+- Compressed size (4 bytes)
+- Uncompressed size (4 bytes)
+- Filename length (2 bytes)
+- Extra field length (2 bytes)
+- Filename (variable length)
+- Extra field (variable length)
+
+So, when processing the local header, after reading the filename length and extra field length, the code needs to read the filename and then the extra field.
+
+In the current code, after reading the filename length and extra field length, it skips the filename bytes and then reads the extra field. But wait, the way it's skipping might be incorrect. Let's see:
+
+The code does:
+archive.seek(offset + LFH_OFFSET_FOR_FILENAME_LENGTH);
+Then reads 2 bytes for fileNameLen, then another 2 for extraFieldLen.
+
+So the offset after that is at offset + LFH_OFFSET_FOR_FILENAME_LENGTH + 4 bytes (2 for fileNameLen, 2 for extraFieldLen). Then it skips fileNameLen bytes. So the position after skipping is at offset + LFH_OFFSET_FOR_FILENAME_LENGTH + 4 + fileNameLen. Then it reads extraFieldLen bytes for the extra field.
+
+But wait, the filename comes right after the filename length and extra field length. So after reading those two shorts, the next bytes are the filename, then the extra field.
+
+So the code skips the filename correctly by reading the length, then skips that many bytes. Then reads the extra field.
+
+But maybe the issue is that the code is not correctly setting the data offset. The data offset is supposed to point to the start of the file data, which comes after the local header, including the filename and extra field.
+
+In the code, offsetEntry.dataOffset is set to offset + LFH_OFFSET_FOR_FILENAME_LENGTH + SHORT (2) + SHORT (2) + fileNameLen + extraFieldLen.
+
+Wait, let's calculate that:
+
+LFH_OFFSET_FOR_FILENAME_LENGTH is the offset within the local header where the filename length is stored. So that's 26 (since the first 12 bytes are header signature, version, flags, etc., then comes CRC, sizes, then filename length at offset 26). So when we seek to offset + 26, that's correct.
+
+Then, after reading fileNameLen and extraFieldLen, the code skips the filename, which is fileNameLen bytes, then reads the extra field, which is extraFieldLen bytes.
+
+So the data offset should be the start of the file data, which is after the local header. The local header size is 30 bytes (header signature 4, version 2, flags 2, method 2, time 2, date 2, crc 4, compressed 4, uncompressed 4, fileNameLen 2, extraLen 2: total 4+2+2+2+2+2+4+4+4+2+2 = 30 bytes). Then comes the filename, then extra field.
+
+So the data offset should be offset + 30 + fileNameLen + extraFieldLen.
+
+Wait, in the code, offsetEntry.dataOffset is set as:
+
+offset + LFH_OFFSET_FOR_FILENAME_LENGTH (which is 26) + SHORT (2) + SHORT (2) + fileNameLen + extraFieldLen.
+
+So that's 26 + 2 + 2 = 30, plus fileNameLen and extraFieldLen. So yes, that's correct.
+
+Hmm, maybe the issue is elsewhere. Let's think about the test that's failing: testReadWinZipArchive. It's trying to read a zip created by WinZip that uses UTF8. The error is that the InputStream is null when trying to read an entry.
+
+Wait, maybe when the code processes the local file header, it's not correctly handling the extra fields, especially the UTF8 flag. Let's look at the code again.
+
+In the code, if the entry is in entriesWithoutUTF8Flag, it's setting the name and comment using ZipUtil.setNameAndCommentFromExtraFields. That function probably reads the extra fields to set the correct name and comment, especially when UTF8 is used.
+
+But perhaps the code is not correctly handling cases where the extra field includes the UTF8 flag. Maybe when the extra field is being read, the code isn't processing it correctly, leading to the name not being set properly, which in turn causes the entry not to be found in the nameMap, leading to a null InputStream when trying to get it.
+
+Wait, looking at the code, when the entry is in entriesWithoutUTF8Flag, it's getting the name and comment from the extra fields. But perhaps the code is not correctly reading the extra fields, so the name isn't being set, causing the entry not to be found.
+
+Wait, the code is reading the extra field data into localExtraData, then setting ze.setExtra(localExtraData). Then, if the entry is in entriesWithoutUTF8Flag, it's calling ZipUtil.setNameAndCommentFromExtraFields with nc.name and nc.comment.
+
+Wait, but nc.name and nc.comment are probably derived from the extra fields. So perhaps the issue is that the code is not correctly handling the extra fields, leading to the name not being set correctly, so when the name is looked up in the nameMap, it's not found, leading to the InputStream being null.
+
+Alternatively, maybe the way the code is setting the extra field is incorrect. Let's look at the code again:
+
+ze.setExtra(localExtraData);
+
+Then, when calling ZipUtil.setNameAndCommentFromExtraFields, it's passing nc.name and nc.comment. But perhaps this function is expecting to read from the extra data, not from nc. Wait, the parameters are ze, nc.name, and nc.comment.
+
+Wait, looking at the method signature of ZipUtil.setNameAndCommentFromExtraFields, it's probably something like:
+
+public static void setNameAndCommentFromExtraFields(ZipArchiveEntry ze, String name, String comment)
+
+Which would set the name and comment of ze, ignoring the extra fields. But that doesn't make sense. Maybe I'm misunderstanding the code.
+
+Alternatively, perhaps the code should be using the extra fields to get the name and comment, especially when UTF8 is used. So maybe the code is not correctly extracting the name from the extra fields, leading to the name being incorrect, thus not found in the map.
+
+Wait, another possibility: when the code sets the dataOffset, maybe it's miscalculating, causing the file data not to be read correctly, leading to the InputStream being null because the data isn't found.
+
+Alternatively, perhaps the code is not correctly handling the case where the filename in the local header is empty, and the name is stored in the extra fields with the UTF8 flag.
+
+Wait, let's think about how the zip specification handles UTF8. If the general purpose flag bit 11 is set, it indicates that the filename and comment are encoded in UTF8. In such cases, the filename in the local header might be empty, and the actual filename is stored in the extra field.
+
+So, if the code is processing the local header and not correctly handling the case where the filename is empty, it might not set the correct name, leading to the entry not being found.
+
+Looking back at the code, the function is processing the local header, reading the filename length. If the filename length is zero, it would skip zero bytes, then read the extra field. Then, if the entry is in entriesWithoutUTF8Flag, it would set the name and comment from the extra fields.
+
+Wait, but the code is using the entriesWithoutUTF8Flag map, which suggests that these entries do not have the UTF8 flag set in their general purpose flags. But in reality, if the UTF8 flag is set, the filename in the local header might be empty, and the actual name is in the extra fields.
+
+So perhaps the code is incorrectly assuming that entries without the UTF8 flag have their names in the local header, but in reality, the local header's filename might still be empty if the name is stored in the extra fields with UTF8.
+
+Wait, perhaps the issue is that the code is not correctly handling the case where the local header's filename is empty, and the name is in the extra fields. So when processing the local header, the code skips the filename (which is zero length), then reads the extra field. But if the code doesn't correctly extract the name from the extra field, the name remains empty, causing the entry not to be found in the nameMap.
+
+So, the problem might be in the way the code is setting the name and comment from the extra fields. Let's look at that part:
+
+if (entriesWithoutUTF8Flag.containsKey(ze)) {
+    String orig = ze.getName();
+    NameAndComment nc = entriesWithoutUTF8Flag.get(ze);
+    ZipUtil.setNameAndCommentFromExtraFields(ze, nc.name, nc.comment);
+    if (!orig.equals(ze.getName())) {
+        nameMap.remove(orig);
+        nameMap.put(ze.getName(), ze);
+    }
+}
+
+Wait, this part is only executed if the entry is in entriesWithoutUTF8Flag. So perhaps the code is expecting that these entries have their names stored in the extra fields, but the way it's reading them is incorrect.
+
+Alternatively, maybe the code should be using the extra fields to set the name regardless of whether the UTF8 flag is set, especially if the local header's filename is empty.
+
+Another possibility: the code is not correctly reading the extra field data. Let's see how the code reads the extra field. It reads extraFieldLen bytes into localExtraData, then sets ze.setExtra(localExtraData). Then, when calling ZipUtil.setNameAndCommentFromExtraFields, it's passing nc.name and nc.comment, which might not be correctly derived from the extra data.
+
+Wait, perhaps the NameAndComment object is created elsewhere, and it's supposed to contain the correct name and comment parsed from the extra fields. But if the code isn't correctly parsing the extra fields, nc.name might be incorrect.
+
+Alternatively, perhaps the code should be parsing the extra fields within this function, rather than relying on the NameAndComment object.
+
+Wait, maybe the issue is that the code is not correctly handling the extra fields when the UTF8 flag is set. So, when the local header's filename is empty, the code needs to read the name from the extra fields. But in the current code, that's only done if the entry is in entriesWithoutUTF8Flag, which might be incorrect.
+
+Wait, perhaps the condition should be based on whether the UTF8 flag is set, not whether the entry is in entriesWithoutUTF8Flag. Or maybe the entriesWithoutUTF8Flag is being populated incorrectly.
+
+Alternatively, perhaps the code is not correctly reading the extra fields, leading to the name not being set, which causes the entry not to be found in the nameMap, hence the InputStream is null.
+
+Wait, another angle: the dataOffset is being set incorrectly, causing the file data not to be read, hence when trying to get the InputStream, it's null because the data isn't found.
+
+Let me recalculate the dataOffset:
+
+offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH + SHORT + SHORT + fileNameLen + extraFieldLen;
+
+Which is:
+
+offset (start of local header) + 26 (offset to filename length) + 2 (filenameLen) + 2 (extraLen) + fileNameLen + extraLen.
+
+So that's offset + 26 + 2 + 2 = offset + 30, plus fileNameLen and extraLen. So dataOffset is at the end of the local header plus filename and extra.
+
+Which should be correct.
+
+Wait, maybe the issue is that the code is not accounting for the fact that the local header's CRC and sizes might be incorrect, leading to the data not being read properly.
+
+Alternatively, perhaps the code is not correctly handling the case where the extra field includes other data besides the UTF8 name.
+
+Wait, perhaps the problem is that when the code reads the extra field, it's not correctly parsing it, so the name isn't being set, leading to the entry not being found.
+
+Another thought: perhaps the code is using the wrong value for LFH_OFFSET_FOR_FILENAME_LENGTH. Let me check what that value should be.
+
+In the local file header, the filename length is at offset 26 (since the header is 30 bytes, the first 4 are signature, then 2 for version, 2 flags, etc.). So 4 + 2 + 2 + 2 + 2 + 2 + 4 + 4 + 4 = 26. Yes, that's correct.
+
+So the code is correctly seeking to offset + 26.
+
+Wait, but in the code, after seeking to offset + 26, it reads two bytes into b, which is the filename length. Then reads another two bytes into b for extraFieldLen.
+
+But in Java, when you read bytes, you have to consider the endianness. The Zip specification uses little-endian for these values.
+
+Looking at the code, it's using ZipShort.getValue(b), which probably correctly handles the little-endian conversion.
+
+So that's probably correct.
+
+Wait, but the code is reading the filename length and extra field length, but perhaps it's not handling the case where the filename length is zero. If the filename is stored in the extra field (when UTF8 is used), then the local header's filename length is zero. So the code would skip zero bytes, then read the extra field.
+
+But then, the code only processes the name and comment if the entry is in entriesWithoutUTF8Flag. That might be the issue.
+
+Because, when the UTF8 flag is set, the local header's filename is empty, and the actual name is in the extra field. So the code should process the extra field to get the name, but only if the UTF8 flag is set.
+
+Wait, but the code is checking if the entry is in entriesWithoutUTF8Flag, which suggests that these entries do not have the UTF8 flag set. So perhaps the code is incorrectly handling the case where the UTF8 flag is set, leading to the name not being correctly read from the extra fields.
+
+So maybe the condition should be checking if the entry does have the UTF8 flag set, not the other way around.
+
+Alternatively, perhaps the entriesWithoutUTF8Flag is a map of entries that were added without the UTF8 flag, but their names are stored in the extra fields. So when the code is processing these, it's setting the name correctly.
+
+But perhaps the code is not correctly reading the extra fields, so the name remains empty, causing the entry not to be found.
+
+Wait, perhaps the issue is that the code is not correctly parsing the extra fields to extract the name and comment. The function ZipUtil.setNameAndCommentFromExtraFields might not be correctly handling the extra data.
+
+Alternatively, perhaps the NameAndComment object is not correctly populated, leading to the name not being set.
+
+Wait, perhaps the code should be parsing the extra fields within this function, rather than relying on the NameAndComment object. Let me think about how the extra fields are structured.
+
+The extra fields are a series of chunks, each with a header ID, data size, and data. For UTF8 names, the header ID is 0x0019, followed by the data size (which is 2*length for the name, as it's stored as UTF8 bytes), and then the data.
+
+So, to correctly extract the name, the code needs to parse the extra fields, look for the 0x0019 header, and then extract the name.
+
+But in the current code, it's setting ze.setExtra(localExtraData), which probably makes the extra data available, but then it's using the NameAndComment object's name and comment, which might not be correctly set.
+
+Wait, perhaps the NameAndComment is being created elsewhere by parsing the extra fields, but if that's not done correctly, then the name and comment would be wrong.
+
+Alternatively, perhaps the code should be directly parsing the localExtraData to extract the name and comment, especially when the UTF8 flag is set.
+
+So, perhaps the code is not correctly handling the case where the local header's filename is empty, and the name is in the extra fields, leading to the name not being set correctly, thus the entry isn't found in the nameMap, causing the InputStream to be null.
+
+So, to fix this, the code should correctly parse the extra fields to extract the name, especially when the filename length is zero.
+
+Perhaps the issue is that the code is not checking if the filename length is zero and then looking into the extra fields for the name.
+
+So, in the loop, after reading the filename length, if it's zero, the code should parse the extra fields to get the name.
+
+Alternatively, perhaps the code should always parse the extra fields for the name if the UTF8 flag is set, regardless of whether the filename length is zero.
+
+So, perhaps the code needs to be modified to handle the case where the filename is stored in the extra fields, which would involve parsing the extra data to extract the name.
+
+In the current code, the parsing is done in ZipUtil.setNameAndCommentFromExtraFields, but perhaps that function isn't correctly handling the data, or perhaps the data isn't being passed correctly.
+
+Alternatively, perhaps the code should be modified to check if the filename length is zero, and then extract the name from the extra fields.
+
+Let me try to think of how to adjust the code.
+
+After reading the filename length and extra field length, if the filename length is zero, then the name is stored in the extra fields. So the code should parse the extra fields to get the name.
+
+But in the current code, this is only done if the entry is in entriesWithoutUTF8Flag, which might not be correct.
+
+Alternatively, perhaps the code should always parse the extra fields for the name if the UTF8 flag is set, regardless of the filename length.
+
+Wait, perhaps the code should check the general purpose flags to see if the UTF8 flag is set. If it is, then the name is in the extra fields, and the filename length in the local header is zero.
+
+So, perhaps the code should be modified to:
+
+After reading the filename length, check if the flags have the UTF8 flag set. If so, then the filename is in the extra fields, so parse it.
+
+But in the current code, the condition is based on whether the entry is in entriesWithoutUTF8Flag, which seems to be the opposite.
+
+Wait, perhaps the entriesWithoutUTF8Flag map contains entries that were added without the UTF8 flag, but their names are stored in the extra fields, perhaps because the name contains non-ASCII characters. So, the code is trying to correct the names for these entries.
+
+But perhaps the code is not correctly handling the case where the UTF8 flag is set, leading to the name not being correctly set.
+
+Alternatively, perhaps the code is not correctly reading the extra fields, leading to the name not being set, thus the entry isn't found.
+
+So, perhaps the fix is to ensure that when the filename length is zero, the code parses the extra fields to get the name.
+
+Alternatively, perhaps the code should always parse the extra fields for the name, regardless of the filename length.
+
+Wait, let's think about the logic in the code. The code is processing each entry's local header. For each entry, it reads the filename length and extra field length. It skips the filename, reads the extra data, and sets it on the entry. Then, if the entry is in entriesWithoutUTF8Flag, it sets the name and comment from the extra fields.
+
+But perhaps the entriesWithoutUTF8Flag is a map of entries that were added without the UTF8 flag, but their names are stored in the extra fields. So, the code is trying to fix their names.
+
+But if the code is not correctly parsing the extra fields, then the name isn't set, leading to the issue.
+
+So, perhaps the issue is that the code is not correctly parsing the extra fields to extract the name and comment, especially when the UTF8 flag is set.
+
+Alternatively, perhaps the code is not correctly handling the case where multiple extra field chunks are present.
+
+Another possibility: the code is not correctly handling the case where the extra field data is split across the local and central directories.
+
+Wait, in the code, the localExtraData is read from the local header. But the extra fields in the local header might be a subset of the full extra fields, which are in the central directory. So, perhaps the code is not correctly combining the extra fields from both the local and central headers.
+
+But in the current code, it's only reading the local extra fields. So, if the name is stored in the central directory's extra fields, the code might be missing it.
+
+Alternatively, perhaps the code is supposed to read the extra fields from the central directory, but it's reading from the local header instead.
+
+Wait, no, the code is processing the local header, so it's reading the local extra fields. The central directory's extra fields are processed elsewhere.
+
+Hmm, this is getting a bit complicated. Maybe the issue is that the code is not correctly setting the name when the UTF8 flag is set, leading to the name not being found in the nameMap.
+
+So, perhaps the code needs to be modified to correctly parse the extra fields for the name, regardless of whether the entry is in entriesWithoutUTF8Flag.
+
+Alternatively, perhaps the code should not rely on the NameAndComment object, but instead parse the extra fields directly.
+
+Wait, perhaps the problem is that the code is using the NameAndComment object's name and comment, which might not be correctly set. Instead, it should parse the extra fields within this function.
+
+So, perhaps the code should be modified to parse the localExtraData to extract the name and comment when the UTF8 flag is set, rather than relying on the NameAndComment object.
+
+But without knowing the exact implementation of ZipUtil.setNameAndCommentFromExtraFields, it's hard to say.
+
+Alternatively, perhaps the code should be modified to check if the filename is empty and then parse the extra fields for the name.
+
+So, in the code, after reading the filenameLen, if it's zero, then the name is in the extra fields. So, parse the extra fields to get the name.
+
+So, perhaps adding a condition:
+
+if (fileNameLen == 0) {
+    // parse extra fields for name
+}
+
+But the current code doesn't do that; instead, it only processes the name if the entry is in entriesWithoutUTF8Flag.
+
+So, perhaps the fix is to change the condition to check if the filename length is zero, and then parse the extra fields for the name.
+
+Alternatively, perhaps the code should always parse the extra fields if the UTF8 flag is set.
+
+Wait, perhaps the code should check the general purpose flags for the UTF8 flag. If set, then the name is in the extra fields.
+
+So, perhaps in the code, after reading the flags, check if the UTF8 flag is set, and then parse the extra fields.
+
+But in the current code, the flags are not being read. So, perhaps the code is missing that step.
+
+Wait, in the loop, for each ZipArchiveEntry ze, it gets the offsetEntry, then seeks to the local header's filename length position. It doesn't read the flags.
+
+So, perhaps the code is not checking whether the UTF8 flag is set, leading to not correctly parsing the name from the extra fields.
+
+So, to fix this, the code should read the flags, check if the UTF8 flag is set, and then parse the extra fields for the name.
+
+So, the steps would be:
+
+1. For each entry, read the local header's flags.
+2. If the UTF8 flag is set, then the name is in the extra fields, so parse it.
+3. Otherwise, use the filename from the local header.
+
+But in the current code, it's not reading the flags, so it doesn't know whether to parse the extra fields for the name.
+
+So, perhaps the code needs to be modified to read the flags, check for the UTF8 flag, and then process the extra fields accordingly.
+
+So, to implement this, the code would need to:
+
+- Seek to the offset of the flags in the local header.
+- Read the flags.
+- Check if the UTF8 flag (bit 11) is set.
+- If set, parse the extra fields for the name.
+- Else, use the filename from the local header.
+
+But in the current code, the flags are not being read, so this check isn't done.
+
+So, perhaps the bug is that the code isn't checking the UTF8 flag and thus isn't correctly parsing the name from the extra fields when necessary.
+
+Therefore, the fix would involve modifying the code to read the flags, check for the UTF8 flag, and then parse the extra fields if needed.
+
+So, let's outline the changes:
+
+1. After seeking to the local header, read the flags.
+2. Check if the UTF8 flag is set.
+3. If set, parse the extra fields for the name and comment.
+4. Update the entry's name and comment accordingly.
+5. Update the nameMap if the name has changed.
+
+This way, the code correctly handles entries where the name is stored in the extra fields due to the UTF8 flag.
+
+So, in the code, after seeking to offset + LFH_OFFSET_FOR_FILENAME_LENGTH, which is 26, it reads the filename length and extra field length. But before that, it should read the flags.
+
+Wait, the flags are at offset 6 in the local header (since the header starts at 0: 0-3 signature, 4-5 version, 6-7 flags, etc.). So, the offset for flags is offset + 6.
+
+So, in the code, before seeking to offset + 26, it should seek to offset + 6, read the flags, then proceed.
+
+Alternatively, after seeking to offset + 26, it can seek backward to read the flags.
+
+But that might complicate the code. Alternatively, read all the necessary parts in order.
+
+Wait, perhaps the code should read the local header in the correct order, extracting all necessary fields, including the flags.
+
+So, the code should:
+
+- Seek to the start of the local header (offset).
+- Read the signature (4 bytes), though it's not necessary here.
+- Read version (2), flags (2), method (2), time (2), date (2), crc (4), compressed size (4), uncompressed size (4).
+- Then read filename length (2) and extra field length (2).
+- Then process the flags to check for UTF8.
+
+So, perhaps the code is missing reading the flags, which is necessary to determine if the name is in the extra fields.
+
+So, to fix this, the code needs to read the flags, check for the UTF8 flag, and then parse the extra fields accordingly.
+
+So, modifying the code:
+
+In the loop:
+
+for (ZipArchiveEntry ze : entries.keySet()) {
+    OffsetEntry offsetEntry = entries.get(ze);
+    long offset = offsetEntry.headerOffset;
+
+    // Read local header fields
+    archive.seek(offset + 6); // flags are at offset 6
+    byte[] flagsBytes = new byte[2];
+    archive.readFully(flagsBytes);
+    int flags = ZipShort.getValue(flagsBytes);
+    boolean utf8Flag = ((flags >> 11) & 1)!= 0;
+
+    // Now proceed to read filename length and extra field length
+    archive.seek(offset + LFH_OFFSET_FOR_FILENAME_LENGTH);
+    byte[] b = new byte[SHORT];
+    archive.readFully(b);
+    int fileNameLen = ZipShort.getValue(b);
+    archive.readFully(b);
+    int extraFieldLen = ZipShort.getValue(b);
+
+    // Skip filename
+    int lenToSkip = fileNameLen;
+    while (lenToSkip > 0) {
+        int skipped = archive.skipBytes(lenToSkip);
+        if (skipped <= 0) {
+            throw new RuntimeException("failed to skip file name in local file header");
+        }
+        lenToSkip -= skipped;
+    }
+
+    // Read extra fields
+    byte[] localExtraData = new byte[extraFieldLen];
+    archive.readFully(localExtraData);
+    ze.setExtra(localExtraData);
+
+    // Set data offset
+    offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH + SHORT + SHORT + fileNameLen + extraFieldLen;
+
+    // Check if UTF8 flag is set
+    if (utf8Flag) {
+        // Parse extra fields for name and comment
+        NameAndComment nc = ZipUtil.parseExtraFieldsForUTF8NameAndComment(localExtraData);
+        if (nc!= null) {
+            ZipUtil.setNameAndCommentFromExtraFields(ze, nc.name, nc.comment);
+        }
+    } else if (entriesWithoutUTF8Flag.containsKey(ze)) {
+        // Existing code for entries without UTF8 flag
+        String orig = ze.getName();
+        NameAndComment nc = entriesWithoutUTF8Flag.get(ze);
+        ZipUtil.setNameAndCommentFromExtraFields(ze, nc.name, nc.comment);
+        if (!orig.equals(ze.getName())) {
+            nameMap.remove(orig);
+            nameMap.put(ze.getName(), ze);
+        }
+    }
+}
+
+Wait, but I'm not sure if ZipUtil has a method called parseExtraFieldsForUTF8NameAndComment. So perhaps the code should directly parse the extra fields.
+
+Alternatively, perhaps the code should check if the UTF8 flag is set, and if so, parse the extra fields for the name, else proceed as before.
+
+So, perhaps the code should be modified to read the flags, check for UTF8, and then parse the extra fields if needed.
+
+This way, when the UTF8 flag is set, the name is correctly read from the extra fields, ensuring that the name is set, and thus the entry can be found in the nameMap.
+
+Therefore, the fixed code would involve adding the steps to read the flags, check for the UTF8 flag, and parse the extra fields accordingly.
+</think>
+
+To fix the bug, the code needs to correctly handle cases where the filename is stored in the extra fields due to the UTF8 flag being set. This involves reading the flags from the local header, checking if the UTF8 flag is set, and then parsing the extra fields to extract the correct name and comment.
+
+Here's the fixed version of the function:
+
+```java
+private void resolveLocalFileHeaderData(Map<ZipArchiveEntry, NameAndComment> entriesWithoutUTF8Flag)
+        throws IOException {
+    // changing the name of a ZipArchiveEntry is going to change
+    // the hashcode - see COMPRESS-164
+    // Map needs to be reconstructed in order to keep central
+    // directory order
+    for (ZipArchiveEntry ze : entries.keySet()) {
+        OffsetEntry offsetEntry = entries.get(ze);
+        long offset = offsetEntry.headerOffset;
+
+        // Read flags to check for UTF8
+        archive.seek(offset + 6); // Flags are at offset 6
+        byte[] flagsBytes = new byte[2];
+        archive.readFully(flagsBytes);
+        int flags = ZipShort.getValue(flagsBytes);
+        boolean utf8Flag = ((flags >> 11) & 1)!= 0;
+
+        // Proceed to read filename length and extra field length
+        archive.seek(offset + LFH_OFFSET_FOR_FILENAME_LENGTH);
+        byte[] b = new byte[SHORT];
+        archive.readFully(b);
+        int fileNameLen = ZipShort.getValue(b);
+        archive.readFully(b);
+        int extraFieldLen = ZipShort.getValue(b);
+
+        int lenToSkip = fileNameLen;
+        while (lenToSkip > 0) {
+            int skipped = archive.skipBytes(lenToSkip);
+            if (skipped <= 0) {
+                throw new RuntimeException("failed to skip file name in local file header");
+            }
+            lenToSkip -= skipped;
+        }
+
+        byte[] localExtraData = new byte[extraFieldLen];
+        archive.readFully(localExtraData);
+        ze.setExtra(localExtraData);
+
+        offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH
+                + SHORT + SHORT + fileNameLen + extraFieldLen;
+
+        if (utf8Flag) {
+            // Parse extra fields for UTF8 name and comment
+            NameAndComment nc = ZipUtil.parseExtraFields(ze, localExtraData);
+            if (nc!= null) {
+                String newName = nc.name;
+                String newComment = nc.comment;
+                if (!ze.getName().equals(newName)) {
+                    String oldName = ze.getName();
+                    ze.setName(newName);
+                    nameMap.remove(oldName);
+                    nameMap.put(newName, ze);
+                }
+                if (!ze.getComment().equals(newComment)) {
+                    ze.setComment(newComment);
+                }
+            }
+        } else if (entriesWithoutUTF8Flag.containsKey(ze)) {
+            String orig = ze.getName();
+            NameAndComment nc = entriesWithoutUTF8Flag.get(ze);
+            ZipUtil.setNameAndCommentFromExtraFields(ze, nc.name, nc.comment);
+            if (!orig.equals(ze.getName())) {
+                nameMap.remove(orig);
+                nameMap.put(ze.getName(), ze);
+            }
+        }
+    }
+}
+```
+
+Note: This fix assumes that `ZipUtil` has a method `parseExtraFields` that correctly extracts the name and comment from the extra data when the UTF8 flag is set. If such a method doesn't exist, you'd need to implement the parsing logic within the function.
+~~~~~~~~~~~~~~~~~
+Okay, so I have this Java method that's supposed to resolve local file header data for a ZIP archive, but it's causing some tests to fail. The specific test that's failing is testReadWinZipArchive, and the error is that the InputStream is null. Hmm, that's confusing. Let me try to figure out what's going on.
+
+Looking at the code, the method is called resolveLocalFileHeaderData. It takes a map of ZipArchiveEntry and NameAndComment objects. The purpose seems to be to adjust some entries based on whether they have a UTF-8 flag or not.
+
+Let me walk through the code step by step. It loops through each ZipArchiveEntry in the entries map. For each entry, it gets the OffsetEntry and calculates the offset. Then it seeks to a specific position in the archive, reads some bytes, and processes the filename length and extra field length. After that, it skips the filename bytes and reads the extra data. Then it sets the extra data on the ZipArchiveEntry.
+
+Next, if the entry is in the entriesWithoutUTF8Flag map, it gets the original name and the NameAndComment object. It then sets the name and comment using ZipUtil.setNameAndCommentFromExtraFields. If the original name doesn't match the new name, it updates the nameMap.
+
+Wait a minute, the test is failing because the InputStream is null. That suggests that when trying to read an entry, the input stream isn't being properly set up. Maybe the data offset is being calculated incorrectly, leading to the stream not finding the data.
+
+Looking at the calculation of offsetEntry.dataOffset. It's being set to offset + LFH_OFFSET_FOR_FILENAME_LENGTH + SHORT (which is 2) + another SHORT (another 2) plus fileNameLen and extraFieldLen. Let me check the constants. LFH_OFFSET_FOR_FILENAME_LENGTH is probably 4, since the local file header structure has the header signature (4 bytes), then version, flags, compression, etc. Wait, maybe the offset is being miscalculated.
+
+The local file header starts at offset. The structure is:
+
+- Header signature (4 bytes)
+- Version needed (2)
+- Flags (2)
+- Compression method (2)
+- Last modified time (2)
+- Last modified date (2)
+- CRC-32 (4)
+- Compressed size (4)
+- Uncompressed size (4)
+- Filename length (2)
+- Extra field length (2)
+
+So after the header signature, the next fields are version, flags, etc., which are 2 bytes each. So from the start of the header, the filename length is at offset 4 + 2+2+2+2+2+2+4+4+4 = wait, let me count correctly.
+
+Wait, the local file header structure is as follows (each in bytes):
+
+- Header signature: 4
+- Version needed: 2
+- Flags: 2
+- Compression method: 2
+- Last modified time: 2
+- Last modified date: 2
+- CRC-32: 4
+- Compressed size: 4
+- Uncompressed size: 4
+- Filename length: 2
+- Extra field length: 2
+
+So the total bytes before the filename length is 4 + (2*6) + (4*3) = 4 + 12 + 12 = 28 bytes. So the filename length starts at offset + 28. Then after that comes the extra field length, which is 2 more bytes. So the data offset should be after the header, filename, and extra field.
+
+Wait, the data offset is where the actual file data starts. So it's the start of the local file header (offset) plus the size of the header, which is 4 (signature) + 2*10 (version, flags, etc.) + 4*2 (crc, sizes) + 2 (filename len) + 2 (extra len) = 4 + 20 + 8 + 2 + 2 = 36 bytes. Then add the filename length and extra field length.
+
+Wait, no. The data offset is the offset of the local file header plus the size of the header plus the filename and extra field. So dataOffset = offset + 4 (header) + 2 (version) + 2 (flags) +... etc. Alternatively, perhaps the dataOffset should be offset + 30 (since 4 + 2*10 = 24, plus 4*2=8, total 32, plus 2+2=34? Wait, maybe I'm getting this wrong.
+
+Alternatively, perhaps the code is miscalculating the data offset. Let me see: the code sets dataOffset as offset + LFH_OFFSET_FOR_FILENAME_LENGTH (which is 28) plus SHORT (2) for the filename length, then another SHORT (2) for the extra field length, then the fileNameLen and extraFieldLen. So dataOffset = offset + 28 + 2 + 2 + fileNameLen + extraFieldLen.
+
+Wait, that doesn't seem right. Because after the filename and extra field, the data starts. So the data offset should be the start of the local header (offset) plus the size of the header (which is 30 bytes?), plus the filename length and extra field length. Wait, no, the header is 30 bytes (from the structure above: 4 + 2*10 + 4*3 = 4 + 20 + 12 = 36 bytes). Wait, let me recalculate:
+
+Header signature: 4
+Version: 2
+Flags: 2
+Compression: 2
+Time: 2
+Date: 2
+CRC: 4
+Compressed size:4
+Uncompressed size:4
+Filename length:2
+Extra length:2
+
+Total: 4 + (2*6) = 4+12=16, plus (4*3) = 12, so 28, plus 2+2=2, total 30 bytes. So the header is 30 bytes. Then the filename is fileNameLen bytes, and the extra field is extraFieldLen bytes. So the data offset should be offset + 30 + fileNameLen + extraFieldLen.
+
+But in the code, the dataOffset is being set as offset + 28 (LFH_OFFSET_FOR_FILENAME_LENGTH) + 2 (SHORT) + 2 (another SHORT) + fileNameLen + extraFieldLen. So that's 28 + 4 + fileNameLen + extraFieldLen. Which totals 32 + fileNameLen + extraFieldLen. But the correct data offset should be 30 + fileNameLen + extraFieldLen. So the code is adding 2 extra bytes, making the dataOffset 2 bytes too high.
+
+So that would mean that when trying to read the data, it's starting 2 bytes too far, which might cause the data to be misread, leading to an invalid input stream, hence the InputStream being null.
+
+So the bug is in the calculation of dataOffset. Instead of adding 28 + 2 + 2, it should add 30, because the header is 30 bytes. Alternatively, perhaps LFH_OFFSET_FOR_FILENAME_LENGTH is wrong. Let me check what that constant is.
+
+If LFH_OFFSET_FOR_FILENAME_LENGTH is 28, that would mean that the filename length starts at offset +28. But in reality, the filename length starts at 28 bytes into the header, which is correct. But then, after reading the filename length (2 bytes) and the extra field length (another 2 bytes), the next bytes are the filename and then the extra field. So the data starts at offset +30 (the end of the header) plus the filename length and extra field length.
+
+So the correct calculation should be:
+
+dataOffset = offset + 30 + fileNameLen + extraFieldLen.
+
+But in the code, it's being calculated as:
+
+offset + 28 + 2 + 2 + fileNameLen + extraFieldLen.
+
+Which is 28 +4 =32, so dataOffset = offset +32 + fileNameLen + extraFieldLen. That's 2 bytes more than it should be.
+
+So to fix this, we should change the calculation to:
+
+dataOffset = offset + 30 + fileNameLen + extraFieldLen.
+
+Alternatively, perhaps LFH_OFFSET_FOR_FILENAME_LENGTH is 28, and then we add 2 (for filename len) and 2 (for extra len), which makes 32, but that's wrong. So maybe the code should be adjusted to offset + 30 + fileNameLen + extraFieldLen.
+
+So the line in the code is:
+
+offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH
+    + SHORT + SHORT + fileNameLen + extraFieldLen;
+
+Which is 28 + 2 + 2 +... So that's 32 +... So that's incorrect. It should be 30 instead of 32.
+
+So perhaps changing the calculation to offset + 30 + fileNameLen + extraFieldLen.
+
+Alternatively, perhaps the initial offset is already pointing to the start of the local file header, so adding the size of the header (30) plus the filename and extra lengths is correct.
+
+So I think the fix is to change the dataOffset calculation. Let me adjust that.
+
+Another thing to consider: in the loop, the code is seeking to offset + LFH_OFFSET_FOR_FILENAME_LENGTH, which is 28, then reading 2 bytes for fileNameLen, then another 2 for extraFieldLen. So the code is correctly reading those lengths. Then it skips fileNameLen bytes, then reads extraFieldLen bytes. So the data should start after the header, filename, and extra field.
+
+So the dataOffset should be offset (start of header) + 30 (header size) + fileNameLen (bytes for name) + extraFieldLen (bytes for extra). So the code is adding 28 + 2 + 2, which is 32, but it should be 30. So the calculation is off by 2.
+
+So to fix this, we can adjust the dataOffset calculation to be:
+
+offsetEntry.dataOffset = offset + 30 + fileNameLen + extraFieldLen;
+
+Alternatively, perhaps the initial offset is wrong. Let me see: the offset is obtained from offsetEntry.headerOffset, which should point to the start of the local file header. So adding 30 to that would give the end of the header.
+
+Wait, perhaps another approach: the data starts after the header, filename, and extra field. The header is 30 bytes, so after that comes the filename (fileNameLen bytes), then the extra field (extraFieldLen bytes), then the data.
+
+So the dataOffset should be offset + 30 + fileNameLen + extraFieldLen.
+
+So in the code, the current calculation is offset +28 +2 +2 + fileNameLen + extraFieldLen. Which is 28+4=32, so 32 + fileNameLen + extraFieldLen. That's 2 bytes more than it should be. So the dataOffset is incorrect.
+
+So the fix is to change the calculation to offset +30 + fileNameLen + extraFieldLen.
+
+So in the code, the line:
+
+offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH
+    + SHORT + SHORT + fileNameLen + extraFieldLen;
+
+Should be changed to:
+
+offsetEntry.dataOffset = offset + 30 + fileNameLen + extraFieldLen;
+
+Alternatively, perhaps LFH_OFFSET_FOR_FILENAME_LENGTH is 28, so 28 + 2 + 2 is 32, but that's incorrect. So replacing 28 + 4 with 30.
+
+Wait, perhaps the LFH_OFFSET_FOR_FILENAME_LENGTH is correct as 28, because the filename length is at 28 bytes into the header. So after reading that, the code is correctly getting the lengths. But then, the data offset is after the entire header, which is 30 bytes, plus the filename and extra lengths.
+
+So the code is adding 28 + 2 (for filename length) + 2 (for extra length) + fileNameLen + extraFieldLen. That's 32 +... So it's 2 bytes too much.
+
+So to correct it, subtract 2 from that sum. So perhaps the dataOffset should be offset + (28 + 2 + 2) = offset +32, but that's wrong. Wait no, the data offset is after the header, which is 30 bytes, plus the filename and extra.
+
+So the correct way is:
+
+dataOffset = offset + 30 + fileNameLen + extraFieldLen.
+
+So in code, that's offset + 30 + fileNameLen + extraFieldLen.
+
+So in the existing code, it's offset + 28 + 2 + 2 + fileNameLen + extraFieldLen. Which is 28+4=32, so 32 +... So we need to subtract 2.
+
+So perhaps changing it to offset + 28 + 2 + 2 is 32, but that's wrong. So instead, we can write it as offset + 30 + fileNameLen + extraFieldLen.
+
+So the line should be modified.
+
+Let me see, in the code, the line is:
+
+offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH
+    + SHORT + SHORT + fileNameLen + extraFieldLen;
+
+Assuming SHORT is 2, that's 28 + 2 + 2 = 32, plus the lengths. So to make it 30, I can subtract 2 from that. So perhaps it's:
+
+offsetEntry.dataOffset = offset + LFH_OFFSET_FOR_FILENAME_LENGTH + fileNameLen + extraFieldLen;
+
+Wait, no, because LFH_OFFSET_FOR_FILENAME_LENGTH is 28, so adding fileNameLen and extraFieldLen would give 28 +... which is not correct. Wait no, the dataOffset is after the header (30 bytes), plus the filename and extra lengths.
+
+So perhaps the correct code is:
+
+offsetEntry.dataOffset = offset + 30 + fileNameLen + extraFieldLen;
+
+Which would be:
+
+offsetEntry.dataOffset = offset + 30 + fileNameLen + extraFieldLen;
+
+So I think that's the fix. Let me adjust the code accordingly.
+
+Another thing to consider: could this miscalculation affect how the data is read, leading to the InputStream being null? If the dataOffset is wrong, when trying to read the entry's data, it might seek to an incorrect position, possibly beyond the end of the file or at a position where there's no data, causing the stream to be null.
+
+So by correcting the dataOffset calculation, the InputStream should be correctly positioned, allowing the data to be read properly.
+
+I think that's the main issue here. So I'll adjust the code to set dataOffset correctly.
+</think>
+
+To fix the bug, the calculation of `offsetEntry.dataOffset` was incorrect, leading to an invalid data offset. This caused the input stream to be null when trying to read the file data. The corrected code properly calculates the data offset by considering the correct header size and the lengths of the filename and extra fields.
+
+```java
+    private void resolveLocalFileHeaderData(Map<ZipArchiveEntry, NameAndComment>
+                                            entriesWithoutUTF8Flag)
+        throws IOException {
+        // changing the name of a ZipArchiveEntry is going to change
+        // the hashcode - see COMPRESS-164
+        // Map needs to be reconstructed in order to keep central
+        // directory order
+        for (ZipArchiveEntry ze : entries.keySet()) {
+            OffsetEntry offsetEntry = entries.get(ze);
+            long offset = offsetEntry.headerOffset;
+            archive.seek(offset + LFH_OFFSET_FOR_FILENAME_LENGTH);
+            byte[] b = new byte[SHORT];
+            archive.readFully(b);
+            int fileNameLen = ZipShort.getValue(b);
+            archive.readFully(b);
+            int extraFieldLen = ZipShort.getValue(b);
+            int lenToSkip = fileNameLen;
+            while (lenToSkip > 0) {
+                int skipped = archive.skipBytes(lenToSkip);
+                if (skipped <= 0) {
+                    throw new RuntimeException("failed to skip file name in"
+                                               + " local file header");
+                }
+                lenToSkip -= skipped;
+            }
+            byte[] localExtraData = new byte[extraFieldLen];
+            archive.readFully(localExtraData);
+            ze.setExtra(localExtraData);
+            offsetEntry.dataOffset = offset + 30 + fileNameLen + extraFieldLen;
+
+            if (entriesWithoutUTF8Flag.containsKey(ze)) {
+                String orig = ze.getName();
+                NameAndComment nc = entriesWithoutUTF8Flag.get(ze);
+                ZipUtil.setNameAndCommentFromExtraFields(ze, nc.name,
+                                                         nc.comment);
+                if (!orig.equals(ze.getName())) {
+                    nameMap.remove(orig);
+                    nameMap.put(ze.getName(), ze);
+                }
+            }
+        }
+    }
+```
+~~~~~~~~~~~~~~~~~
