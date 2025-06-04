@@ -127,7 +127,7 @@ class data_loader:
         successful = []
         token_logprobs = []
 
-        QUALITATIVE_SCALE = {
+        """QUALITATIVE_SCALE = {
             "Very low": 0,
             "Low": 0.3,
             "Somewhat low": 0.45,
@@ -135,6 +135,15 @@ class data_loader:
             "Somewhat high": 0.65,
             "High": 0.7,
             "Very high": 1,
+        }"""
+        QUALITATIVE_SCALE = {
+            "Very low": 0,
+            "Low": 0.15,
+            "Somewhat low": 0.3,
+            "Medium": 0.45,
+            "Somewhat high": 0.60,
+            "High": 0.75,
+            "Very high": 0.9,
         }
 
         # Get the token probailities from the samples and create arrays
@@ -356,7 +365,7 @@ class data_loader:
 
         if args.grouping_style == 'scc':
             scc_infos = self.load_scc_data(run, languages, names)
-            groups_w = group_obj.create_groups(args.problem, run, group_style=args.grouping_style, scc=scc_infos)
+            groups_w = group_obj.create_groups(args.problem, run, group_style=args.grouping_style, scc_infos=scc_infos)
         else:
             # Define group matrix
             groups_w = group_obj.create_groups(args.problem, run, group_style=args.grouping_style)

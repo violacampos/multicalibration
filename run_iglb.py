@@ -61,16 +61,20 @@ def main(extern=False):
     temp_group_correctness = correctness_group_uncalibrated
     temp_bin_correctness = correctness_bin_uncalibrated
 
+    train_probs = split_obj.train_data["probs"].to_numpy()
+    test_probs = split_obj.test_data["probs"].to_numpy()
+    val_probs = split_obj.val_data["probs"].to_numpy()
+
     history = {}
 
     while True: 
         # Calculate mse for f_t
-        mse_f_t = iglb.score_obj.mse(split_obj.val_data["probs"], 
+        mse_f_t = iglb.score_obj.mse(val_probs, 
                                      split_obj.val_data["is_correct"], 
                                      len(split_obj.val_data["is_correct"]))
 
         # Assign bins an calculate the probability for each bin,group and tau combination
-        assigned_bins = binning.round_model_to_grid(split_obj.train_data["probs"], grid)   
+        assigned_bins = binning.round_model_to_grid(train_probs, grid)   
         P_S_p_g = iglb.get_P_S_p_g(assigned_bins, split_obj.train_groups) 
         
         # get the tau, bin, group for which the probality * deltas_squared maximises
@@ -83,7 +87,7 @@ def main(extern=False):
 
         if DEBUG: print(f"Max Error: {P_S_p_g[tau, bin, group]}")
         # get the calibrated confidences for the calibration subset
-        split_obj.train_data["probs"] = iglb.predict(split_obj.train_data["probs"], 
+        train_probs = iglb.predict(train_probs, 
                                                      split_obj.train_groups, 
                                                      assigned_bins, 
                                                      tau, 
@@ -91,26 +95,26 @@ def main(extern=False):
                                                      group)
 
         # get the calibrated confidences for the test subset
-        assigned_bins_test = binning.round_model_to_grid(split_obj.test_data["probs"], grid)   
-        split_obj.test_data["probs"] = iglb.predict(split_obj.test_data["probs"], 
-                                                    split_obj.test_groups, 
-                                                    assigned_bins_test, 
-                                                    tau, 
-                                                    bin, 
-                                                    group, 
-                                                    test=True, 
-                                                    is_correct=split_obj.test_data["is_correct"])
+        assigned_bins_test = binning.round_model_to_grid(test_probs, grid)   
+        test_probs= iglb.predict(   test_probs, 
+                                    split_obj.test_groups, 
+                                    assigned_bins_test, 
+                                    tau, 
+                                    bin, 
+                                    group, 
+                                    test=True, 
+                                    is_correct=split_obj.test_data["is_correct"])
 
         # get the calibrated confidences for the validation subset to calculate MSE
-        assigned_bins_val = binning.round_model_to_grid(split_obj.val_data["probs"], grid)   
-        split_obj.val_data["probs"] = iglb.predict( split_obj.val_data["probs"], 
-                                                    split_obj.val_groups,
-                                                    assigned_bins_val, 
-                                                    tau, 
-                                                    bin, 
-                                                    group)
+        assigned_bins_val = binning.round_model_to_grid(val_probs, grid)   
+        val_probs = iglb.predict(   val_probs, 
+                                    split_obj.val_groups,
+                                    assigned_bins_val, 
+                                    tau, 
+                                    bin, 
+                                    group)
         
-        curr_group_total, curr_group_correctness, curr_bin_total, curr_bin_correctness = iglb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
+        curr_group_total, curr_group_correctness, curr_bin_total, curr_bin_correctness = iglb.score_obj.get_total_and_correctness(test_probs, 
                                                                                                                                   split_obj.test_data["is_correct"], 
                                                                                                                                   split_obj.test_groups)
         
@@ -128,17 +132,17 @@ def main(extern=False):
             break
         
         # Set the new model for the next iteration
-        iglb = iglb.fit(split_obj.train_data["probs"], split_obj.train_data["is_correct"], split_obj.train_groups)
+        iglb = iglb.fit(train_probs, split_obj.train_data["is_correct"], split_obj.train_groups)
             
     #if OUTPUTS: print(f"GASCE: {iglb.gasce}\n")
-    scores_calibrated = iglb.score_obj.calc_all_new(split_obj.test_data["probs"], 
+    scores_calibrated = iglb.score_obj.calc_all_new(test_probs, 
                                                     split_obj.test_data["is_correct"], 
                                                     groups=split_obj.test_groups)
-    total_group_calibrated, correctness_group_calibrated, total_bin_calibrated, correctness_bin_calibrated = iglb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
+    total_group_calibrated, correctness_group_calibrated, total_bin_calibrated, correctness_bin_calibrated = iglb.score_obj.get_total_and_correctness(test_probs, 
                                                                                                                                                       split_obj.test_data["is_correct"], 
                                                                                                                                                       split_obj.test_groups) 
     
-    total_group, correctness_group, average_group_confidence = iglb.score_obj.get_correctness_per_group(split_obj.test_data["probs"], 
+    total_group, correctness_group, average_group_confidence = iglb.score_obj.get_correctness_per_group(test_probs, 
                                                                                                         split_obj.test_data["is_correct"], 
                                                                                                         split_obj.test_groups) 
             
@@ -153,7 +157,7 @@ def main(extern=False):
                 "average_group_confidence":  average_group_confidence,
                 "total_group":  total_group, 
                 "scores_calibrated":  scores_calibrated,
-                "calibrated_probs": split_obj.test_data["probs"]}
+                "calibrated_probs": test_probs}
     else:
         if args.save_charts:
             chartmaker.calibration_info(total_bin_uncalibrated, correctness_bin_uncalibrated, total_bin_calibrated, correctness_bin_calibrated)

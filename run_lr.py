@@ -25,7 +25,10 @@ def main(extern=False):
         exit()
 
     # Loads all the necessary data into an dict
-    data_obj = data_loader(args, run_dir, extern, "lr")
+    if args.control_exp:
+        data_obj = data_loader(args, run_dir, extern, "lr_all")
+    else:
+        data_obj = data_loader(args, run_dir, extern, "lr")
 
     # Splits the loaded data
     split_obj = split(args.split, data_obj)
@@ -33,8 +36,14 @@ def main(extern=False):
     # Control experiment to check which groups helps the model to make correct predictions
     if args.control_exp:
         y = split_obj.train_data["is_correct"]
+        X = split_obj.train_groups
+        print(X)
+        print(split_obj.train_data["probs"].to_numpy())
+        print(np.append(X, [split_obj.train_data["probs"]], ))
+        exit()
     else:
         y = split_obj.train_data["is_correct"] - split_obj.train_data["probs"]
+        X = split_obj.train_groups
     
     # get the grid for binning type and the chartmaker obj        
     grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run, 
@@ -46,7 +55,7 @@ def main(extern=False):
                                                        binning_step_size=1/args.bin_count)
 
     # Train the linear regression on the train data split
-    lr = lr_calibration(grid, OUTPUTS, DEBUG).fit(split_obj.train_groups, 
+    lr = lr_calibration(grid, OUTPUTS, DEBUG).fit(X, 
                                                   y)
 
     # Calculate scores on uncalibrated test set

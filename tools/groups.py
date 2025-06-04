@@ -23,11 +23,10 @@ class groups:
                 self.median_loc = np.mean(np.array([d["Code"] for d in scc_infos]))
                 for program, prompt, infos in zip(self.programs, self.prompts, scc_infos):
                     self.groups_w.append(self.check_groups_code_gen(prompt, program, group_style=group_style, infos=infos))
-            elif group_style == 'simple':
+            elif group_style == 'simple' or group_style == 'categories':
                 self.set_median_loc()
                 for program, prompt in zip(self.programs, self.prompts):
-                    self.groups_w.append(self.check_groups_code_gen(prompt, program, group_style=group_style))
-                
+                    self.groups_w.append(self.check_groups_code_gen(prompt, program, group_style=group_style))                
 
         elif problem == 'program-repair':
             if group_style == 'simple':
@@ -94,7 +93,14 @@ class groups:
             if include_counter: check.append(0 if infos["Code"] > self.median_loc else 1)
 
         elif group_style == 'categories':
-            print()
+            check.append(1 if "word" in prompt or "string" in prompt or "char" in prompt else 0)
+            if include_counter: check.append(0 if "word" in prompt or "string" in prompt or "char" in prompt else 1)
+
+            check.append(1 if "math" in prompt or "integer" in prompt or "float" in prompt or ("number" in prompt and "calculate" in prompt) else 0)
+            if include_counter: check.append(0 if "math" in prompt or "integer" in prompt or "float" in prompt or ("number" in prompt and "calculate" in prompt) else 1)
+
+            check.append(1 if "list" in prompt or "array" in prompt or "dict" in prompt or "tree" in prompt else 0)
+            if include_counter: check.append(0 if "list" in prompt or "array" in prompt or "dict" in prompt or "tree" in prompt else 1)
         else:
             exit("Grouping sytle not found!")
 

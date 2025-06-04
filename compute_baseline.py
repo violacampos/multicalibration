@@ -33,6 +33,10 @@ def main(extern=False):
     # Splits the loaded data
     split_obj = split(args.split, data_obj)
 
+    groups = np.array([np.array(xi) for xi in data_obj.data["groups"].values])
+
+    print(f"Group count: {groups.sum(axis=0)}")
+
     # get the grid for binning type and the chartmaker obj        
     grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run, 
                                                        args.binning_type, 

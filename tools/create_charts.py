@@ -124,28 +124,19 @@ class chart_creator():
         plt.close()
 
     def scatter_plot(self, ax, method, x, y, area):
-        if len(x) == 6:
-            colors = [  
-                        'tab:blue',
-                        'tab:orange',
-                        'tab:green',
-                        'tab:red',
-                        'tab:purple',
-                        'tab:brown'
-                    ]
-        else:
-            colors = [  
-                        'tab:blue',
-                        'tab:orange',
-                        'tab:green',
-                        'tab:red',
-                        'tab:purple',
-                        'tab:brown',
-                        'tab:pink',
-                        'tab:gray',
-                        'tab:olive',
-                        'tab:cyan'
-                    ]
+        colors = [  
+                    'tab:blue',
+                    'tab:orange',
+                    'tab:green',
+                    'tab:red',
+                    'tab:purple',
+                    'tab:brown',
+                    'tab:pink',
+                    'tab:gray',
+                    'tab:olive',
+                    'tab:cyan'
+                ]
+        colors = colors[:len(x)]
 
         scatter = ax.scatter(x, y, s=area, c=colors, alpha=0.7, marker=r'$\odot$')
         ax.set_title(method, fontsize=12)
