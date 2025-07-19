@@ -28,12 +28,12 @@ GENERATED_DIR = BASE_DIR+METHOD+"/"
 
 QUALITATIVE_SCALE = {
     "Very low": 0,
-    "Low": 0.3,
-    "Somewhat low": 0.45,
-    "Medium": 0.5,
-    "Somewhat high": 0.65,
-    "High": 0.7,
-    "Very high": 1,
+    "Low": 0.15,
+    "Somewhat low": 0.3,
+    "Medium": 0.45,
+    "Somewhat high": 0.6,
+    "High": 0.75,
+    "Very high": 0.9,
 }
 
 TEMPLATE = "Answer as short as you can. \nHere is a snippet of generated code consisting of the prompt, generated code and test cases: \n {code}"

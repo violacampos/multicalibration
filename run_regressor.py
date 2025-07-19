@@ -27,8 +27,27 @@ def main(extern=False):
     # Loads all the necessary data into an dict
     data_obj = data_loader(args, run_dir, extern, "regressor")
 
+    results, temperature, top_p, num_samples = data_obj.load_multipl_e_run(run_dir)
+
+    verb_data_path_quantitativ = 'verbalized_data/quantitativ/'+data_obj.run+'/'+args.model+'/data.json'
+    verb_data_quantitativ = data_obj.load_json_data(verb_data_path_quantitativ)
+    probs_quantitativ, _, _, _, _, _, _ = data_obj.proability_and_correctness_for_samples(results, verb_data_quantitativ, type='quantitativ')
+    data_obj.data["probs_quantitativ"] = probs_quantitativ
+
+    verb_data_path_qualitativ = 'verbalized_data/qualitativ/'+data_obj.run+'/'+args.model+'/data.json'
+    verb_data_qualitativ = data_obj.load_json_data(verb_data_path_qualitativ)
+    probs_qualitativ, _, _, _, _, _, _ = data_obj.proability_and_correctness_for_samples(results, verb_data_qualitativ, type='qualitativ')
+    data_obj.data["probs_qualitativ"] = probs_qualitativ
+    
+
     # Splits the loaded data
     split_obj = split(args.split, data_obj)
+
+
+    #if args.problem == "code-gen":  
+        # probs -> confidence of the model
+        # is_correct -> label 1: is correct, 0: is not correct
+    #    probs, is_correct, programs, prompts, languages, names, token_logprobs = self.proability_and_correctness_for_samples(results, verb_data, type=args.prob_method)
 
     # Control experiment to check which groups helps the model to make correct predictions
     y = split_obj.train_data["is_correct"] - split_obj.train_data["probs"]
@@ -37,11 +56,14 @@ def main(extern=False):
     histograms_train = np.array([np.histogram([np.round(np.exp(list(l.values())[0][0]),2) for l in sample], bins=bin_edges)[0] for sample in split_obj.train_data["token_logprobs"]])
     histograms_test = np.array([np.histogram([np.round(np.exp(list(l.values())[0][0]),2) for l in sample], bins=bin_edges)[0] for sample in split_obj.test_data["token_logprobs"]])
 
-    X = np.hstack((np.hstack((split_obj.train_groups, np.array(split_obj.train_data["probs"]).reshape(-1, 1))), histograms_train))
+    X = np.hstack((split_obj.train_groups, np.array(split_obj.train_data["probs"]).reshape(-1, 1), histograms_train, np.array(split_obj.train_data["probs_quantitativ"]).reshape(-1, 1),np.array(split_obj.train_data["probs_qualitativ"]).reshape(-1, 1)))
     #X = np.hstack((split_obj.train_groups, histograms_train))
 
-    X_test = np.hstack((np.hstack((split_obj.test_groups, np.array(split_obj.test_data["probs"]).reshape(-1, 1))), histograms_test))
+    X_test = np.hstack((split_obj.test_groups, np.array(split_obj.test_data["probs"]).reshape(-1, 1), histograms_test, np.array(split_obj.test_data["probs_quantitativ"]).reshape(-1, 1),np.array(split_obj.test_data["probs_qualitativ"]).reshape(-1, 1)))
     #X_test = np.hstack((split_obj.test_groups, histograms_test))
+
+    print(np.array(split_obj.test_groups).sum(axis=0))
+    print(len(split_obj.test_data["probs"]))
 
     # get the grid for binning type and the chartmaker obj        
     grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run, 

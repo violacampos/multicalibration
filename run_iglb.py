@@ -80,7 +80,7 @@ def main(extern=False):
         # get the tau, bin, group for which the probality * deltas_squared maximises
         tau, bin, group = np.unravel_index((P_S_p_g*iglb.deltas_square).argmax(), iglb.deltas.shape)
         if iglb.debug: print(f"Max delta in: Tau {tau}, Bin {bin}, Group {group}")
-
+        print(P_S_p_g[tau, bin, group])
         # First break if probability is smaller then alpha
         if P_S_p_g[tau, bin, group] < args.epsilon:
             break

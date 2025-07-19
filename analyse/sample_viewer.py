@@ -60,22 +60,30 @@ def for_file(path: Path):
 
     return return_values
 
-st.set_page_config(layout="wide")
-
+#st.set_page_config(layout="wide")
+st.html("""
+    <style>
+        .stMainBlockContainer {
+            max-width:60rem;
+        }
+    </style>
+    """
+)
 run = 'humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1'
 method = 'comparison'
 binning_type = 'linear'
 prob_method = 'avg_logprob'
-split = 'all'
+grouping_style = 'simple'
+split = 'split'
 model = 'gpt_4o_mini'
 
-with open('./runs/'+run+'/'+method+'/'+binning_type+'/'+prob_method+'/'+split+'/calibration_data/calibration.pkl', 'rb') as f:
+with open('./runs/'+run+'/'+method+'/'+binning_type+'/'+prob_method+'/'+grouping_style+'/'+split+'/calibration_data/calibration.pkl', 'rb') as f:
     data = pickle.load(f)
 
-with open('./runs/'+run+'/'+method+'/'+binning_type+'/qualitativ/'+split+'/'+model+'/calibration_data/calibration.pkl', 'rb') as f:
+with open('./runs/'+run+'/'+method+'/'+binning_type+'/qualitativ/'+grouping_style+'/'+split+'/'+model+'/calibration_data/calibration.pkl', 'rb') as f:
     data_quant = pickle.load(f)
 
-with open('./runs/'+run+'/'+method+'/'+binning_type+'/quantitativ/'+split+'/'+model+'/calibration_data/calibration.pkl', 'rb') as f:
+with open('./runs/'+run+'/'+method+'/'+binning_type+'/quantitativ/'+grouping_style+'/'+split+'/'+model+'/calibration_data/calibration.pkl', 'rb') as f:
     data_qual = pickle.load(f)
 
 st.title("Sample viewer")
@@ -150,7 +158,7 @@ st.dataframe(prob_df.style.format("{:.0%}"), hide_index=True)
 
 st.write("**Groups:**")
 groups = pd.DataFrame([df["groups"].values[0]])
-groups.columns = ["simple complexity", "more complex", "complex", "untestable", "prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]
+#groups.columns = ["simple complexity", "more complex", "complex", "untestable", "prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]
 st.dataframe(groups, hide_index=True)
 
 red = Color("red")

@@ -49,13 +49,6 @@ class IGLB_calibration:
             ab_test = binning.round_model_to_grid(X_, self.grid)
             self.changes.append([tau, bin, group, (alpha_star, beta_star), len(ab_test[ab_test != assigned_bins]), [ab_test[ab_test != assigned_bins], groups[ab_test != assigned_bins], is_correct[ab_test != assigned_bins]]])    
         
-        """ab_test = binning.round_model_to_grid(X_, self.grid)
-        print(len(ab_test[ab_test != assigned_bins]))
-        t = np.array([bin_a if (bin_a == (bin/self.m)) and (groups[idx, group] == 1) else 0 for idx, bin_a in enumerate(assigned_bins)])
-        print(t[t!=0])
-        print(bin/self.m)
-        print(bin)
-        print()"""
         return X_ 
    
     def get_deltas(self, X, y, groups):
@@ -108,7 +101,7 @@ class IGLB_calibration:
         # mse function to optimize for alpha and beta
         def mse(params):
             alpha, beta = params
-            transformed = expit(alpha + beta * logit_f)  # LS[f](x)
+            transformed = expit(alpha + beta * logit_f)  # LS[f](x)a
             return np.mean((transformed - is_correct) ** 2)  # calculate the MSE
 
         # minimize for the mse and get alpha and beta values

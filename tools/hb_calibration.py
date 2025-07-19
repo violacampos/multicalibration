@@ -5,11 +5,12 @@ from termcolor import colored
 
 class hb_calibration:
     
-    def __init__(self, grid, outputs, debug):
+    def __init__(self, grid, m, outputs, debug):
         self.grid = grid
         self.debug = debug
         self.outputs = outputs
         self.delta_p_f_ = []
+        self.m = m
         self.score_obj = score(grid, outputs, debug)
 
     def fit(self, X, y):
@@ -27,7 +28,7 @@ class hb_calibration:
         if self.debug: print(f"TEST Assigned Bins: {assigend_bins}")
 
         # Correct the model confidence with the calculated deltas
-        X_ = np.array([bin_a+self.delta_p_f_[int(bin_a*10)] for bin_a in assigend_bins])
+        X_ = np.array([bin_a+self.delta_p_f_[np.where(self.grid == bin_a)[0][0]] for bin_a in assigend_bins])
 
         return X_
         

@@ -57,7 +57,7 @@ class chart_creator():
         plt.close()
 
     def calibration_method_comp_chart(self, y1, y2, y3, y4, y5, x1, x2, x3, x4, x5):
-        plt.title(self.run+' # Reliability chart on test set', fontsize=7)
+        #plt.title(self.run+' # Reliability chart on test set', fontsize=7)
         plt.plot(y1, x1, color="r")
         plt.plot(y2, x2, color="b")
         plt.plot(y3, x3, color="g")
@@ -69,20 +69,20 @@ class chart_creator():
         plt.yticks(np.arange(0, 1.1, 0.1))
         plt.xlabel('Confidence')
         plt.ylabel('Correct')
-        plt.savefig(self.save_dir+"calibration_method_comparison.png")
+        plt.savefig(self.save_dir+"calibration_method_comparison.pdf")
         plt.close()
 
     def calibration_method_comp_bar_chart(self, y1, y2, y3, y4, y5, x1, x2, x3, x4, x5):
-        fig, axs = plt.subplots(1, 5, figsize=(30, 5))
-        fig.suptitle(self.run+' # Calibration Bar Charts', fontsize=14)
+        fig, axs = plt.subplots(3, 2, figsize=(10, 15))
+        #fig.suptitle(self.run+' # Calibration Bar Charts', fontsize=14)
         
-        self.calibration_bar_chart(axs[0], 'Uncalibrated', x1, self.get_bar_colors(y1), y1)        
-        self.calibration_bar_chart(axs[1], 'HB', x2, self.get_bar_colors(y2), y2)    
-        self.calibration_bar_chart(axs[2], 'LR', x3, self.get_bar_colors(y3), y3)    
-        self.calibration_bar_chart(axs[3], 'IGHB', x4, self.get_bar_colors(y4), y4)    
-        self.calibration_bar_chart(axs[4], 'IGLB', x5, self.get_bar_colors(y5), y5)
-        
-        plt.savefig(self.save_dir+"calibration_comparison_bar.png")
+        self.calibration_bar_chart(axs[0, 0], 'Uncalibrated', x1, self.get_bar_colors(y1), y1)        
+        self.calibration_bar_chart(axs[1, 0], 'HB', x2, self.get_bar_colors(y2), y2)    
+        self.calibration_bar_chart(axs[1, 1], 'LR', x3, self.get_bar_colors(y3), y3)    
+        self.calibration_bar_chart(axs[2, 0], 'IGHB', x4, self.get_bar_colors(y4), y4)    
+        self.calibration_bar_chart(axs[2, 1], 'IGLB', x5, self.get_bar_colors(y5), y5)
+        axs[0,1].axis('off')
+        plt.savefig(self.save_dir+"calibration_comparison_bar.pdf")
         plt.close()
 
     def histogram(self, data, path, typ):
@@ -97,17 +97,17 @@ class chart_creator():
     def count_distribution(self, ax, sub_title, totals):
         ax.set_title(sub_title, fontsize=12)
         bars = ax.bar(self.chart_grid, totals, width = self.bar_width, color=['tab:blue'], edgecolor='black')
-        ax.bar_label(bars, totals)
+        #ax.bar_label(bars, totals, fontsize=6)
         ax.set_xticks(np.arange(0, 1.1, 0.1))
         ax.set(xlabel ='Confidence')
         ax.set(ylabel ='Count')
 
     def calibration_bar_chart(self, ax, sub_title, x, bar_colors, totals=None):
-        ax.set_title(sub_title, fontsize=12)
+        ax.set_title(sub_title, fontsize=12, fontweight="bold")
         bars = ax.bar(self.chart_grid, x, width = self.bar_width, color=bar_colors, edgecolor='black')
         ax.plot([0, 1], [0, 1], linestyle='--')
         if totals is not None:
-            ax.bar_label(bars, totals)
+            ax.bar_label(bars, totals, fontsize=6)
         ax.set_xticks(np.arange(0, 1.1, 0.1))
         ax.set_yticks(np.arange(0, 1.1, 0.1))
         ax.set(xlabel ='Confidence')
@@ -134,13 +134,31 @@ class chart_creator():
                     'tab:pink',
                     'tab:gray',
                     'tab:olive',
-                    'tab:cyan'
+                    'tab:cyan',
+                    'yellow', 
+                    'indigo', 
+                    'violet', 
+                    'navy', 
+                    'teal', 
+                    'maroon', 
+                    'silver', 
+                    'tan', 
+                    'gold', 
+                    'purple',
+                    'moccasin', 
+                    'bisque', 
+                    'wheat', 
+                    'peachpuff', 
+                    'navajowhite', 
+                    'salmon', 
+                    'crimson'
                 ]
         colors = colors[:len(x)]
 
         scatter = ax.scatter(x, y, s=area, c=colors, alpha=0.7, marker=r'$\odot$')
-        ax.set_title(method, fontsize=12)
-        ax.plot([np.min(y), 1 if np.max(y)+0.05 > 1 else np.max(y)+0.05], [np.min(y), 1 if np.max(y)+0.05 > 1 else np.max(y)+0.05], linestyle='--')
+        ax.set_title(method, fontsize=12, fontweight="bold")
+        #ax.plot([np.min(y), 1 if np.max(y)+0.05 > 1 else np.max(y)+0.05], [np.min(y), 1 if np.max(y)+0.05 > 1 else np.max(y)+0.05], linestyle='--')
+        ax.plot([0.150, 0.8], [0.150, 0.8], linestyle='--')
         ax.set(xlabel ='Confidence')
         ax.set(ylabel ='Correct')   
 
@@ -161,30 +179,30 @@ class chart_creator():
                                   iglb_conf,
                                   iglb_total):
         
-        fig, axs = plt.subplots(1, 5, figsize=(30, 5))
-        fig.suptitle(self.run+' # Group Calibration Charts', fontsize=14)
-        
-        self.scatter_plot(axs[0], 'Uncalibrated', uncalib_conf, uncalib_corr,uncalib_total)        
-        self.scatter_plot(axs[1], 'HB', hb_conf, hb_corr,hb_total)    
-        self.scatter_plot(axs[2], 'LR', lr_conf, lr_corr,lr_total)    
-        self.scatter_plot(axs[3], 'IGHB', ighb_conf, ighb_corr, ighb_total)    
-        self.scatter_plot(axs[4], 'IGLB', iglb_conf, iglb_corr, iglb_total)
-        
-        plt.savefig(self.save_dir+"group_calibration.png")
+        fig, axs = plt.subplots(3, 2, figsize=(10, 15))
+        #fig.suptitle(self.run+' # Group Calibration Charts', fontsize=14)
+
+        self.scatter_plot(axs[0, 0], 'Uncalibrated', uncalib_conf, uncalib_corr,uncalib_total)        
+        self.scatter_plot(axs[1, 0], 'HB', hb_conf, hb_corr,hb_total)    
+        self.scatter_plot(axs[1, 1], 'LR', lr_conf, lr_corr,lr_total)    
+        self.scatter_plot(axs[2, 0], 'IGHB', ighb_conf, ighb_corr, ighb_total)    
+        self.scatter_plot(axs[2, 1], 'IGLB', iglb_conf, iglb_corr, iglb_total)
+        axs[0,1].axis('off')
+        plt.savefig(self.save_dir+"group_calibration.pdf")
         plt.close()
 
     def calibration_info(self, total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated):
         self.set_bar_colors(total_uncalibrated, total_calibrated)
 
         fig, axs = plt.subplots(2, 2, figsize=(10, 10))
-        fig.suptitle(self.run+' # Calibration Charts', fontsize=14)
+        #fig.suptitle(self.run+' # Calibration Charts', fontsize=14)
         self.calibration_bar_chart(axs[0, 0], 'Test uncalibrated', correctness_uncalibrated, self.colors_uncalibrated)
         self.calibration_bar_chart(axs[0, 1], 'Test calibrated', correctness_calibrated, self.colors_calibrated)
         
         self.count_distribution(axs[1, 0], 'Test uncalibrated distribution', total_uncalibrated)
         self.count_distribution(axs[1, 1], 'Test calibrated distribution', total_calibrated)
         
-        plt.savefig(self.save_dir+"calibration_infos.png")
+        plt.savefig(self.save_dir+"calibration_infos.pdf")
         plt.close() 
 
         #self.calibration_comparision_chart(self.chart_range[total_calibrated != 0], self.chart_range[total_uncalibrated != 0], correctness_calibrated[total_calibrated != 0], correctness_uncalibrated[total_uncalibrated != 0])

@@ -16,7 +16,7 @@ np.seterr(divide='ignore', invalid='ignore')
 def main(extern=False):
     args = cmd_input.load_parser()
 
-    m = np.ceil(1/args.alpha)
+    m = args.bin_count
 
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
@@ -66,7 +66,7 @@ def main(extern=False):
                                                                binning_step_size=1/args.bin_count)
 
             # Fit calibrator
-            ighb = IGHB_calibration(grid, m, args.alpha, OUTPUTS, DEBUG).fit(train_X, train_y, train_groups)
+            ighb = IGHB_calibration(grid, m, 1/args.bin_count, OUTPUTS, DEBUG).fit(train_X, train_y, train_groups)
 
             # Calculate values for uncalibrated test set
             scores_uncalibrated = ighb.score_obj.calc_all_new(  test_X, 
@@ -83,7 +83,7 @@ def main(extern=False):
             # set the conf to calibrate on
             calibrated_conf = train_X
             history_item = {}
-            while ighb.max_error > ighb.args.alpha:  
+            while ighb.max_error > ighb.alpha:  
                 if DEBUG: print(f"Max Error: {ighb.max_error}")
                 # get new better calibrated confidences
                 calibrated_conf = ighb.predict(calibrated_conf, train_groups, is_correct=train_y)
@@ -129,7 +129,7 @@ def main(extern=False):
                                                            probs=split_obj.train_data["probs"], 
                                                            binning_step_size=1/args.bin_count)
     
-        ighb = IGHB_calibration(grid, m, args.alpha, OUTPUTS, DEBUG).fit(split_obj.train_data["probs"], 
+        ighb = IGHB_calibration(grid, m, 1/args.bin_count, OUTPUTS, DEBUG).fit(split_obj.train_data["probs"], 
                                                                          split_obj.train_data["is_correct"], 
                                                                          split_obj.train_groups)
 
@@ -151,7 +151,7 @@ def main(extern=False):
         uncalibrated_conf = split_obj.test_data["probs"]
         history = {}
         while ighb.max_error > ighb.alpha:  
-            if DEBUG: print(f"Max Error: {ighb.max_error}")
+            #print(f"Max Error: {ighb.max_error}")
             # get new calibrated confidences
             if args.split:
                 calibrated_conf = ighb.predict(calibrated_conf, 

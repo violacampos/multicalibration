@@ -62,8 +62,6 @@ def main(extern=False):
                                                                                                                            split_obj.test_data["is_correct"], 
                                                                                                                            split_obj.test_groups)    
 
-    #total_lang_uncalib, correctness_lang_uncalib, average_lang_confidence_uncalib = score_obj.get_correctness_per_language(data["probs"], data["is_correct"], data["languages"])       
-
     # Add entry for the run in the score table
     score_obj.add_to_score_table(data_obj.run, scores_uncalibrated, [], baseline=True)
     
@@ -86,7 +84,7 @@ def main(extern=False):
     else:
         if args.save_charts:
             fig, axs = plt.subplots(1, 1, figsize=(6, 5))
-            fig.suptitle(data_obj.run+' # Calibration Bar Charts', fontsize=14)
+            #fig.suptitle(data_obj.run+' # Calibration Bar Chart', fontsize=10)
             
             chartmaker.calibration_bar_chart(axs, 
                                              'Uncalibrated', 
@@ -94,7 +92,7 @@ def main(extern=False):
                                              chartmaker.get_bar_colors(total_bin_uncalibrated), 
                                              total_bin_uncalibrated)        
             
-            plt.savefig(chartmaker.save_dir+"calibration.png")
+            plt.savefig(chartmaker.save_dir+"calibration.pdf")
             plt.close() 
         
     # display score table for all runs

@@ -363,7 +363,7 @@ class data_loader:
 
         group_obj = groups(programs, prompts, languages, names, base_dir)
 
-        if args.grouping_style == 'scc':
+        if args.grouping_style == 'scc' or args.grouping_style == 'all':
             scc_infos = self.load_scc_data(run, languages, names)
             groups_w = group_obj.create_groups(args.problem, run, group_style=args.grouping_style, scc_infos=scc_infos)
         else:

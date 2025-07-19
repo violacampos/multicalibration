@@ -42,7 +42,7 @@ def main(extern=False):
                                                        binning_step_size=1/args.bin_count)
             
     # Create calibration object and calculates the deltas
-    hb = hb_calibration(grid, OUTPUTS, DEBUG).fit(split_obj.train_data["probs"], 
+    hb = hb_calibration(grid, args.bin_count, OUTPUTS, DEBUG).fit(split_obj.train_data["probs"], 
                                                   split_obj.train_data["is_correct"])
 
     # calculate scores for the uncalibrated test set

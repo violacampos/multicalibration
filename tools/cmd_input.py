@@ -34,7 +34,7 @@ def load_parser():
         
     parser.add_argument(
         "--grouping-style", 
-        choices=["simple", "scc", "categories"],
+        choices=["simple", "scc", "categories", "all"],
         default="simple",
         help="Choose ways of grouping the samples.")       
 
@@ -58,7 +58,7 @@ def load_parser():
     parser.add_argument(
         "--bin-count", 
         type=int,  
-        default=10,
+        default=20,
         help="Choose which binning type to use.")  
 
     parser.add_argument(
@@ -84,13 +84,7 @@ def load_parser():
         action="store_true",
         default=False,
         help="Save the output data of all methods")     
-        
-    parser.add_argument(
-        "--alpha", 
-        type=float,  
-        default=0.01,
-        help="Alpha value only for IGHB method.")  
-    
+            
     parser.add_argument(
         "--epsilon", 
         type=float,  

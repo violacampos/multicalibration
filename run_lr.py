@@ -89,7 +89,8 @@ def main(extern=False):
                                                                                                       split_obj.test_data["is_correct"], 
                                                                                                       split_obj.test_groups) 
     
-    if OUTPUTS: print(f"Group Lamdas: {lr.reg.coef_}")
+    if OUTPUTS: print(f"Group weights: {lr.reg.coef_}")
+    if OUTPUTS: print(f"bias: {lr.reg.intercept_}")
 
     # Add entry for the run in the score table
     lr.score_obj.add_to_score_table(data_obj.run, scores_uncalibrated, scores_calibrated)

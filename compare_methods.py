@@ -102,21 +102,21 @@ if __name__ == "__main__":
                                             iglb_results["average_group_confidence"], 
                                             iglb_results["total_group"])
         
-        if args.save_data:      
-            data = {
-                "calibrated_probs_hb": hb_results["calibrated_probs"],
-                "calibrated_probs_lr": lr_results["calibrated_probs"],
-                "calibrated_probs_ighb": ighb_results["calibrated_probs"],                
-                "calibrated_probs_iglb": iglb_results["calibrated_probs"],                
-                "uncalibrated_probs": baseline_results["uncalibrated_probs"],
-                "is_correct": baseline_results["is_correct"],
-                "language": baseline_results["language"],
-                "groups": baseline_results["groups"],
-                "names": baseline_results["names"],
-                "programs": baseline_results["programs"],
-                "prompts": baseline_results["prompts"],
-                "token_logprobs": baseline_results["token_logprobs"]
-            }
+    if args.save_data:      
+        data = {
+            "calibrated_probs_hb": hb_results["calibrated_probs"],
+            "calibrated_probs_lr": lr_results["calibrated_probs"],
+            "calibrated_probs_ighb": ighb_results["calibrated_probs"],                
+            "calibrated_probs_iglb": iglb_results["calibrated_probs"],                
+            "uncalibrated_probs": baseline_results["uncalibrated_probs"],
+            "is_correct": baseline_results["is_correct"],
+            "language": baseline_results["language"],
+            "groups": baseline_results["groups"],
+            "names": baseline_results["names"],
+            "programs": baseline_results["programs"],
+            "prompts": baseline_results["prompts"],
+            "token_logprobs": baseline_results["token_logprobs"]
+        }
 
-            with open(data_obj.save_dir+'calibration_data/calibration.pkl', 'wb') as f:
-                pickle.dump(data, f)
+        with open(data_obj.save_dir+'calibration_data/calibration.pkl', 'wb') as f:
+            pickle.dump(data, f)
