@@ -60,7 +60,6 @@ def for_file(path: Path):
 
     return return_values
 
-#st.set_page_config(layout="wide")
 st.html("""
     <style>
         .stMainBlockContainer {
@@ -159,6 +158,7 @@ st.dataframe(prob_df.style.format("{:.0%}"), hide_index=True)
 st.write("**Groups:**")
 groups = pd.DataFrame([df["groups"].values[0]])
 #groups.columns = ["simple complexity", "more complex", "complex", "untestable", "prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]
+groups.columns = ["prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not Longer then median loc"]
 st.dataframe(groups, hide_index=True)
 
 red = Color("red")

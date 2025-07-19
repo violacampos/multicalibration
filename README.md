@@ -51,3 +51,9 @@ python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Cod
 python compare_methods.py --dir program_repair/runs/bugsphp/test/Qwen-Qwen2.5-Coder-32B-Instruct/ --prob-method avg_logprob --problem program-repair --save-data --save-table --save-charts
 
 python run_lr.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --prob-method avg_logprob --problem code-gen --control-exp --save-charts --use-scc
+
+## IGHB
+
+To run the k-fold experiment on the IGHB approch the following command can be used:
+python run_ighb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --k-fold --bin-count 100
+

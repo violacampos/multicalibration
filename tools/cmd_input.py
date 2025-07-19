@@ -2,6 +2,10 @@ import sys
 import argparse
 
 def load_parser():
+    """
+        Creates a parser for command line inputs
+
+    """  
     parser = argparse.ArgumentParser()
     
     parser.add_argument(
@@ -39,6 +43,11 @@ def load_parser():
         help="Choose ways of grouping the samples.")       
 
     parser.add_argument(
+        "--counter-groups", 
+        action="store_true",
+        help="Usage of counter groups.")   
+
+    parser.add_argument(
         "--save-table", 
         action="store_true",
         help="Flag to save the result table.")      
@@ -50,6 +59,12 @@ def load_parser():
         help="Choose which probability to use.")      
 
     parser.add_argument(
+        "--regressor", 
+        choices=["LR", "SVR", "XGBoost"],
+        default="LR",
+        help="Choose which regressor to use (only used with the run_regressor script).")   
+
+    parser.add_argument(
         "--binning-type", 
         choices=["linear"],
         default='linear',
@@ -59,7 +74,7 @@ def load_parser():
         "--bin-count", 
         type=int,  
         default=20,
-        help="Choose which binning type to use.")  
+        help="Choose the amount of bins to calibrate on.")  
 
     parser.add_argument(
         "--control-exp", 

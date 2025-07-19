@@ -1,5 +1,5 @@
 import numpy as np
-from tools import binning
+from tools import calibration_scores
 
 np.seterr(divide='ignore', invalid='ignore')
 
@@ -20,7 +20,7 @@ labels = np.array([1,
                    0])
 
 
-total_per_bin, correctness_per_bin, confidence_per_bin = binning.bin_round_probabilities_discret(assigned_bins, labels, score_grid)
+total_per_bin, correctness_per_bin, confidence_per_bin = calibration_scores.score.bin_round_probabilities_discret(assigned_bins, labels, score_grid)
 
 print(f"Total per Bin:\n{total_per_bin}")
 print(f"Correctness per Bin:\n{correctness_per_bin}")

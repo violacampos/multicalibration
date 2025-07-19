@@ -4,14 +4,11 @@ os.environ['HF_HOME'] = "/data/stud/2025-MA-kuschnereit/hf_models/"
 os.environ["VLLM_USE_V1"]="1"
 os.environ["VLLM_CACHE_ROOT"]="/data/stud/2025-MA-kuschnereit/.vllmcache/"
 
-from human_eval.data import write_jsonl, read_problems
 from vllm import LLM, SamplingParams
 import torch
-from huggingface_hub import login
 from tools import data
 import argparse
 import json
-from tqdm import tqdm
 
 os.environ["CUDA_VISIBLE_DEVICES"]="7"
 
@@ -94,7 +91,7 @@ if __name__ == "__main__":
                
         # probs -> confidence of the model
         # is_correct -> label 1: is correct, 0: is not correct
-        _, _, programs, _, languages, names = data.proability_and_correctness_for_samples(results)
+        _, _, programs, _, languages, names = data.load_samples(results)
 
         verbalized_data = {k: [] for k in languages}
 

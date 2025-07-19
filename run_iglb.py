@@ -12,8 +12,10 @@ OUTPUTS = True
 np.seterr(divide='ignore', invalid='ignore')
 
 def main(extern=False):
+    # loads commandline parameter
     args = cmd_input.load_parser()
 
+    # get run dir
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
 
@@ -37,26 +39,24 @@ def main(extern=False):
     
     # get the grid for binning type and the chartmaker obj        
     grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run, 
-                                                       args.binning_type, 
-                                                       data_obj.save_dir, 
-                                                       args.bin_count, 
+                                                       args, 
+                                                       data_obj.save_dir,  
                                                        extern, 
-                                                       probs=split_obj.train_data["probs"], 
-                                                       binning_step_size=1/args.bin_count)
+                                                       probs=split_obj.train_data["probs"])
 
     # Create object and calculate first deltas and so on
     iglb = IGLB_calibration(grid, args.epsilon, args.bin_count, OUTPUTS, DEBUG).fit(split_obj.train_data["probs"], 
                                                                                     split_obj.train_data["is_correct"], 
                                                                                     split_obj.train_groups)
     
-    scores_uncalibrated = iglb.score_obj.calc_all_new(  split_obj.test_data["probs"], 
+    scores_uncalibrated = iglb.score_obj.calc_all(  split_obj.test_data["probs"], 
                                                         split_obj.test_data["is_correct"], 
                                                         groups=split_obj.test_groups, 
                                                         set_brier_ref=True)
     
-    total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = iglb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
-                                                                                                                                                              split_obj.test_data["is_correct"], 
-                                                                                                                                                              split_obj.test_groups) 
+    _, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = iglb.score_obj.get_total_and_correctness( split_obj.test_data["probs"], 
+                                                                                                                                        split_obj.test_data["is_correct"], 
+                                                                                                                                        split_obj.test_groups) 
     
     temp_group_correctness = correctness_group_uncalibrated
     temp_bin_correctness = correctness_bin_uncalibrated
@@ -80,7 +80,7 @@ def main(extern=False):
         # get the tau, bin, group for which the probality * deltas_squared maximises
         tau, bin, group = np.unravel_index((P_S_p_g*iglb.deltas_square).argmax(), iglb.deltas.shape)
         if iglb.debug: print(f"Max delta in: Tau {tau}, Bin {bin}, Group {group}")
-        print(P_S_p_g[tau, bin, group])
+        
         # First break if probability is smaller then alpha
         if P_S_p_g[tau, bin, group] < args.epsilon:
             break
@@ -114,7 +114,7 @@ def main(extern=False):
                                     bin, 
                                     group)
         
-        curr_group_total, curr_group_correctness, curr_bin_total, curr_bin_correctness = iglb.score_obj.get_total_and_correctness(test_probs, 
+        curr_group_total, curr_group_correctness, _, curr_bin_correctness = iglb.score_obj.get_total_and_correctness(test_probs, 
                                                                                                                                   split_obj.test_data["is_correct"], 
                                                                                                                                   split_obj.test_groups)
         
@@ -127,6 +127,7 @@ def main(extern=False):
         mse_h_t_plus_1 = iglb.score_obj.mse(split_obj.val_data["probs"], 
                                             split_obj.val_data["is_correct"], 
                                             len(split_obj.val_data["is_correct"]))
+        
         if mse_h_t_plus_1 >= mse_f_t:
             if OUTPUTS: print(f"MSE h_t+1: {mse_h_t_plus_1} >= MSE f_t: {mse_f_t}")
             break
@@ -135,12 +136,12 @@ def main(extern=False):
         iglb = iglb.fit(train_probs, split_obj.train_data["is_correct"], split_obj.train_groups)
             
     #if OUTPUTS: print(f"GASCE: {iglb.gasce}\n")
-    scores_calibrated = iglb.score_obj.calc_all_new(test_probs, 
+    scores_calibrated = iglb.score_obj.calc_all(test_probs, 
                                                     split_obj.test_data["is_correct"], 
                                                     groups=split_obj.test_groups)
-    total_group_calibrated, correctness_group_calibrated, total_bin_calibrated, correctness_bin_calibrated = iglb.score_obj.get_total_and_correctness(test_probs, 
-                                                                                                                                                      split_obj.test_data["is_correct"], 
-                                                                                                                                                      split_obj.test_groups) 
+    _, _, total_bin_calibrated, correctness_bin_calibrated = iglb.score_obj.get_total_and_correctness(  test_probs, 
+                                                                                                        split_obj.test_data["is_correct"], 
+                                                                                                        split_obj.test_groups) 
     
     total_group, correctness_group, average_group_confidence = iglb.score_obj.get_correctness_per_group(test_probs, 
                                                                                                         split_obj.test_data["is_correct"], 
@@ -173,5 +174,6 @@ def main(extern=False):
     if args.save_table:
         with open(data_obj.save_dir+'scores.txt', 'w') as f:
             f.write(iglb.score_obj.printable_table)
+            
 if __name__ == "__main__":
     main()

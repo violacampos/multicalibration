@@ -13,8 +13,10 @@ OUTPUTS = True
 np.seterr(divide='ignore', invalid='ignore')
 
 def main(extern=False):
+    # loads commandline parameter
     args = cmd_input.load_parser()
 
+    # get run dir
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
 
@@ -33,31 +35,30 @@ def main(extern=False):
     # Splits the loaded data
     split_obj = split(args.split, data_obj)
 
+    # get group matrix
     groups = np.array([np.array(xi) for xi in data_obj.data["groups"].values])
 
     print(f"Group count: {groups.sum(axis=0)}")
 
     # get the grid for binning type and the chartmaker obj        
     grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run, 
-                                                       args.binning_type, 
+                                                       args, 
                                                        data_obj.save_dir, 
-                                                       args.bin_count, 
                                                        extern, 
-                                                       probs=split_obj.train_data["probs"], 
-                                                       binning_step_size=1/args.bin_count)
+                                                       probs=split_obj.train_data["probs"])
             
     score_obj = score(grid, OUTPUTS, DEBUG)
 
     # calculate scores for the uncalibrated test set
-    scores_uncalibrated = score_obj.calc_all_new(   split_obj.test_data["probs"], 
+    scores_uncalibrated = score_obj.calc_all(   split_obj.test_data["probs"], 
                                                     split_obj.test_data["is_correct"],
                                                     groups=split_obj.test_groups, 
                                                     set_brier_ref=True)
 
-    total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
-                                                                                                                                                         split_obj.test_data["is_correct"], 
-                                                                                                                                                         split_obj.test_groups)
-    
+    _, _, total_bin_uncalibrated, correctness_bin_uncalibrated = score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
+                                                                                                     split_obj.test_data["is_correct"], 
+                                                                                                     split_obj.test_groups)
+
     total_group_uncalib, correctness_group_uncalib, average_group_confidence_uncalib = score_obj.get_correctness_per_group(split_obj.test_data["probs"], 
                                                                                                                            split_obj.test_data["is_correct"], 
                                                                                                                            split_obj.test_groups)    
@@ -83,8 +84,7 @@ def main(extern=False):
                 "token_logprobs": split_obj.test_data["token_logprobs"]}
     else:
         if args.save_charts:
-            fig, axs = plt.subplots(1, 1, figsize=(6, 5))
-            #fig.suptitle(data_obj.run+' # Calibration Bar Chart', fontsize=10)
+            _, axs = plt.subplots(1, 1, figsize=(6, 5))
             
             chartmaker.calibration_bar_chart(axs, 
                                              'Uncalibrated', 

@@ -3,7 +3,7 @@ import argparse
 import os
 from sklearn.model_selection import train_test_split
 from tools import data, groups, calibration_scores, binning
-from tools.create_charts import chart_creator
+from tools.create_charts import charts
 from tools.lr_calibration import lr_calibration
 from tabulate import tabulate
 

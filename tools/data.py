@@ -14,6 +14,16 @@ import pandas as pd
 class data_loader:
 
     def __init__(self, args, run_dir, extern, method):
+        """
+            Initilaizes a data loader object
+
+            :param args: passed arguments from command line
+            :param run_dir: directory of the samples to load
+            :param extern: is the method called from an external method (comparison)
+            :param method: Specifies which methods usese the data loader
+
+            :return: grid, chartmaker
+        """
         self.run = None
         self.save_dir = None
         self.num_samples = None
@@ -22,10 +32,11 @@ class data_loader:
         self.setup_data(args, run_dir, extern, method)
         self.check_data_loaded()
 
-
+    
     def gunzip_json(self, path: Path) -> Optional[dict]:
         """
-        Reads a .json.gz file, but produces None if any error occurs.
+            Reads a .json.gz file, but produces None if any error occurs.
+            Used from https://github.com/nuprl/MultiPL-E/blob/main/multipl_e/util.py
         """
         try:
             with gzip.open(path, "rt") as f:
@@ -33,12 +44,19 @@ class data_loader:
         except Exception as e:
             return None
 
-    def gzip_json(self, path: Path, data: dict) -> None:
+    """def gzip_json(self, path: Path, data: dict) -> None:
         with gzip.open(path, "wt") as f:
-            json.dump(data, f)
-
+            json.dump(data, f)"""
 
     def for_file(self, path: Path):
+        """
+            Loads the sample data from one file.
+            Parts used from https://github.com/nuprl/MultiPL-E/blob/main/multipl_e/completions.py
+
+            :param path: Path to load data from
+
+            :return: dict with sample data
+        """
         if path.suffix == ".gz":
             data = self.gunzip_json(path)
         else:
@@ -75,14 +93,29 @@ class data_loader:
 
         return return_values
 
-    # StackOverflow https://stackoverflow.com/questions/27789665/check-if-a-given-directory-contains-any-directory-in-python
     def folders_in(self, path_to_parent):
+        """
+            Checks if samples lie in the subfolder of the passed dir.
+            Used from StackOverflow https://stackoverflow.com/questions/27789665/check-if-a-given-directory-contains-any-directory-in-python
+
+            :param path_to_parent: Partend folder path
+
+            :return: subfolder
+        """
         for fname in os.listdir(path_to_parent):
             if os.path.isdir(os.path.join(path_to_parent,fname)):
                 yield os.path.join(path_to_parent,fname)
 
 
     def load_multipl_e_run(self, path):
+        """
+            Loads the results for every sample in the run path.
+            Parts used from https://github.com/nuprl/MultiPL-E/blob/main/multipl_e/completions.py
+
+            :param path: Path of the multipl_e run
+
+            :return: results, temeprature, top_p, number of samples
+        """
         subfolders = list(self.folders_in(path))
 
         if not subfolders:
@@ -112,12 +145,28 @@ class data_loader:
         return results, temperature, top_p, num_samples
 
     def load_json_data(self, path):
+        """
+            Loads stored json data from a path.
+
+            :param path: Path of the json file
+
+            :return: json data
+        """
         with open(path, 'r') as file:
             json_data = json.load(file)
         return json_data
 
-    #  Teile aus https://github.com/parameterlab/apricot/blob/main/src/eval.py
-    def proability_and_correctness_for_samples(self, results, verb_data, type="avg_logprob"):
+    def load_samples(self, results, verb_data, type="avg_logprob"):
+        """
+            Loads needed data for all samples.
+            Parts used from https://github.com/parameterlab/apricot/blob/main/src/eval.py. (Quantative and qualitative data)
+
+            :param results: Loaded Multipl_E results
+            :param verb_data: Loaded verbalized data
+            :param type: Type of the probability that should be loaded (avg_logprob, quantitativ, qualitativ)
+
+            :return: probabilities, labels, programms, prompts, languages, names, token probabilities
+        """
         prob_value_list = []
         is_correct = []
         prompts = []
@@ -127,15 +176,6 @@ class data_loader:
         successful = []
         token_logprobs = []
 
-        """QUALITATIVE_SCALE = {
-            "Very low": 0,
-            "Low": 0.3,
-            "Somewhat low": 0.45,
-            "Medium": 0.5,
-            "Somewhat high": 0.65,
-            "High": 0.7,
-            "Very high": 1,
-        }"""
         QUALITATIVE_SCALE = {
             "Very low": 0,
             "Low": 0.15,
@@ -152,6 +192,7 @@ class data_loader:
                 token_count = len(sample["token_ids"])
                 cumulative_logprob = sample["cumulative_logprob"]
                 
+                # Some name changes are needed for mapping.
                 if sample["language"] == 'elixir':
                     lang = "ex"
                 elif sample["language"] == 'go_test.go':
@@ -159,13 +200,13 @@ class data_loader:
                 else:
                     lang = sample["language"]
 
+                # Differentiate in different probability types
                 if type == "avg_logprob":
                     prob = np.round(np.exp(cumulative_logprob / token_count), 2)
                 elif type == "quantitativ":
                     try:
                         template = r"\d{1,3}(?:\.\d+)?\s?\%?"
                         d = verb_data[lang][sample["name"]]
-                        #d = next((item for item in verb_data[lang] if item["task_id"] == sample["name"]), None)
                         res = re.search(template, d["completion"]).group(0)
                         prob = float(res.replace("%", "")) / 100
                         if not (0 <= prob <= 1):
@@ -178,7 +219,6 @@ class data_loader:
                     try:
                         template = rf"({'|'.join(QUALITATIVE_SCALE.keys())})"
                         d = verb_data[lang][sample["name"]]
-                        #d = next((item for item in verb_data[lang] if item["task_id"] == sample["name"]), None)
                         res = re.search(template, d["completion"]).group(0)
                         prob = QUALITATIVE_SCALE[res]
 
@@ -186,17 +226,19 @@ class data_loader:
                         successful.append(False)
                     successful.append(True)
                                         
-                # collect average token probabilty and correctnes value
+                # collect values and add to return list
                 programms.append(sample["program"])
                 languages.append(lang)
-
                 names.append(sample["name"])
                 prompts.append(sample["prompt"])
                 prob_value_list.append(prob)
                 is_correct.append(1) if sample["c"] == 1 else is_correct.append(0)
                 token_logprobs.append(sample["token_logprobs"])
+
+        # Check if all samples got a probability
         if type in ["qualitativ", "quantitativ"]:
             print(f"Succesful extracted: {len(successful)}")
+
         prob_value_list     = np.array(prob_value_list)
         is_correct          = np.array(is_correct)
         languages           = np.array(languages)
@@ -204,10 +246,27 @@ class data_loader:
         return prob_value_list, is_correct, programms, prompts, languages, names, token_logprobs
 
     def avg_token_probability(self, cumulative_logprob, token_count):
+        """
+            Calculates the average token probability.
+
+            :param cumulative_logprob: Sum of all token probabailities
+            :param token_count: Total of tokens in the sample
+
+            :return: average token probability
+        """
         return np.round(np.exp(cumulative_logprob / token_count), 2) 
 
 
     def load_scc_data(self, run, languages, names):
+        """
+            Loads the scc data to later create groups with the complexity scores. To load a samples scc data the name and the languages needs to be known.
+
+            :param run: Name of the run
+            :param languages: programming languages of the sample
+            :param names: Name of each sample.
+            
+            :return: average token probability
+        """
         scc_infos = []
         with open('./scc/'+run+'.json') as scc:
             scc_data = json.load(scc)
@@ -231,22 +290,34 @@ class data_loader:
 
     def generate_save_dir(self, run, method, binning, prob_generation, grouping_style, split, model, calibration_data=False, history_data=False):
         """
-        Generate a directory with the following structure for different runs and methods
-        (dir) runs
-            (dir) *run_name*
-                (dir) *calibration_method*
-                    (dir) *binning_method*
-                        (dir) *prob_generation_method*
-                            (dir) *grouping_style*
-                                (file) timestamp file for traceability
-                                (file) comparison_bar_chart
-                                (file) group_calibration
-                                (file) scores (txt/json)
-                                (dir) *model* (only for qualitativ/qunatitativ prob_generation)
+            Generate a directory with the following structure for different runs and methods
+            (dir) runs
+                (dir) *run_name*
+                    (dir) *calibration_method*
+                        (dir) *binning_method*
+                            (dir) *prob_generation_method*
+                                (dir) *grouping_style*
                                     (file) timestamp file for traceability
                                     (file) comparison_bar_chart
                                     (file) group_calibration
                                     (file) scores (txt/json)
+                                    (dir) *model* (only for qualitativ/qunatitativ prob_generation)
+                                        (file) timestamp file for traceability
+                                        (file) comparison_bar_chart
+                                        (file) group_calibration
+                                        (file) scores (txt/json)
+
+            :param run: Name of the run
+            :param method: Name of the used calibration method
+            :param binning: Binning type
+            :param prob_generation: How the probabilities were generated. (avg_logprob, quantitativ, qualitativ)
+            :param grouping_style: How the groups were generated.
+            :param split: If the data is splitted
+            :param model: Name of the used model for generation
+            :param calibration_data: Flag to save calibrated data
+            :param history_data: Flag to save the history of certain methods
+            
+            :return: directory string         
 
         """
 
@@ -280,6 +351,11 @@ class data_loader:
         return dir
 
     def load_config(self):
+        """
+            Loads config file
+            
+            :return: config
+        """
         config = configparser.ConfigParser()
         try:
             file = open("config.ini", "r")
@@ -297,6 +373,13 @@ class data_loader:
 
 
     def load_program_repair_data(self, path):
+        """
+            Loads the data for the code repair problem
+
+            :param path: Path of the sample
+            
+            :return: probabilities, labels, programs, prompts, languages, names, token probabailities
+        """
         with open(path+'data.json', 'r') as f:
             data = json.load(f)
 
@@ -328,6 +411,15 @@ class data_loader:
         return probs, is_correct, programs, prompts, languages, names, token_logprobs
 
     def setup_data(self, args, run_dir, extern, method):
+        """
+            Is called on intialization. Loads data for given arguments and creates directories.
+
+            :param args: Passed commandline arguments
+            :param run_dir: Path of the run directory
+            :param extern: Flag specifies if its called from another script
+            :param method: Name of the method that calls the data loader
+            
+        """
         base_dir = self.load_config()["Paths"]["base_dir"]
 
         if args.problem == "code-gen":    
@@ -354,14 +446,15 @@ class data_loader:
         if args.problem == "code-gen":  
             # probs -> confidence of the model
             # is_correct -> label 1: is correct, 0: is not correct
-            probs, is_correct, programs, prompts, languages, names, token_logprobs = self.proability_and_correctness_for_samples(results, verb_data, type=args.prob_method)
+            probs, is_correct, programs, prompts, languages, names, token_logprobs = self.load_samples(results, verb_data, type=args.prob_method)
         elif args.problem == "program-repair":
             probs, is_correct, programs, prompts, languages, names, token_logprobs = self.load_program_repair_data(run_dir)
             num_samples = len(probs)
         else:
             exit("Couldn't find data for problem.")
 
-        group_obj = groups(programs, prompts, languages, names, base_dir)
+        # Creates group obj and group matrix
+        group_obj = groups(programs, prompts, languages, names, base_dir, include_counter=args.counter_groups)
 
         if args.grouping_style == 'scc' or args.grouping_style == 'all':
             scc_infos = self.load_scc_data(run, languages, names)
@@ -390,6 +483,9 @@ class data_loader:
         )
 
     def check_data_loaded(self):
+        """
+            Checks if the values for every element in the data dict are set.    
+        """
         check = [self.__dict__.values()]
         if any(x is None for x in check):
             exit("Failed to load all neded data!")

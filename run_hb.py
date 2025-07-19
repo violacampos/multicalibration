@@ -10,11 +10,11 @@ OUTPUTS = True
 
 np.seterr(divide='ignore', invalid='ignore')
 
-# python run_hb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1 --split --use-scc --prob-method avg_logprob 
-
 def main(extern=False):
+    # loads commandline parameter
     args = cmd_input.load_parser()
 
+    # get run dir
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
 
@@ -34,39 +34,36 @@ def main(extern=False):
 
     # get the grid for binning type and the chartmaker obj        
     grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run,
-                                                       args.binning_type, 
+                                                       args, 
                                                        data_obj.save_dir, 
-                                                       args.bin_count, 
                                                        extern, 
-                                                       probs=split_obj.train_data["probs"], 
-                                                       binning_step_size=1/args.bin_count)
+                                                       probs=split_obj.train_data["probs"])
             
     # Create calibration object and calculates the deltas
-    hb = hb_calibration(grid, args.bin_count, OUTPUTS, DEBUG).fit(split_obj.train_data["probs"], 
+    hb = hb_calibration(grid, args, OUTPUTS, DEBUG).fit(split_obj.train_data["probs"], 
                                                   split_obj.train_data["is_correct"])
 
     # calculate scores for the uncalibrated test set
-    scores_uncalibrated = hb.score_obj.calc_all_new(split_obj.test_data["probs"], 
+    scores_uncalibrated = hb.score_obj.calc_all(split_obj.test_data["probs"], 
                                                     split_obj.test_data["is_correct"],
                                                     groups=split_obj.test_groups, 
                                                     set_brier_ref=True)
-    total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = hb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
-                                                                                                                                                            split_obj.test_data["is_correct"], 
-                                                                                                                                                            split_obj.test_groups)
-    total_group_uncalib, correctness_group_uncalib, average_group_confidence_uncalib = hb.score_obj.get_correctness_per_group(split_obj.test_data["probs"], 
-                                                                                                                              split_obj.test_data["is_correct"], 
-                                                                                                                              split_obj.test_groups)    
+    
+    _, _, total_bin_uncalibrated, correctness_bin_uncalibrated = hb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
+                                                                                                        split_obj.test_data["is_correct"], 
+                                                                                                        split_obj.test_groups)
 
     # Uses the deltas to calculate the corrected values
     corrected_probs = hb.predict(split_obj.test_data["probs"]) 
 
     # calculate scores for the calibrated test set
-    scores_calibrated = hb.score_obj.calc_all_new(  corrected_probs, 
+    scores_calibrated = hb.score_obj.calc_all(  corrected_probs, 
                                                     split_obj.test_data["is_correct"],
                                                     groups=split_obj.test_groups)
-    total_group_calibrated, correctness_group_calibrated, total_bin_calibrated, correctness_bin_calibrated = hb.score_obj.get_total_and_correctness(corrected_probs, 
-                                                                                                                                                    split_obj.test_data["is_correct"], 
-                                                                                                                                                    split_obj.test_groups) 
+    
+    _, _, total_bin_calibrated, correctness_bin_calibrated = hb.score_obj.get_total_and_correctness(corrected_probs, 
+                                                                                                    split_obj.test_data["is_correct"], 
+                                                                                                    split_obj.test_groups) 
     
     total_group, correctness_group, average_group_confidence = hb.score_obj.get_correctness_per_group(corrected_probs, 
                                                                                                       split_obj.test_data["is_correct"], 

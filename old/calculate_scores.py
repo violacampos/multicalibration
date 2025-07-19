@@ -50,7 +50,7 @@ def main():
         print(f"Temperature: {temperature}")
         print(f"Num samples: {num_samples}")
 
-        probs, is_correct = data.proability_and_correctness_for_samples(results)
+        probs, is_correct = data.load_samples(results)
         
         correct_count = np.count_nonzero(is_correct == 1)
         print(f"Korrekt: {correct_count}")

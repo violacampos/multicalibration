@@ -1,10 +1,10 @@
 import os
 
-problem = "program-repair"
+problem = "code-gen"
+
 # code-gen
-#run = "../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1"
-#run = "program_repair/runs/bugsphp/test/Qwen-Qwen2.5-Coder-32B-Instruct/"
-run = "program_repair/runs/defects4j/test/Qwen-Qwen2.5-Coder-32B-Instruct/"
+run = "../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1"
+
 if problem == "code-gen":
     grouping_styles = ["simple", "scc"]
 else:

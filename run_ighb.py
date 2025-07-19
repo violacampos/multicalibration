@@ -6,7 +6,6 @@ import pickle
 from sklearn.model_selection import KFold
 from tools.data import data_loader
 from tools.split import split
-import matplotlib.pyplot as plt
 
 DEBUG = False
 OUTPUTS = True
@@ -14,10 +13,12 @@ OUTPUTS = True
 np.seterr(divide='ignore', invalid='ignore')
 
 def main(extern=False):
+    # loads commandline parameter
     args = cmd_input.load_parser()
 
     m = args.bin_count
-
+    
+    # get run dir
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
 
@@ -38,6 +39,7 @@ def main(extern=False):
     if OUTPUTS: print(f"Run: {data_obj.run}")
     if OUTPUTS: print(f"Gruppen Anzahl: {split_obj.train_groups.sum(axis=0)}")
 
+    # Possible k_fold
     if args.k_fold:
         if args.split:
             exit("Can't use split while using K-Fold!")
@@ -58,24 +60,21 @@ def main(extern=False):
 
             # get the grid for binning type and the chartmaker obj        
             grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run, 
-                                                               args.binning_type, 
+                                                               args, 
                                                                data_obj.save_dir, 
-                                                               m, 
                                                                extern, 
-                                                               probs=train_X, 
-                                                               binning_step_size=1/args.bin_count)
+                                                               probs=train_X)
 
             # Fit calibrator
             ighb = IGHB_calibration(grid, m, 1/args.bin_count, OUTPUTS, DEBUG).fit(train_X, train_y, train_groups)
 
             # Calculate values for uncalibrated test set
-            scores_uncalibrated = ighb.score_obj.calc_all_new(  test_X, 
-                                                                test_y, 
-                                                                groups=test_groups,
-                                                                deltas=ighb.get_deltas(test_X, test_y, test_groups), 
-                                                                set_brier_ref=True)
+            scores_uncalibrated = ighb.score_obj.calc_all(  test_X, 
+                                                            test_y, 
+                                                            groups=test_groups,
+                                                            set_brier_ref=True)
             
-            total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = ighb.score_obj.get_total_and_correctness(test_X, test_y, test_groups) 
+            _, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = ighb.score_obj.get_total_and_correctness(test_X, test_y, test_groups) 
 
             temp_group_correctness = correctness_group_uncalibrated
             temp_bin_correctness = correctness_bin_uncalibrated
@@ -92,8 +91,8 @@ def main(extern=False):
                 test_X = ighb.predict(test_X, test_groups, test=True, is_correct=test_y)
 
                 # Calculate some metrics on the UNcorrected values
-                curr_group_total, curr_group_correctness, curr_bin_total, curr_bin_correctness = ighb.score_obj.get_total_and_correctness(test_X, test_y, test_groups)
-                history_item[len(ighb.changes)] = [temp_group_correctness, curr_group_correctness, ighb.changes[-1], curr_group_total, temp_bin_correctness, curr_bin_correctness] #chartmaker.map_correctness_to_eleven_bins(
+                curr_group_total, curr_group_correctness, _, curr_bin_correctness = ighb.score_obj.get_total_and_correctness(test_X, test_y, test_groups)
+                history_item[len(ighb.changes)] = [temp_group_correctness, curr_group_correctness, ighb.changes[-1], curr_group_total, temp_bin_correctness, curr_bin_correctness]
                 temp_group_correctness = curr_group_correctness
                 temp_bin_correctness = curr_bin_correctness
                 
@@ -102,16 +101,16 @@ def main(extern=False):
                     
 
             # Calculate values for calibrated test set
-            scores_calibrated = ighb.score_obj.calc_all_new(test_X, 
-                                                            test_y, 
-                                                            groups=test_groups,
-                                                            deltas=ighb.get_deltas(test_X, test_y, test_groups))
+            scores_calibrated = ighb.score_obj.calc_all(test_X, 
+                                                        test_y, 
+                                                        groups=test_groups)
             
-            total_group_calibrated, correctness_group_calibrated, total_bin_calibrated, correctness_bin_calibrated = ighb.score_obj.get_total_and_correctness(test_X, test_y, test_groups) 
+            _, _, total_bin_calibrated, correctness_bin_calibrated = ighb.score_obj.get_total_and_correctness(test_X, test_y, test_groups) 
 
             # Add entry for the run in the score table
             ighb.score_obj.add_to_score_table(data_obj.run, scores_uncalibrated, scores_calibrated)
-
+            ighb.score_obj.display_score_table()
+            
             history_item["score"] = ighb.score_obj.score_table
             history[i] = history_item
             ighb = None
@@ -122,24 +121,22 @@ def main(extern=False):
         
         # get the grid for binning type and the chartmaker obj        
         grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run, 
-                                                           args.binning_type, 
+                                                           args, 
                                                            data_obj.save_dir, 
-                                                           m, 
                                                            extern, 
-                                                           probs=split_obj.train_data["probs"], 
-                                                           binning_step_size=1/args.bin_count)
+                                                           probs=split_obj.train_data["probs"])
     
-        ighb = IGHB_calibration(grid, m, 1/args.bin_count, OUTPUTS, DEBUG).fit(split_obj.train_data["probs"], 
-                                                                         split_obj.train_data["is_correct"], 
-                                                                         split_obj.train_groups)
+        ighb = IGHB_calibration(grid, m, 1/args.bin_count, OUTPUTS, DEBUG).fit( split_obj.train_data["probs"], 
+                                                                                split_obj.train_data["is_correct"], 
+                                                                                split_obj.train_groups)
 
         # Calculate values for uncalibrated test set
-        scores_uncalibrated = ighb.score_obj.calc_all_new(  split_obj.test_data["probs"], 
+        scores_uncalibrated = ighb.score_obj.calc_all(  split_obj.test_data["probs"], 
                                                             split_obj.test_data["is_correct"], 
                                                             groups=split_obj.test_groups, 
                                                             set_brier_ref=True)
         
-        total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = ighb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
+        _, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = ighb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
                                                                                                                                                                   split_obj.test_data["is_correct"],
                                                                                                                                                                   split_obj.test_groups) 
 
@@ -172,11 +169,11 @@ def main(extern=False):
             else:
                 split_obj.test_data["probs"] = calibrated_conf
 
-            # Calculate some metrics on the UNcorrected values
-            curr_group_total, curr_group_correctness, curr_bin_total, curr_bin_correctness = ighb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
+            # Calculate some metrics on the values
+            curr_group_total, curr_group_correctness, _, curr_bin_correctness = ighb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
                                                                                                                                       split_obj.test_data["is_correct"], 
                                                                                                                                       split_obj.test_groups)
-            
+            # Storing history
             history[len(ighb.changes)] = [temp_group_correctness, curr_group_correctness, ighb.changes[-1], curr_group_total, temp_bin_correctness, curr_bin_correctness] #chartmaker.map_correctness_to_eleven_bins(
             temp_group_correctness = curr_group_correctness
             temp_bin_correctness = curr_bin_correctness
@@ -188,13 +185,14 @@ def main(extern=False):
                 
 
         # Calculate values for calibrated test set
-        scores_calibrated = ighb.score_obj.calc_all_new(split_obj.test_data["probs"], 
+        scores_calibrated = ighb.score_obj.calc_all(split_obj.test_data["probs"], 
                                                         split_obj.test_data["is_correct"], 
                                                         groups=split_obj.test_groups)
         
-        total_group_calibrated, correctness_group_calibrated, total_bin_calibrated, correctness_bin_calibrated = ighb.score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
-                                                                                                                                                          split_obj.test_data["is_correct"], 
-                                                                                                                                                          split_obj.test_groups) 
+        _, _, total_bin_calibrated, correctness_bin_calibrated = ighb.score_obj.get_total_and_correctness(  split_obj.test_data["probs"], 
+                                                                                                            split_obj.test_data["is_correct"], 
+                                                                                                            split_obj.test_groups) 
+        
         total_group, correctness_group, average_group_confidence = ighb.score_obj.get_correctness_per_group(split_obj.test_data["probs"], 
                                                                                                             split_obj.test_data["is_correct"], 
                                                                                                             split_obj.test_groups) 

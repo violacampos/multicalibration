@@ -2,15 +2,13 @@ import streamlit as st
 import pickle
 import pandas as pd
 import numpy as np
-import altair as alt
 
-#st.set_page_config(layout="wide")
 fold = st.toggle("Enable 5-Fold")
 split = st.toggle("Enable Full Dataset", disabled=fold)
 groups = st.toggle("Enable Groups")
 each_iteration = st.toggle("Enable Iteration")
 
-grid = np.round(np.arange(0.0, 1+(1/10), 1/10),2)
+grid = np.round(np.arange(0.0, 1+(1/20), 1/20),2)
 
 if split:
     with open('./history_data/ighb_history_no_split.pkl', 'rb') as f:
@@ -27,7 +25,6 @@ else:
 
 if each_iteration:
     iteration = st.slider("Choose iteration", 1, len(loaded_dict)-1, 1)
-
     if groups:
         group = st.slider("Choose Group", 0, 9, 1)
         before = np.array(loaded_dict[iteration][0])[:, group]
@@ -69,7 +66,7 @@ else:
         exit()
     else:
         if groups:
-            group = st.slider("Choose Group", 0, 9, 1)
+            group = st.slider("Choose Group", 0, 5, 1)
 
             before =  pd.DataFrame({'Confidence': np.array(loaded_dict[1][0])[:, group], 'bin': grid})
             before_total = pd.DataFrame({group: loaded_dict[1][3][:, group] ,'bin': grid})
@@ -116,19 +113,14 @@ df.columns = ['Run',
             'skill_score']
 st.table(df)
 
-print(np.array(gasce))
 df = pd.DataFrame()
-df[["simple complexity", "more complex", "complex", "untestable", "prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]] = gasce
+df[["prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]] = gasce
 st.table(df)
 
 st.header("Groups", divider=True)
-st.markdown("0. simple complexity (< 11)")
-st.markdown("1. more complex (11 - 20)")
-st.markdown("2. complex  (21 - 50)")
-st.markdown("3. untestable (> 50)")
-st.markdown("4. prompt >= 500")
+st.markdown("0. prompt >= 500")
+st.markdown("1. not 9")
+st.markdown("2. examples")
+st.markdown("3. not 2")
+st.markdown("4. longer then median LoC")
 st.markdown("5. not 4")
-st.markdown("6. examples")
-st.markdown("7. not 6")
-st.markdown("8. longer then median LoC")
-st.markdown("9. not 8")

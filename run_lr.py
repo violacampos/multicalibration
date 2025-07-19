@@ -47,19 +47,17 @@ def main(extern=False):
     
     # get the grid for binning type and the chartmaker obj        
     grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run, 
-                                                       args.binning_type, 
+                                                       args, 
                                                        data_obj.save_dir, 
-                                                       args.bin_count, 
                                                        extern, 
-                                                       probs=split_obj.train_data["probs"], 
-                                                       binning_step_size=1/args.bin_count)
+                                                       probs=split_obj.train_data["probs"])
 
     # Train the linear regression on the train data split
     lr = lr_calibration(grid, OUTPUTS, DEBUG).fit(X, 
                                                   y)
 
     # Calculate scores on uncalibrated test set
-    scores_uncalibrated = lr.score_obj.calc_all_new(split_obj.test_data["probs"], 
+    scores_uncalibrated = lr.score_obj.calc_all(split_obj.test_data["probs"], 
                                                     split_obj.test_data["is_correct"], 
                                                     groups=split_obj.test_groups,
                                                     set_brier_ref=True)
@@ -77,7 +75,7 @@ def main(extern=False):
         calibrated_predictions = predictions + split_obj.test_data["probs"]
 
     # Calculate scores on uncalibrated test set
-    scores_calibrated = lr.score_obj.calc_all_new(  calibrated_predictions, 
+    scores_calibrated = lr.score_obj.calc_all(  calibrated_predictions, 
                                                     split_obj.test_data["is_correct"], 
                                                     groups=split_obj.test_groups)
     

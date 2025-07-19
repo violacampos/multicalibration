@@ -8,13 +8,15 @@ import altair as alt
 
 groups = st.toggle("Enable Groups")
 
-grid = np.round(np.arange(0.0, 1+(1/10), 1/10),2)
+grid = np.round(np.arange(0.0, 1+(1/20), 1/20),2)
 
 with open('./history_data/iglb_history.pkl', 'rb') as f:
     loaded_dict = pickle.load(f)
 
-
-iteration = st.slider("Choose iteration", 1, len(loaded_dict)-1, 1)
+if len(loaded_dict) == 1:
+    iteration = st.slider("Choose iteration", 0, len(loaded_dict)-1, 1)
+else:
+    iteration = 1
 
 if groups:
     group = st.slider("Choose Group", 0, 9, 1)
@@ -42,7 +44,7 @@ data = {'Confidence': loaded_dict[iteration][2][5][0]}
 
 # Create DataFrame
 df = pd.DataFrame(data)
-df[["simple complexity", "more complex", "complex", "untestable", "prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]] = t
+df[["prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]] = t
 df[["is_correct"]] = c
 
 st.header("Element details", divider=True)
@@ -67,17 +69,13 @@ st.table(df)
 
 print(np.array(gasce))
 df = pd.DataFrame()
-df[["simple complexity", "more complex", "complex", "untestable", "prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]] = gasce
+df[["prompt >= 500", "not >= 500", "has_examples", "not example", "Longer then median loc", "not loc"]] = gasce
 st.table(df)
 
 st.header("Groups", divider=True)
-st.markdown("0. simple complexity (< 11)")
-st.markdown("1. more complex (11 - 20)")
-st.markdown("2. complex  (21 - 50)")
-st.markdown("3. untestable (> 50)")
-st.markdown("4. prompt >= 500")
+st.markdown("0. prompt >= 500")
+st.markdown("1. not 0")
+st.markdown("2. examples")
+st.markdown("3. not 2")
+st.markdown("4. longer then median LoC")
 st.markdown("5. not 4")
-st.markdown("6. examples")
-st.markdown("7. not 6")
-st.markdown("8. longer then median LoC")
-st.markdown("9. not 8")

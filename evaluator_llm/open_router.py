@@ -69,7 +69,7 @@ if __name__ == "__main__":
                
         # probs -> confidence of the model
         # is_correct -> label 1: is correct, 0: is not correct
-        _, _, programs, _, languages, names, _ = data.proability_and_correctness_for_samples(results, None)
+        _, _, programs, _, languages, names, _ = data.load_samples(results, None)
 
         file_name = save_dir+'data.json'
         if os.path.isfile(file_name):

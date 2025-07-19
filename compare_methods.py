@@ -10,10 +10,13 @@ from tools.data import data_loader
 import pickle
 
 if __name__ == "__main__":
+    # loads commandline parameter
     args = cmd_input.load_parser()
 
+    # extract run name from path
     run = args.dir[0].split('/')[-1]
-    
+
+    # get run dir
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
 
@@ -22,14 +25,15 @@ if __name__ == "__main__":
 
     run_dir = run_dirs[0]
 
+    # Load data and setup grid/chartmaker
     data_obj = data_loader(args, run_dir, False, "comparison")
     
     grid, chartmaker = binning.get_grid_and_chartmaker(run, 
-                                                       args.binning_type, 
+                                                       args, 
                                                        data_obj.save_dir, 
-                                                       args.bin_count, 
                                                        False)
     
+    # execute every calibration approach
     baseline_results = compute_baseline.main(extern=True)    
 
     hb_results = run_hb.main(extern=True)    
@@ -40,6 +44,7 @@ if __name__ == "__main__":
     
     iglb_results = run_iglb.main(extern=True)
 
+    # Collect results in table and print table
     table_print = []
     table_print.append(["Uncalib"]+list(list(baseline_results["scores_uncalibrated"].values())[0].values()))
     table_print.append(["HB"]+list(list(hb_results["scores_calibrated"].values())[0].values()))
@@ -55,12 +60,12 @@ if __name__ == "__main__":
                                                 'skill_score',
                                                 'GASCE'], tablefmt='orgtbl')
     print(table_print)
-    # CUDA_VISIBLE_DEVICES=6 python compare_methods.py ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1
 
     if args.save_table:
         with open(data_obj.save_dir+'scores.txt', 'w') as f:
             f.write(table_print)
 
+    # Create charts for comparison
     if args.save_charts:
         chartmaker.calibration_method_comp_chart(grid,
                                             grid[hb_results["total_bin_calibrated"] != 0],
@@ -101,7 +106,8 @@ if __name__ == "__main__":
                                             iglb_results["correctness_group"], 
                                             iglb_results["average_group_confidence"], 
                                             iglb_results["total_group"])
-        
+    
+    # save the results for further analysis
     if args.save_data:      
         data = {
             "calibrated_probs_hb": hb_results["calibrated_probs"],

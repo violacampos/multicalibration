@@ -7,6 +7,15 @@ from scipy.optimize import minimize
 class IGLB_calibration:
     
     def __init__(self, grid, alpha, m, outputs, debug):
+        """
+            Initilaizes a iterative group linear binning object
+
+            :param grid: used grid for calibration
+            :param m: Number of bins
+            :param alpha: Value to determine if the algorithm should stop
+            :param outputs: flag to enable optional outputs
+            :param debug: flag to enable debug outputs
+        """
         self.grid = grid
         self.alpha = alpha
         self.debug = debug
@@ -21,6 +30,15 @@ class IGLB_calibration:
         self.changes = []
         
     def fit(self, X, y, groups):
+        """
+            Learns deltas for each bin-group combination and creates a linear scaling within each bin-group combination
+
+            :param X: Probabilities for calibration
+            :param y: Label of correctness
+            :param groups: Group matrix
+
+            :return: ILGB object
+        """
         # calculate deltas
         self.deltas = self.get_deltas(X, y, groups) 
        
@@ -33,7 +51,20 @@ class IGLB_calibration:
         return self
 
     def predict(self, X, groups, assigned_bins, tau, bin, group, test=False, is_correct=None):
-        
+        """
+            Uses the learned delta on a selected bin-group combination for adjustement.
+
+            :param X: Probabilities for calibration
+            :param groups: Group matrix
+            :param assigned_bins: Discretized probabilities
+            :param tau: Tau of the probabilites that have to be adjusted
+            :param bin: Bin of the probabilites that have to be adjusted
+            :param group: Group of the probabilites that have to be adjusted
+            :param test: Flag to store changes on test subset
+            :param is_correct: Labels of correctness for history
+
+            :return: adjusted probabilities
+        """        
         # get the alpha and beta values for the given tau, bin, group
         alpha_star = self.LS[tau, bin, group][0]
         beta_star = self.LS[tau, bin, group][1]
@@ -45,6 +76,7 @@ class IGLB_calibration:
         else:
             X_ = np.array([expit(alpha_star + beta_star * logit(X[idx])) if (bin_a >= (bin/self.m)) and (groups[idx, group] == 1) else X[idx] for idx, bin_a in enumerate(assigned_bins)])
         
+        # Save changes on test subset
         if test:
             ab_test = binning.round_model_to_grid(X_, self.grid)
             self.changes.append([tau, bin, group, (alpha_star, beta_star), len(ab_test[ab_test != assigned_bins]), [ab_test[ab_test != assigned_bins], groups[ab_test != assigned_bins], is_correct[ab_test != assigned_bins]]])    
@@ -52,6 +84,15 @@ class IGLB_calibration:
         return X_ 
    
     def get_deltas(self, X, y, groups):
+        """
+            Calculates the deltas for the different tau-bin-group combinations
+
+            :param X: Probabilities for calibration
+            :param y: Labels of correctness
+            :param groups: Group matrix
+
+            :return: 3D delta array
+        """
         # get the assigned bins of the confidences
         assigned_bins = binning.round_model_to_grid(X, self.grid)
 
@@ -68,6 +109,14 @@ class IGLB_calibration:
         return deltas
     
     def get_P_S_p_g(self, assigned_bins, groups):
+        """
+            Calculates the probability that a sample is in the different tau-bin-group combinations
+
+            :param assigned_bins: Discretized sample probabilities
+            :param groups: Group matrix
+
+            :return: 3D probaility array
+        """
         # Create sets with tau <= bin, for each bin and group
         P_S_p_g_smaller = [[len(assigned_bins[(assigned_bins <= i) & (g == 1)]) / len(assigned_bins) for g in groups.T] for i in self.grid]
 
@@ -81,6 +130,15 @@ class IGLB_calibration:
         return P_S_p_g
     
     def get_LS(self, X, is_correct, groups):
+        """
+            Gets the liner scaling parameters for the different tau-bin-group combinations
+
+            :param X: Probabilities
+            :param is_correct: Labels of correctness
+            :param groups: Group matrix
+
+            :return: 3D probaility array
+        """
         # Get alpha and beta values for <= subsets
         LS_smaller = [[self.linear_scaling(X[(X <= i) & (g == 1)], is_correct[(X <= i) & (g == 1)]) for idx, g in enumerate(groups.T)] for i in self.grid]
         
@@ -92,7 +150,14 @@ class IGLB_calibration:
         return LS
     
     def linear_scaling(self, X, is_correct):
-        #print(f"\nBin: {i}, Group: {g}")
+        """
+            Learns the alpha and beta values of the linear scaling for the given probabilities and labels.
+
+            :param X: Probabilities
+            :param is_correct: Labels of correctness
+
+            :return: List with alpha and beta
+        """
         # clip the value to dont get -inf or inf
         X = np.clip(X, 1e-10, 1 - 1e-10)
         # get logits for confidences
@@ -101,8 +166,8 @@ class IGLB_calibration:
         # mse function to optimize for alpha and beta
         def mse(params):
             alpha, beta = params
-            transformed = expit(alpha + beta * logit_f)  # LS[f](x)a
-            return np.mean((transformed - is_correct) ** 2)  # calculate the MSE
+            transformed = expit(alpha + beta * logit_f) 
+            return np.mean((transformed - is_correct) ** 2) 
 
         # minimize for the mse and get alpha and beta values
         result = minimize(mse, x0=[0, 1])  

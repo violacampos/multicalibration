@@ -38,7 +38,7 @@ def main(extern=False):
     score_obj = score(grid, OUTPUTS, DEBUG)        
     
     # calculate scores for the uncalibrated test set
-    scores_uncalibrated = score_obj.calc_all_new(confidence, 
+    scores_uncalibrated = score_obj.calc_all(confidence, 
                                                 label,
                                                 groups=groups, 
                                                 set_brier_ref=True)
