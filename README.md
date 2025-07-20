@@ -4,8 +4,27 @@ The scripts are tested on the hsrm megagpu server. It is possible that the resul
 
 ## Structure
 In the downloaded folder following folder can be found:
-- masterarbeit
-    - contains all scripts for calibration
+- masterarbeit (contains all scripts for calibration)
+    - analyse/sample_viewer.py: enables the exploration of individual samples
+    - analyse/ighb_history_viewer.py: enables the exploration changes that the ighb approach makes
+    - analyse/iglb_history_viewer.py: enables the exploration changes that the iglb approach makes
+    - calibration_data/*: contains the saved data from the comparison
+    - evaluator_llm/*: scripts to evaluate code samples with another LLM
+    - history_data/*: data from the IGHB/IGLB approach
+    - program_repair/*: scripts and data affilated to the program-repair problem
+    - runs_saved/*: some saved data from previous runs 
+    - scc/*: saved scc results for code generations
+    - tests/*: several test scripts for testing functionality
+    - tolls/*: contains main components for data loading, group creation, score calculation and the calibration logics
+    - verbalized_data/*: contains the saved verbalized probabilites from the evaluator LLM
+    - compute_baseline.py: Computes the baseline for the given data
+    - compare_methods.py: Compares all calibration methods
+    - run_hb.py: Uses histogram binning for calibration
+    - run_lr.py: Uses linear regression for calibration
+    - run_ighb.py: Uses iterative group histogram binning for calibration
+    - run_iglb.py: Uses iterative group linear binning for calibration
+    - run_regressor.py: Can use different regressors and extended input features for calibration
+    - create_programs.py: Creates for all code generations a file and evaluates them with scc
 - MultiPL-E
     - Benchmark used for code generation, with the extension of returning the token scores.
 
