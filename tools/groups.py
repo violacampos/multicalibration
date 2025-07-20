@@ -3,7 +3,7 @@ import json
 
 class groups:
 
-    def __init__(self, programs, prompts, languages, names, base_dir, include_counter=False):
+    def __init__(self, programs, prompts, languages, names, include_counter=False):
         """
             Initilaizes a group object.
 
@@ -11,7 +11,6 @@ class groups:
             :param prompts: List of prompts
             :param languages: List of languages
             :param names: List of task names
-            :param base_dir: Sets the base dir for data loading.
         """
         self.prompts = prompts
         self.programs = programs
@@ -22,7 +21,6 @@ class groups:
         self.median_loc = 0
         self.median_prompt = 0
         self.run = None
-        self.base_dir = base_dir
         self.include_counter = include_counter
     
     def create_groups(self, problem, run, group_style=None, scc_infos=None):
@@ -51,7 +49,7 @@ class groups:
         elif problem == 'program-repair':
             if group_style == 'simple':
                 repair_set = self.run.split("/")[0]
-                group_file = self.base_dir+"program_repair/groups/"+repair_set+"/groups.json"
+                group_file = "program_repair/groups/"+repair_set+"/groups.json"
                 with open(group_file, 'r') as f:
                     group_content = json.load(f)   
 

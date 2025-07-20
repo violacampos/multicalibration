@@ -13,13 +13,10 @@ np.seterr(divide='ignore', invalid='ignore')
 def main(extern=False):
     # loads commandline parameter
     args = cmd_input.load_parser()
-
+    
     # get run dir
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
-
-    if args.all_lang == True:
-        run_dirs = [run_dirs[0]]
 
     run_dir = run_dirs[0]
 

@@ -19,12 +19,7 @@ def load_parser():
         choices=["code-gen", "program-repair"],
         default="code-gen",
         help="Which set to evaluate")
-    
-    parser.add_argument(
-        "--all-lang", 
-        action="store_true",
-        help="Flag to evaluate all languages.")
-    
+        
     parser.add_argument(
         "--split", 
         action="store_true",

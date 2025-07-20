@@ -1,59 +1,110 @@
 # Masterarbeit
 
-## Commands
+The scripts are tested on the hsrm megagpu server. It is possible that the results differ when executed on other operation systems/other configurations. This is the case because the data is stored in files and are read up on execution. Therefore the order of the read files can change.
 
-Add before script execution to select Graphics Card('s) <br/>
-`CUDA_VISIBLE_DEVICES=7`<br/>
-`CUDA_VISIBLE_DEVICES=4,5,6,7`
+## Structure
+In the downloaded folder following folder can be found:
+- masterarbeit
+    - contains all scripts for calibration
+- MultiPL-E
+    - Benchmark used for code generation, with the extension of returning the token scores.
 
-Caculates the ECE/Brier score for the Benchmarks in the runs directory (you can also select single runs)<br/>
-`python calculate_ece.py ../MultiPL-E/runs/`
-
-Creates charts for the given run (reliability chart, (total, pass, fail) propability distribution)<br/>
-`python generate_charts_multipl_e.py ../MultiPL-E/runs/mbpp-py-keep-_data_tyler_llms_llama3.1_huggingface_Meta_Llama_3.1_8B_Instruct_-1.0-reworded/`
-
-Runs the generation Process of the MultiPL-E Benchmark (--use-local and dataset) or (--lang rs to chose language).<br/>
-Set --batch-size to 10 for 70B Models.<br/>
-`python automodel_vllm.py --name Qwen/Qwen2.5-Coder-7B-Instruct \
-                          --root-dataset humaneval \
-                          --use-local \
-                          --dataset prompts/mbpp-py-keep.jsonl \
-                          --temperature 1.0 \
-                          --batch-size 20 \
-                          --completion-limit 1 \
-                          --output-dir-prefix runs`
-
-use generate_4_all script to generate code for all different languages. Parameters are specified in the script.
-CUDA_VISIBLE_DEVICES=6,7 python generate_4_all.py --use-local
-
-After generation of samples. use the Multipl_E script to check for correctness. Copy samples to local machin in the Multipl-E repo
-under the folder runs.
-Then excute the following command:
-docker run --rm --network none -v G:/Masterarbeit/MultiPL-E/runs:/runs:rw multipl-e-eval --dir /runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --output-dir /runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --recursive                    
-
-replace dir with the name of the copied folder
-
-After the evaluation copy the folder onto the hostmachine if necessary.
-
-Run the script create programs to obtain information about the generated code. But before that adjust the run parameter in the script.
-
-After programs are created install scc by boyter and execute the following command.
-scc -f json -o results.json --by-file programs
-
-this will generat a json file with informations about every program. To use them copy them into the scc folder in the project masterarbeit and rename it to the name of the run.
-
-Now you can run the compare_methods script to get a result for all methods:
-python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1 --split --use-scc --prob-method avg_logprob --save-table
-
-python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --use-scc --prob-method avg_logprob --save-table --save-charts --split --save-data
+Furthermore the code generations are stored under 'MultiPL-E/run/'. Currently the generations were made with one model.
 
 
-python compare_methods.py --dir program_repair/runs/bugsphp/test/Qwen-Qwen2.5-Coder-32B-Instruct/ --prob-method avg_logprob --problem program-repair --save-data --save-table --save-charts
+## Setup
 
-python run_lr.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_14B-Instruct-1.0-comp-1 --prob-method avg_logprob --problem code-gen --control-exp --save-charts --use-scc
+All required python packages for the calibration approaches can be found in the requirement.txt file. You need to be in the masterarbeit folder for all following commands.
 
-## IGHB
+Therefore navigate to the downloaded folder and use:
+```bash
+cd masterarbeit
+```
+
+
+To install them create a venv and use the command:
+```bash
+pip install -r .\requirements.txt
+```
+
+
+## Analysis
+To get an overview of the data streamlit can be used to explore individual examples.
+
+Therfore execute the following command:
+```bash
+streamlit run analyse/sample_viewer.py 
+```
+
+## Commandline parameters
+
+| Command | Description |
+| --- | --- |
+| --dir | Directory of the MultiPL-E code generations |
+| --problem | Default: code-gen |
+| --prob-method | Default: avg_logprob. Options: [avg_logprob, qualitativ, quantitativ] |
+| --model | Options: [gpt_4o_mini]. Needs to be set for the qualitativ and quantitativ prob method |
+| --bin-count| Default: 20. Number of bins to calibrate on |
+| --grouping-style| Default: simple. Options: [simple, scc, categories, all] |
+| --counter-groups | Enables the usage of counter groups |
+| --save-table | Table will be saved in run folder |
+| --save-charts | Table will be saved in run folder |
+| --save-data | Saves the data of the comparison results |
+| --split | By adding this the data is splitted in train, test, val |
+| --k-fold | Option for run_ighb.py. Evaluates on 5-Fold split |
+| --epsilon | Only effects run_iglb.py. Hyperparamter for early stopping. |
+| --regressor | Default: LR. Options: [LR, SVR, XGBoost]. Only effects script run_regressor.py |
+| --binning-type | Default: linear. Options: [linear]. Only effects script run_regressor.py |
+
+## Comparison of methods
+For a comparison of all methods the following command can be used:
+```bash
+python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --counter-groups --save-charts --save-table
+```
+
+This will output the results of every calibration approach. Further more a runs directory will be cerated where the charts are stored.
+
+## Baseline
+Command for calculating the baseline scores:
+```bash
+python compute_baseline.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --save-table --counter-groups
+```
+## Histogram binning
+Command for using only the histogram binning approach:
+```bash
+python run_hb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table
+```
+
+## Linear regression
+Command for using only the linear regression approach:
+```bash
+python run_lr.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table
+```
+
+## Iterative group histogram binning
+Command for using only the iterative group histogram binning approach:
+```bash
+python run_ighb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table
+```
 
 To run the k-fold experiment on the IGHB approch the following command can be used:
+```bash
 python run_ighb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --k-fold --bin-count 100
+```
 
+## Iterative group linear binning
+Command for using only the iterative group histogram binning approach:
+```bash
+python run_iglb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table
+```
+
+## Regressors
+Command for using the differen regressor approach with linear regression:
+```bash
+python run_regressor.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table --model gpt_4o_mini --grouping-style all
+```
+
+Command for using the differen regressor approach with SVR:
+```bash
+python run_regressor.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table --model gpt_4o_mini --grouping-style all --regressor SVR
+```

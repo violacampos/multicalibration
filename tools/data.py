@@ -7,7 +7,6 @@ import numpy as np
 import os
 import datetime
 import re
-import configparser
 from tools.groups import groups
 import pandas as pd
 
@@ -320,10 +319,7 @@ class data_loader:
             :return: directory string         
 
         """
-
-        config = self.load_config()
-
-        dir = config["Paths"]["base_dir"]+"runs/"+run+"/"+method+"/"+binning+"/"+prob_generation+"/"+grouping_style+"/"
+        dir = "runs/"+run+"/"+method+"/"+binning+"/"+prob_generation+"/"+grouping_style+"/"
 
         if split:
             dir += "split/"
@@ -349,28 +345,6 @@ class data_loader:
             f.write(content)
         
         return dir
-
-    def load_config(self):
-        """
-            Loads config file
-            
-            :return: config
-        """
-        config = configparser.ConfigParser()
-        try:
-            file = open("config.ini", "r")
-        except FileNotFoundError:
-            print("Can't find config.ini!")
-            exit()
-
-        config.read_file(file)
-
-        if not config.has_option("Paths", "base_dir"):
-            print("Can't find base_dir in the Paths section of config.ini!")
-            exit()
-
-        return config
-
 
     def load_program_repair_data(self, path):
         """
@@ -420,8 +394,6 @@ class data_loader:
             :param method: Name of the method that calls the data loader
             
         """
-        base_dir = self.load_config()["Paths"]["base_dir"]
-
         if args.problem == "code-gen":    
             # load the data from the run directory
             results, temperature, top_p, num_samples = self.load_multipl_e_run(run_dir)
@@ -436,7 +408,7 @@ class data_loader:
         if not extern:
             save_dir = self.generate_save_dir(run, method, args.binning_type, args.prob_method, args.grouping_style ,args.split, args.model, calibration_data=args.save_data , history_data=args.save_history)
         else:
-            save_dir = base_dir
+            save_dir = ''
 
         verb_data = None
         if args.prob_method in ["quantitativ", "qualitativ"]:          
@@ -454,7 +426,7 @@ class data_loader:
             exit("Couldn't find data for problem.")
 
         # Creates group obj and group matrix
-        group_obj = groups(programs, prompts, languages, names, base_dir, include_counter=args.counter_groups)
+        group_obj = groups(programs, prompts, languages, names, include_counter=args.counter_groups)
 
         if args.grouping_style == 'scc' or args.grouping_style == 'all':
             scc_infos = self.load_scc_data(run, languages, names)

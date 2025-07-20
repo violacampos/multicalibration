@@ -20,9 +20,6 @@ if __name__ == "__main__":
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
 
-    if args.all_lang == True:
-        run_dirs = [run_dirs[0]]
-
     run_dir = run_dirs[0]
 
     # Load data and setup grid/chartmaker
@@ -34,14 +31,19 @@ if __name__ == "__main__":
                                                        False)
     
     # execute every calibration approach
+    print("Baseline:")
     baseline_results = compute_baseline.main(extern=True)    
 
+    print("Histogram binning:")
     hb_results = run_hb.main(extern=True)    
     
+    print("Linear regression:")
     lr_results = run_lr.main(extern=True)  
 
+    print("Iterative group histogram binning:")
     ighb_results = run_ighb.main(extern=True)
     
+    print("Iterative group linear binning:")
     iglb_results = run_iglb.main(extern=True)
 
     # Collect results in table and print table

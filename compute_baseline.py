@@ -20,9 +20,6 @@ def main(extern=False):
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
 
-    if args.all_lang == True:
-        run_dirs = [run_dirs[0]]
-
     run_dir = run_dirs[0]
 
     # if main dir is in list just continue

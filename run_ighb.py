@@ -22,9 +22,6 @@ def main(extern=False):
     run_dirs = [x[0] for x in os.walk(args.dir[0])]
     run_dirs.sort()
 
-    if args.all_lang == True:
-        run_dirs = [run_dirs[0]]
-
     run_dir = run_dirs[0]
 
     if run_dir == args.dir[0] and ("humaneval" not in run_dir and "mbpp" not in run_dir) and args.problem == 'code-gen':
@@ -114,9 +111,9 @@ def main(extern=False):
             history_item["score"] = ighb.score_obj.score_table
             history[i] = history_item
             ighb = None
-
-        with open(data_obj.save_dir+'history_data/ighb_history_kfold.pkl', 'wb') as f:
-            pickle.dump(history, f)
+        if args.save_history:
+            with open(data_obj.save_dir+'history_data/ighb_history_kfold.pkl', 'wb') as f:
+                pickle.dump(history, f)
     else:
         
         # get the grid for binning type and the chartmaker obj        
