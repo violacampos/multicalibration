@@ -7,7 +7,7 @@ from sklearn.model_selection import KFold
 from tools.data import data_loader
 from tools.split import split
 
-DEBUG = True
+DEBUG = False
 OUTPUTS = True
 
 np.seterr(divide='ignore', invalid='ignore')

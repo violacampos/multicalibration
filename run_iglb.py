@@ -6,7 +6,7 @@ import pickle
 from tools.data import data_loader
 from tools.split import split
 
-DEBUG = False
+DEBUG = True
 OUTPUTS = True
 
 np.seterr(divide='ignore', invalid='ignore')
@@ -120,12 +120,12 @@ def main(extern=False):
         temp_bin_correctness = curr_bin_correctness    
 
         # Second Break if MSE of the new model is greater or equal to the model before
-        mse_h_t_plus_1 = iglb.score_obj.mse(split_obj.val_data["probs"], 
+        mse_h_t_plus_1 = iglb.score_obj.mse(val_probs, 
                                             split_obj.val_data["is_correct"], 
                                             len(split_obj.val_data["is_correct"]))
         
-        if mse_h_t_plus_1 >= mse_f_t:
-            if OUTPUTS: print(f"MSE h_t+1: {mse_h_t_plus_1} >= MSE f_t: {mse_f_t}")
+        if mse_h_t_plus_1 > mse_f_t:
+            if OUTPUTS: print(f"MSE h_t+1: {mse_h_t_plus_1} > MSE f_t: {mse_f_t}")
             break
         
         # Set the new model for the next iteration
