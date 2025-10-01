@@ -45,7 +45,11 @@ def create_unform_grid(m):
     """
     d = str(1/m)
     round_to = len(d)-2
-    return np.round(np.arange(0.0, 1+(1/m), 1/m), round_to) 
+    if round_to > 10:
+        return np.linspace(0.0, 1.0, m + 1)
+    else:
+        return np.round(np.arange(0.0, 1+(1/m), 1/m), round_to) # VIOLA: extra bin for p=1.0? somehow weird
+    #
 
 def create_qunatil_grid(probs, m):
     """

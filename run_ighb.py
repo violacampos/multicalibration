@@ -7,7 +7,7 @@ from sklearn.model_selection import KFold
 from tools.data import data_loader
 from tools.split import split
 
-DEBUG = False
+DEBUG = True
 OUTPUTS = True
 
 np.seterr(divide='ignore', invalid='ignore')
@@ -123,7 +123,7 @@ def main(extern=False):
                                                            extern, 
                                                            probs=split_obj.train_data["probs"])
     
-        ighb = IGHB_calibration(grid, m, 1/args.bin_count, OUTPUTS, DEBUG).fit( split_obj.train_data["probs"], 
+        ighb = IGHB_calibration(grid, m, 1/m, OUTPUTS, DEBUG).fit( split_obj.train_data["probs"], 
                                                                                 split_obj.train_data["is_correct"], 
                                                                                 split_obj.train_groups)
 
@@ -157,7 +157,7 @@ def main(extern=False):
                                                test=True, 
                                                is_correct=split_obj.train_data["is_correct"])
             
-            # calculate the corrected values for the test set
+            # calculate the corrected values for the test set VIOLA check this!!
             if args.split:
                 split_obj.test_data["probs"] = ighb.predict(split_obj.test_data["probs"], 
                                                             split_obj.test_groups, 
@@ -221,6 +221,8 @@ def main(extern=False):
         if args.save_table:
             with open(data_obj.save_dir+'scores.txt', 'w') as f:
                 f.write(ighb.score_obj.printable_table)
+                
+        
 
 if __name__ == "__main__":
     main()

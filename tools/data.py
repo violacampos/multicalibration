@@ -201,7 +201,8 @@ class data_loader:
 
                 # Differentiate in different probability types
                 if type == "avg_logprob":
-                    prob = np.round(np.exp(cumulative_logprob / token_count), 2)
+                    #prob = np.round(np.exp(cumulative_logprob / token_count), 2)
+                    prob = np.exp(cumulative_logprob / token_count)
                 elif type == "quantitativ":
                     try:
                         template = r"\d{1,3}(?:\.\d+)?\s?\%?"
@@ -253,7 +254,7 @@ class data_loader:
 
             :return: average token probability
         """
-        return np.round(np.exp(cumulative_logprob / token_count), 2) 
+        return np.exp(cumulative_logprob / token_count)
 
 
     def load_scc_data(self, run, languages, names):
@@ -367,7 +368,7 @@ class data_loader:
 
 
         for d in data.values():
-            prob = np.round(np.exp(d["cumulative_logprob"] / d["token_count"]), 2)
+            prob = np.exp(d["cumulative_logprob"] / d["token_count"])
             probs.append(prob)
             is_correct.append(d["is_correct"])
             programs.append(d["program"])
