@@ -1,6 +1,6 @@
 import numpy as np
 from tools.calibration_scores import score
-from tools import binning
+from tools import binning, groups
 
 
 class IGHB_calibration:
@@ -43,32 +43,22 @@ class IGHB_calibration:
 
         :return: IGHB object
         """
-        # Assign probabilties to bins
-        assigned_bins = binning.round_model_to_grid(X, self.grid)
-
+        
         # Get deltas and probability for every bin-group combination
         self.deltas = self.get_deltas(X, y, groups)
         self.deltas_square = self.deltas**2
         group_counts = groups.sum(axis=0)
-        self.P_S_p_g = np.array(
-            [
-                [
-                    len(assigned_bins[(np.round(assigned_bins, 2) == np.round(i, 2)) & (g == 1)])
-                    / len(
-                        X
-                    )  # group_counts[g_idx] VIOLA check this!! -> handle empty groups
-                    for g_idx, g in enumerate(groups.T)
-                ]
-                for i in self.grid
-            ]
-        )
-
+        counts = self.get_bin_group_counts(X, groups)
+        total_counts = len(X)
+        # probability of bin and group membership
+        self.P_S_p_g = counts / total_counts
+        
         # Get GASCE
-        self.gasce = self.score_obj.gasce(assigned_bins, y, groups, grid=self.grid)
+        self.gasce = self.score_obj.gasce_not_rounded(X, y, groups)
         if self.debug:
             print(f"GASCE: {self.gasce}, sum: {self.gasce.sum()}")
 
-        # Probability of that a sample is in a group
+        # Probability of group membership
         p_group = group_counts / len(groups)
         if self.debug:
             print(f"P(g(X)=1): {p_group}")
@@ -111,21 +101,13 @@ class IGHB_calibration:
             print(f"Max delta: {max_delta}")
 
         # Adjust samples in that combination
-        X_ = np.array(
-            [
-                (
-                    bin_a + self.deltas[bin, group]
-                    if (np.round(bin_a, 2) == (bin / self.m))
-                    and (groups[idx, group] == 1)
-                    else bin_a
-                )
-                for idx, bin_a in enumerate(
-                    assigned_bins
-                )  # VIOLA: original probs vs discretized?
-            ]
-        )
+        bin_indices = np.digitize(X, self.grid) - 1
+        mask = (bin_indices == bin) & (groups[:, group] == 1)
+        X_ = X.copy()
+        X_[mask] += self.deltas[bin, group]
+        
 
-        # Save changes on test subset
+        # Save changes on test subset # VIOLA: did not check this
         if test:
             ab_test = binning.round_model_to_grid(X_, self.grid)
             self.changes.append(
@@ -144,6 +126,81 @@ class IGHB_calibration:
             )
 
         return X_
+    
+
+    
+    def get_bin_group_counts(self, X, groups):
+        """
+        Returns an array of shape (n_bins, n_groups) with the absolute number of samples
+        from X that fall into each bin and are in each group.
+
+        :param X: Probabilities for calibration
+        :param groups: Group matrix
+
+        :return: 2D array of counts
+        """
+        # Assign each sample to a bin index (0-based)
+        bin_indices = np.digitize(X, self.grid) - 1  
+
+        n_bins = len(self.grid)
+        n_groups = groups.shape[1]
+        counts = np.zeros((n_bins, n_groups), dtype=int)
+
+        for i in range(n_bins):
+            for j in range(n_groups):
+                # Select samples in bin i and group j
+                mask = (bin_indices == i) & (groups[:, j] == 1)
+                counts[i, j] = np.sum(mask)
+        return counts
+    
+    def get_correct_per_bin_group_counts(self, X, y, groups):
+        """
+        Returns an array of shape (n_bins, n_groups) with the absolute number of samples
+        from X that fall into each bin and are in each group.
+
+        :param X: Probabilities for calibration
+        :param y: Labels of correctness
+        :param groups: Group matrix
+
+        :return: 2D array of counts of correct samples
+        """
+        # Assign each sample to a bin index (0-based)
+        bin_indices = np.digitize(X, self.grid) - 1  
+
+        n_bins = len(self.grid)
+        n_groups = groups.shape[1]
+        counts = np.zeros((n_bins, n_groups), dtype=int)
+
+        for i in range(n_bins):
+            for j in range(n_groups):
+                # Select samples in bin i and group j
+                mask = (bin_indices == i) & (y == 1) & (groups[:, j] == 1)
+                counts[i, j] = np.sum(mask)
+        return counts
+    
+    def get_mean_per_bin_group(self, X, groups):
+        """
+        Returns an array of shape (n_bins, n_groups) with the mean value of X
+        for each bin and group.
+
+        :param X: Probabilities for calibration
+        :param groups: Group matrix
+
+        :return: 2D array of mean values
+        """
+        bin_indices = np.digitize(X, self.grid) - 1
+        n_bins = len(self.grid)
+        n_groups = groups.shape[1]
+        means = np.zeros((n_bins, n_groups), dtype=float)
+
+        for i in range(n_bins):
+            for j in range(n_groups):
+                mask = (bin_indices == i) & (groups[:, j] == 1)
+                if np.any(mask):
+                    means[i, j] = X[mask].mean()
+                else:
+                    means[i, j] = 0.0
+        return means
 
     def get_deltas(self, X, y, groups):
         """
@@ -153,54 +210,25 @@ class IGHB_calibration:
         :param y: Labels of correctness for history
         :param groups: Group matrix
 
-        :return: 2D Array of deltas
+        :return: 2D Array of deltas (between likelihood and correctness) for each bin-group combination
         """
         # round to grid
-        assigned_bins = binning.round_model_to_grid(X, self.grid)
+        # assigned_bins = binning.round_model_to_grid(X, self.grid)
+        
+        counts = self.get_bin_group_counts(X, groups)
+        correct_counts = self.get_correct_per_bin_group_counts(X, y, groups)
 
-        # calculate the total correct per bin and group
-        correct_per_bin_group = np.array(
-            [
-                [
-                    np.divide(
-                        len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (y == 1) & (g == 1)]),
-                        len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)]),
-                        
-                    )
-                    for g in groups.T
-                ]
-                for i in self.grid
-            ]
+        # correctness per bin and group
+        correct_per_bin_group_ = np.divide(
+            correct_counts,
+            counts,
+            out=np.zeros_like(correct_counts, dtype=float),
+            where=(counts > 0),
         )
-        correct_per_bin_group[np.isnan(correct_per_bin_group)] = 0
+        
+        probs_per_bin_group_ = self.get_mean_per_bin_group(X, groups)
 
-        # calculate the total count per bin
-        total_per_bin_group = np.array(
-            [
-                [len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)]) for g in groups.T]
-                for i in self.grid
-            ]
-        )
-        total_per_bin_group[np.isnan(total_per_bin_group)] = 0
+        deltas = correct_per_bin_group_ - probs_per_bin_group_
+        return deltas
 
-        # sum the probabilities per bin
-        bin_sums_group = np.array(
-            [
-                [assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)].sum() for g in groups.T]
-                for i in self.grid
-            ]
-        )
-
-        # calculate the average confidence per bin
-        average_bin_group_confidence = np.divide(
-            bin_sums_group,
-            total_per_bin_group,
-            where=np.array(total_per_bin_group) != 0,
-        )
-
-        deltas = []
-        for corr_bin_group, conf_bin_group, bin_group_count in zip(
-            correct_per_bin_group, average_bin_group_confidence, total_per_bin_group
-        ):
-            deltas.append((corr_bin_group - conf_bin_group))
-        return np.array(deltas)
+        
