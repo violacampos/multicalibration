@@ -70,14 +70,24 @@ class split:
         self.test_data.drop(columns=["groups"])
         self.val_data.drop(columns=["groups"])
         
+    #######################################################
+    
     def get_train_probs(self):
         return self.train_data["probs"]
+    
+    def get_train_is_correct(self):
+        return self.train_data["is_correct"]
+    
+    def get_train_groups(self):
+        return self.train_groups
+    
+    #######################################################
 
     def get_test_probs(self):
         return self.test_data["probs"]
-
-    def get_val_probs(self):
-        return self.val_data["probs"]
+    
+    def set_test_probs(self, new_probs):
+        self.test_data["probs"] = new_probs
 
     def get_test_is_correct(self):
         return self.test_data["is_correct"]
@@ -99,3 +109,14 @@ class split:
 
     def get_test_token_logprobs(self):
         return self.test_data["token_logprobs"]
+    
+    #######################################################
+    
+    def get_val_probs(self):
+        return self.val_data["probs"]
+    
+    def get_val_is_correct(self):
+        return self.val_data["is_correct"]
+    
+    def get_val_groups(self):
+        return self.val_groups

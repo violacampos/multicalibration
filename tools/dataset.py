@@ -120,11 +120,24 @@ class LiveCodeBenchDataset(Dataset):
         # Each item is a list of 10 values
         return self.data[self.split].iloc[idx]
     
+    ########################################################
+    
     def get_train_probs(self):
         return self.data['train']['probs']
+    
+    def get_train_is_correct(self):
+        return self.data['train']['is_correct']
+    
+    def get_train_groups(self):
+        return np.array(self.data['train']['groups'].to_list())
+
+    ########################################################
 
     def get_test_probs(self):
         return self.data['test']['probs']
+    
+    def set_test_probs(self, new_probs):
+        self.data['test']['probs'] = new_probs
 
     def get_test_is_correct(self):
         return self.data['test']['is_correct']
@@ -146,8 +159,18 @@ class LiveCodeBenchDataset(Dataset):
 
     def get_test_token_logprobs(self):
         return self.data['test']['token_logprobs']
+    
+    #########################################################
+    
+    def get_val_probs(self):
+        return self.data['val']['probs']
+    
+    def get_val_is_correct(self):
+        return self.data['val']['is_correct']
 
-
+    def get_val_groups(self):
+        return np.array(self.data['val']['groups'].to_list())
+    
         
 if __name__ == "__main__":
     # DEBUG

@@ -55,16 +55,16 @@ if __name__ == "__main__":
     baseline_results = compute_baseline.main(extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)    
 
     print("Histogram binning:")
-    hb_results = run_hb.main(extern=True)    
+    hb_results = run_hb.main(extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)    
     
     print("Linear regression:")
-    lr_results = run_lr.main(extern=True)  
+    lr_results = run_lr.main(extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)  
 
     print("Iterative group histogram binning:")
-    ighb_results = run_ighb.main(extern=True)
-    
+    ighb_results = run_ighb.main(extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)
+
     print("Iterative group linear binning:")
-    iglb_results = run_iglb.main(extern=True)
+    iglb_results = run_iglb.main(extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)
 
     # Collect results in table and print table
     table_print = []
