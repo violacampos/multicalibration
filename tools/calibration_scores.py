@@ -321,7 +321,7 @@ class score:
         )
 
         num_samples = len(assigned_bins)
-        num_correct = np.count_nonzero(labels == 1)
+        num_correct = sum(labels)
 
         # Get Expected Calibration Error
         ece = self.ece(
@@ -355,11 +355,11 @@ class score:
             print(f"{colored(prefix, color)} ASCE: {asce_not_rounded} (not rounded)")
             print(f"{colored(prefix, color)} Expected Variance: {expected_variance}")
 
-        # Get Group conditional unbiasednes
-        if groups is not None:
-            gcu = self.gcu(labels, confidences, groups)
-            if self.outputs:
-                print(f"{colored(prefix, color)} GCU: {gcu}")
+        # Get Group conditional unbiasedness VIOLA: unused?
+        #if groups is not None:
+        #    gcu = self.gcu(labels, confidences, groups)
+        #    if self.outputs:
+        #        print(f"{colored(prefix, color)} GCU: {gcu}")
 
         # Set the reference Score for the Skill Score calculation
         if set_brier_ref:
@@ -389,7 +389,6 @@ class score:
         gasce_not_rounded = self.gasce_not_rounded(confidences, labels, groups)
         if self.outputs:
             print(f"{colored(prefix, color)} GASCE: {np.round(gasce, 3)}")
-        if self.outputs:
             print(
                 f"{colored(prefix, color)} GASCE: {np.round(gasce_not_rounded, 3)} (not rounded)"
             )

@@ -15,10 +15,22 @@ def load_parser():
         nargs="+")
 
     parser.add_argument(
+        "--data_path", 
+        type=str,  
+        help="Path to jsonlines-file with results.", 
+        default=None)
+
+    parser.add_argument(
         "--problem", 
         choices=["code-gen", "program-repair"],
         default="code-gen",
         help="Which set to evaluate")
+    
+    parser.add_argument(
+        "--benchmark", 
+        choices=["livecodebench", "humaneval"],
+        default="humaneval",
+        help="The evaluation benchmark.")
         
     parser.add_argument(
         "--split", 

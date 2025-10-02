@@ -1,3 +1,4 @@
+import numpy as np
 import run_hb
 import run_lr
 import run_ighb
@@ -6,33 +7,52 @@ import compute_baseline
 from tabulate import tabulate
 import os
 from tools import binning, cmd_input
+from tools.split import split
 from tools.data import data_loader
 import pickle
+
+from tools.dataset import GroupConfig, LiveCodeBenchDataset
 
 if __name__ == "__main__":
     # loads commandline parameter
     args = cmd_input.load_parser()
-
-    # extract run name from path
-    run = args.dir[0].split('/')[-1]
-
-    # get run dir
-    run_dirs = [x[0] for x in os.walk(args.dir[0])]
-    run_dirs.sort()
-
-    run_dir = run_dirs[0]
-
-    # Load data and setup grid/chartmaker
-    data_obj = data_loader(args, run_dir, False, "comparison")
     
-    grid, chartmaker = binning.get_grid_and_chartmaker(run, 
+    if args.benchmark == "livecodebench":
+        config = GroupConfig(add_counter=False, 
+                 larger_than_median_loc=True, 
+                 larger_than_median_prompt=True,
+                 larger_than_median_output=True,
+                 difficulty_easy=True,
+                 difficulty_medium=True,
+                 difficulty_hard=True)
+        split_obj = LiveCodeBenchDataset(
+                jsonl_path =args.data_path, 
+                 split='train', 
+                 group_config=config)
+        
+    else:
+
+        # get run dir
+        run_dirs = [x[0] for x in os.walk(args.dir[0])]
+        run_dirs.sort()
+
+        run_dir = run_dirs[0]
+
+        # Load data and setup grid/chartmaker
+        data_obj = data_loader(args, run_dir, False, "comparison")
+        # Splits the loaded data
+        split_obj = split(args.split, data_obj)
+        
+
+
+    grid, chartmaker = binning.get_grid_and_chartmaker(split_obj.run, 
                                                        args, 
-                                                       data_obj.save_dir, 
+                                                       split_obj.save_dir, 
                                                        False)
     
     # execute every calibration approach
     print("Baseline:")
-    baseline_results = compute_baseline.main(extern=True)    
+    baseline_results = compute_baseline.main(extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)    
 
     print("Histogram binning:")
     hb_results = run_hb.main(extern=True)    
@@ -64,7 +84,7 @@ if __name__ == "__main__":
     print(table_print)
 
     if args.save_table:
-        with open(data_obj.save_dir+'scores.txt', 'w') as f:
+        with open(split_obj.save_dir+'scores.txt', 'w') as f:
             f.write(table_print)
 
     # Create charts for comparison
@@ -126,5 +146,5 @@ if __name__ == "__main__":
             "token_logprobs": baseline_results["token_logprobs"]
         }
 
-        with open(data_obj.save_dir+'calibration_data/calibration.pkl', 'wb') as f:
+        with open(split_obj.save_dir+'calibration_data/calibration.pkl', 'wb') as f:
             pickle.dump(data, f)

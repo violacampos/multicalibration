@@ -18,6 +18,9 @@ class split:
         self.test_groups = None
         self.val_groups = None
 
+        self.run = data_obj.run
+        self.save_dir = data_obj.save_dir
+
         if split:
             self.split_in_train_test(data_obj)
         else:
@@ -66,3 +69,33 @@ class split:
         self.train_data.drop(columns=["groups"])
         self.test_data.drop(columns=["groups"])
         self.val_data.drop(columns=["groups"])
+        
+    def get_train_probs(self):
+        return self.train_data["probs"]
+
+    def get_test_probs(self):
+        return self.test_data["probs"]
+
+    def get_val_probs(self):
+        return self.val_data["probs"]
+
+    def get_test_is_correct(self):
+        return self.test_data["is_correct"]
+
+    def get_test_groups(self):
+        return self.test_groups
+
+    def get_test_languages(self):
+        return self.test_data["languages"]
+
+    def get_test_names(self):
+        return self.test_data["names"]
+
+    def get_test_programs(self):
+        return self.test_data["programs"]
+
+    def get_test_prompts(self):
+        return self.test_data["prompts"]
+
+    def get_test_token_logprobs(self):
+        return self.test_data["token_logprobs"]

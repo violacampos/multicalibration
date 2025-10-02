@@ -2,66 +2,49 @@ import numpy as np
 import os
 
 from tools import  binning, cmd_input
-from tools.data import data_loader
-from tools.split import split
 from tools.calibration_scores import score
 import matplotlib.pyplot as plt
 
 DEBUG = False
 OUTPUTS = True
+BIGCODEBENCH = True
 
 np.seterr(divide='ignore', invalid='ignore')
 
-def main(extern=False):
+def main(data_provider, extern=False, grid=None, chartmaker=None):
+
+    
     # loads commandline parameter
     args = cmd_input.load_parser()
-
-    # get run dir
-    run_dirs = [x[0] for x in os.walk(args.dir[0])]
-    run_dirs.sort()
-
-    run_dir = run_dirs[0]
-
-    # if main dir is in list just continue
-    if run_dir == args.dir[0] and ("humaneval" not in run_dir and "mbpp" not in run_dir) and args.problem == 'code-gen':
-        exit()
     
-    # Loads all the necessary data into an dict
-    data_obj = data_loader(args, run_dir, extern, "baseline")
 
-    # Splits the loaded data
-    split_obj = split(args.split, data_obj)
-
-    # get group matrix
-    groups = np.array([np.array(xi) for xi in data_obj.data["groups"].values])
-
-    print(f"Group count: {groups.sum(axis=0)}")
-
-    # get the grid for binning type and the chartmaker obj        
-    grid, chartmaker = binning.get_grid_and_chartmaker(data_obj.run, 
-                                                       args, 
-                                                       data_obj.save_dir, 
-                                                       extern, 
-                                                       probs=split_obj.train_data["probs"])
+    if grid is None or chartmaker is None:
+        # get the grid for binning type and the chartmaker obj
+        grid, chartmaker = binning.get_grid_and_chartmaker(data_provider.run,
+                                                           args,
+                                                           data_provider.save_dir,
+                                                           extern, 
+                                                           probs=data_provider.get_train_probs())
+   
             
     score_obj = score(grid, OUTPUTS, DEBUG)
 
     # calculate scores for the uncalibrated test set
-    scores_uncalibrated = score_obj.calc_all(   split_obj.test_data["probs"], 
-                                                    split_obj.test_data["is_correct"],
-                                                    groups=split_obj.test_groups, 
+    scores_uncalibrated = score_obj.calc_all(data_provider.get_test_probs(),
+                                                    data_provider.get_test_is_correct(),
+                                                    groups=data_provider.get_test_groups(),
                                                     set_brier_ref=True)
 
-    _, _, total_bin_uncalibrated, correctness_bin_uncalibrated = score_obj.get_total_and_correctness(split_obj.test_data["probs"], 
-                                                                                                     split_obj.test_data["is_correct"], 
-                                                                                                     split_obj.test_groups)
+    _, _, total_bin_uncalibrated, correctness_bin_uncalibrated = score_obj.get_total_and_correctness(data_provider.get_test_probs(),
+                                                                                                     data_provider.get_test_is_correct(),
+                                                                                                     data_provider.get_test_groups())
 
-    total_group_uncalib, correctness_group_uncalib, average_group_confidence_uncalib = score_obj.get_correctness_per_group(split_obj.test_data["probs"], 
-                                                                                                                           split_obj.test_data["is_correct"], 
-                                                                                                                           split_obj.test_groups)    
+    total_group_uncalib, correctness_group_uncalib, average_group_confidence_uncalib = score_obj.get_correctness_per_group(data_provider.get_test_probs(),
+                                                                                                                           data_provider.get_test_is_correct(),
+                                                                                                                           data_provider.get_test_groups())
 
     # Add entry for the run in the score table
-    score_obj.add_to_score_table(data_obj.run, scores_uncalibrated, [], baseline=True)
+    score_obj.add_to_score_table(data_provider.run, scores_uncalibrated, [], baseline=True)
     
     # only return values when script is called from another script
     if extern:
@@ -71,14 +54,14 @@ def main(extern=False):
                 "average_group_confidence_uncalib": average_group_confidence_uncalib,
                 "total_group_uncalib": total_group_uncalib,
                 "scores_uncalibrated": scores_uncalibrated,
-                "uncalibrated_probs": split_obj.test_data["probs"],
-                "is_correct": split_obj.test_data["is_correct"],
-                "groups": split_obj.test_groups,
-                "language": split_obj.test_data["languages"],
-                "names": split_obj.test_data["names"],
-                "programs": split_obj.test_data["programs"],
-                "prompts": split_obj.test_data["prompts"],
-                "token_logprobs": split_obj.test_data["token_logprobs"]}
+                "uncalibrated_probs": data_provider.get_test_probs(),
+                "is_correct": data_provider.get_test_is_correct(),
+                "groups": data_provider.get_test_groups(),
+                "language": data_provider.get_test_languages(),
+                "names": data_provider.get_test_names(),
+                "programs": data_provider.get_test_programs(),
+                "prompts": data_provider.get_test_prompts(),
+                "token_logprobs": data_provider.get_test_token_logprobs()}
     else:
         if args.save_charts:
             _, axs = plt.subplots(1, 1, figsize=(6, 5))
@@ -97,7 +80,7 @@ def main(extern=False):
 
     # saves the score table
     if args.save_table:
-        with open(data_obj.save_dir+'scores.txt', 'w') as f:
+        with open(data_provider.save_dir+'scores.txt', 'w') as f:
             f.write(score_obj.printable_table)
 
 

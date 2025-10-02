@@ -1,7 +1,8 @@
+import copy
 import numpy as np
 import json
 
-class groups:
+class Groups:
 
     def __init__(self, programs, prompts, languages, names, include_counter=False):
         """
@@ -23,7 +24,7 @@ class groups:
         self.run = None
         self.include_counter = include_counter
     
-    def create_groups(self, problem, run, group_style=None, scc_infos=None):
+    def create_groups(self, problem, run, group_style=None, scc_infos=None, difficulty=None):
         """
             Creates the group matrix
 
@@ -40,11 +41,23 @@ class groups:
             self.set_median_loc()
             self.set_median_prompt()
             if scc_infos is None:
-                for program, prompt  in zip(self.programs, self.prompts):
-                    self.groups_w.append(self.check_groups_code_gen(prompt, program, group_style=group_style))   
+                if difficulty is None or len(difficulty) == 0:
+                    for program, prompt  in zip(self.programs, self.prompts):
+                        self.groups_w.append(self.check_groups_code_gen(prompt, program, group_style=group_style))   
+                else:
+                    for program, prompt, diff  in zip(self.programs, self.prompts, difficulty):
+                        self.groups_w.append(self.check_groups_code_gen(prompt, 
+                                                                        program, 
+                                                                        group_style=group_style, 
+                                                                        difficulty=diff))
+
             else:
                 for program, prompt, infos  in zip(self.programs, self.prompts, scc_infos):
-                    self.groups_w.append(self.check_groups_code_gen(prompt, program, group_style=group_style, infos=infos))   
+                    self.groups_w.append(self.check_groups_code_gen(prompt, 
+                                                                    program, 
+                                                                    group_style=group_style, 
+                                                                    infos=infos))
+            
 
         elif problem == 'program-repair':
             if group_style == 'simple':
@@ -62,7 +75,10 @@ class groups:
         """
             Sets the median line of code for group creation purposes.
         """
-        loc = np.array([program.count("\n")+1 for program in self.programs])
+        if len(self.programs) > 0 and isinstance(self.programs[0], list):
+            loc = np.array([program.count("\n")+1 for sublist in self.programs for program in sublist])
+        else:
+            loc = np.array([program.count("\n")+1 for program in self.programs])
         self.median_loc = np.median(loc)
 
     def set_median_prompt(self):
@@ -72,7 +88,7 @@ class groups:
         length = np.array([len(prompts) for prompts in self.prompts])
         self.median_prompt = np.median(length)
 
-    def check_groups_code_gen(self, prompt, program, group_style=None, infos=None):
+    def check_groups_code_gen(self, prompt, program, group_style=None, infos=None, difficulty=None):
         """
             Checks the if the sample is in the defined groups with the corresponding grouping style.
 
@@ -93,9 +109,22 @@ class groups:
             check.append(1 if "example" in prompt else 0)
             if self.include_counter: check.append(0 if "example" in prompt else 1)
             
+            if difficulty is not None:
+                check.append(1 if difficulty == 'easy' else 0)
+                check.append(1 if difficulty == 'medium' else 0)
+                check.append(1 if difficulty == 'hard' else 0)
+            
             # Median line of code
-            check.append(1 if program.count("\n")+1 > self.median_loc else 0)
-            if self.include_counter: check.append(0 if program.count("\n")+1 > self.median_loc else 1)
+            if isinstance(program, list):
+                # TODO: fix for list of programs
+                check_ = [copy.deepcopy(check)] * len(program)
+                for i, prog in enumerate(program):
+                    check_[i].append(1 if prog.count("\n")+1 > self.median_loc else 0)
+                    if self.include_counter: check_[i].append(0 if prog.count("\n")+1 > self.median_loc else 1)
+            else:
+                check.append(1 if program.count("\n")+1 > self.median_loc else 0)
+                if self.include_counter: check.append(0 if program.count("\n")+1 > self.median_loc else 1)
+
 
         elif group_style == 'scc':
             # https://en.wikipedia.org/wiki/Cyclomatic_complexity

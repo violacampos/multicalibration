@@ -7,7 +7,7 @@ import numpy as np
 import os
 import datetime
 import re
-from tools.groups import groups
+from tools.groups import Groups
 import pandas as pd
 
 class data_loader:
@@ -106,6 +106,19 @@ class data_loader:
                 yield os.path.join(path_to_parent,fname)
 
 
+    def load_livecodebench_data(self, path):
+        results = []
+        files = list(Path(path).glob("*.jsonl"))
+        assert len(files) > 0, "No .jsonl files found in the specified path."
+        for file in files:
+            with open(file, 'r') as f:
+                for line in f:
+                    data = json.loads(line)
+                    results.append(data)
+        assert len(results) > 0, "No data found in the specified file."
+        num_samples = len(results) * len((results[0]["program"]))
+        return [results], num_samples
+
     def load_multipl_e_run(self, path):
         """
             Loads the results for every sample in the run path.
@@ -174,6 +187,8 @@ class data_loader:
         names = []
         successful = []
         token_logprobs = []
+        difficulty = []
+
 
         QUALITATIVE_SCALE = {
             "Very low": 0,
@@ -185,10 +200,10 @@ class data_loader:
             "Very high": 0.9,
         }
 
-        # Get the token probailities from the samples and create arrays
+        # Get the token probabilities from the samples and create arrays
         for r in results:
             for sample in r:
-                token_count = len(sample["token_ids"])
+                token_count = len(sample["token_ids"]) if 'token_ids' in sample else sample["token_count"]
                 cumulative_logprob = sample["cumulative_logprob"]
                 
                 # Some name changes are needed for mapping.
@@ -202,7 +217,9 @@ class data_loader:
                 # Differentiate in different probability types
                 if type == "avg_logprob":
                     #prob = np.round(np.exp(cumulative_logprob / token_count), 2)
-                    prob = np.exp(cumulative_logprob / token_count)
+                    prob = [
+                        np.exp(cum_log / count) for cum_log, count in zip(cumulative_logprob, token_count)
+                            ] if isinstance(token_count, list) else np.exp(cumulative_logprob / token_count)
                 elif type == "quantitativ":
                     try:
                         template = r"\d{1,3}(?:\.\d+)?\s?\%?"
@@ -232,8 +249,13 @@ class data_loader:
                 names.append(sample["name"])
                 prompts.append(sample["prompt"])
                 prob_value_list.append(prob)
-                is_correct.append(1) if sample["c"] == 1 else is_correct.append(0)
+                if 'is_correct' in sample:
+                    is_correct.append([1 if x == True else 0 for x in sample["is_correct"]])
+                else:
+                    is_correct.append(1) if sample["c"] == 1 else is_correct.append(0)
                 token_logprobs.append(sample["token_logprobs"])
+                if 'difficulty' in sample:
+                    difficulty.append(sample["difficulty"])
 
         # Check if all samples got a probability
         if type in ["qualitativ", "quantitativ"]:
@@ -243,7 +265,7 @@ class data_loader:
         is_correct          = np.array(is_correct)
         languages           = np.array(languages)
 
-        return prob_value_list, is_correct, programms, prompts, languages, names, token_logprobs
+        return prob_value_list, is_correct, programms, prompts, languages, names, token_logprobs, difficulty
 
     def avg_token_probability(self, cumulative_logprob, token_count):
         """
@@ -397,9 +419,15 @@ class data_loader:
         """
         if args.problem == "code-gen":    
             # load the data from the run directory
-            results, temperature, top_p, num_samples = self.load_multipl_e_run(run_dir)
-            run = run_dir.split("/runs/", 1)[1]
-            run = run.replace('/', '')
+            if 'LiveCodeBench' in run_dir:
+                results, num_samples = self.load_livecodebench_data(run_dir)
+                temperature = None
+                top_p = None
+                run = run_dir.split("/output/", 1)[1].replace('/preprocessed', '').replace('/', '_')    
+            else:
+                results, temperature, top_p, num_samples = self.load_multipl_e_run(run_dir)
+                run = run_dir.split("/runs/", 1)[1]
+                run = run.replace('/', '')
         elif args.problem == "program-repair":
             run = run_dir.split("/runs/", 1)[1]  
             temperature = 1.0
@@ -419,23 +447,30 @@ class data_loader:
         if args.problem == "code-gen":  
             # probs -> confidence of the model
             # is_correct -> label 1: is correct, 0: is not correct
-            probs, is_correct, programs, prompts, languages, names, token_logprobs = self.load_samples(results, verb_data, type=args.prob_method)
+            probs, is_correct, programs, prompts, languages, names, token_logprobs, difficulty = self.load_samples(results, verb_data, type=args.prob_method)
         elif args.problem == "program-repair":
-            probs, is_correct, programs, prompts, languages, names, token_logprobs = self.load_program_repair_data(run_dir)
+            probs, is_correct, programs, prompts, languages, names, token_logprobs, difficulty = self.load_program_repair_data(run_dir)
             num_samples = len(probs)
         else:
             exit("Couldn't find data for problem.")
 
         # Creates group obj and group matrix
-        group_obj = groups(programs, prompts, languages, names, include_counter=args.counter_groups)
+        group_obj = Groups(programs, prompts, languages, names, include_counter=args.counter_groups)
 
         if args.grouping_style == 'scc' or args.grouping_style == 'all':
             scc_infos = self.load_scc_data(run, languages, names)
-            groups_w = group_obj.create_groups(args.problem, run, group_style=args.grouping_style, scc_infos=scc_infos)
+            groups_w = group_obj.create_groups(args.problem, 
+                                               run, 
+                                               group_style=args.grouping_style, 
+                                               scc_infos=scc_infos, 
+                                               difficulty=difficulty)
         else:
             # Define group matrix
-            groups_w = group_obj.create_groups(args.problem, run, group_style=args.grouping_style)
-        
+            groups_w = group_obj.create_groups(args.problem, 
+                                               run, 
+                                               group_style=args.grouping_style, 
+                                               difficulty=difficulty)
+
         self.run = run
         self.save_dir = save_dir
         self.num_samples = num_samples
