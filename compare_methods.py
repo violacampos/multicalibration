@@ -18,6 +18,7 @@ if __name__ == "__main__":
     args = cmd_input.load_parser()
     
     if args.benchmark == "livecodebench":
+        # TODO replace hardcoded config
         config = GroupConfig(add_counter=False, 
                  larger_than_median_loc=True, 
                  larger_than_median_prompt=True,

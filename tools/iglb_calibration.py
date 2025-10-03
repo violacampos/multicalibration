@@ -61,7 +61,7 @@ class IGLB_calibration:
 
         :param X: Probabilities for calibration
         :param groups: Group matrix
-        :param assigned_bins: Discretized probabilities
+        :param assigned_bins: Discretized probabilities # VIOLA: TODO removed from iteration, only used for robins saved changes if test==True -> TODO check
         :param tau: Tau of the probabilites that have to be adjusted
         :param bin: Bin of the probabilites that have to be adjusted
         :param group: Group of the probabilites that have to be adjusted
@@ -85,7 +85,7 @@ class IGLB_calibration:
                         if (bin_a <= (bin / self.m)) and (groups[idx, group] == 1)
                         else X[idx]
                     )
-                    for idx, bin_a in enumerate(assigned_bins)
+                    for idx, bin_a in enumerate(X)
                 ]
             )
         else:
@@ -96,11 +96,11 @@ class IGLB_calibration:
                         if (bin_a >= (bin / self.m)) and (groups[idx, group] == 1)
                         else X[idx]
                     )
-                    for idx, bin_a in enumerate(assigned_bins)
+                    for idx, bin_a in enumerate(X)
                 ]
             )
 
-        # Save changes on test subset
+        # Save changes on test subset VIOLA: unchecked
         if test:
             ab_test = binning.round_model_to_grid(X_, self.grid)
             self.changes.append(

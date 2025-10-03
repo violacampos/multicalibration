@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import pandas as pd
 import numpy as np
@@ -37,9 +38,8 @@ class LiveCodeBenchDataset(Dataset):
         self.data_path = jsonl_path
         self.split = split
         self.n = n  # Number of generations per sample
-        self.run = "Qwen3-Coder-30B-A3B"  # TODO extract from path
-        self.save_dir = "../LiveCodeBench/output/Qwen3-Coder-30B-A3B/preprocessed/baseline/"  # TODO
-        
+        self.run, self.save_dir = self.get_run_and_outdir_from_path(jsonl_path)
+
         self.group_config = group_config
         self.median_prompt = None
         self.median_loc = None
@@ -76,7 +76,15 @@ class LiveCodeBenchDataset(Dataset):
             self.data[split]['is_correct'] = self.data[split]['is_correct'].astype(int)
             self.data[split]['probs'] = np.exp(self.data[split]['cumulative_logprob'] / self.data[split]['token_count'])
             self.add_group_info(split=split)
-            
+
+    @staticmethod
+    def get_run_and_outdir_from_path(path:str):
+        model = path.split("/")[-3]
+        filename = path.split("/")[-1].rstrip(".jsonl")
+        run = 'LiveCodeBench_'+ model + '_' + filename
+        dir = "runs/"+run+"/output/"
+        os.makedirs(dir, exist_ok=True)
+        return run, dir
 
     def add_group_info(self, split=None):
         """

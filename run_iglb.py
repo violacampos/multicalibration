@@ -42,9 +42,13 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                                        probs=data_provider.get_train_probs())
 
     # Create object and calculate first deltas and so on
-    iglb = IGLB_calibration(grid, args.epsilon, args.bin_count, OUTPUTS, DEBUG).fit(data_provider.get_train_probs(), 
-                                                                                    data_provider.get_train_is_correct(), 
-                                                                                    data_provider.get_train_groups())
+    iglb = IGLB_calibration(grid, 
+                            args.epsilon, 
+                            args.bin_count, 
+                            OUTPUTS, 
+                            DEBUG).fit(data_provider.get_train_probs(), 
+                                       data_provider.get_train_is_correct(), 
+                                       data_provider.get_train_groups())
     
     scores_uncalibrated = iglb.score_obj.calc_all(  data_provider.get_test_probs(), 
                                                         data_provider.get_test_is_correct(), 
@@ -58,9 +62,9 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
     temp_group_correctness = correctness_group_uncalibrated
     temp_bin_correctness = correctness_bin_uncalibrated
 
-    train_probs = data_provider.get_train_probs().to_numpy()
-    test_probs = data_provider.get_test_probs().to_numpy()
-    val_probs = data_provider.get_val_probs().to_numpy()
+    train_probs = data_provider.get_train_probs().to_numpy(copy=True)
+    test_probs = data_provider.get_test_probs().to_numpy(copy=True)
+    val_probs = data_provider.get_val_probs().to_numpy(copy=True)
 
     history = {}
 
@@ -71,8 +75,9 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                      len(data_provider.get_val_is_correct()))
 
         # Assign bins an calculate the probability for each bin,group and tau combination
+        # VIOLA: removed from predict iteration, only used for robins saved changes if test==True -> TODO check
         assigned_bins = binning.round_model_to_grid(train_probs, grid)   
-        P_S_p_g = iglb.get_P_S_p_g(assigned_bins, data_provider.get_train_groups()) 
+        P_S_p_g = iglb.get_P_S_p_g(train_probs, data_provider.get_train_groups()) 
         
         # get the tau, bin, group for which the probality * deltas_squared maximises
         tau, bin, group = np.unravel_index((P_S_p_g*iglb.deltas_square).argmax(), iglb.deltas.shape)

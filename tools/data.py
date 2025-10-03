@@ -419,15 +419,9 @@ class data_loader:
         """
         if args.problem == "code-gen":    
             # load the data from the run directory
-            if 'LiveCodeBench' in run_dir:
-                results, num_samples = self.load_livecodebench_data(run_dir)
-                temperature = None
-                top_p = None
-                run = run_dir.split("/output/", 1)[1].replace('/preprocessed', '').replace('/', '_')    
-            else:
-                results, temperature, top_p, num_samples = self.load_multipl_e_run(run_dir)
-                run = run_dir.split("/runs/", 1)[1]
-                run = run.replace('/', '')
+            results, temperature, top_p, num_samples = self.load_multipl_e_run(run_dir)
+            run = run_dir.split("/runs/", 1)[1]
+            run = run.replace('/', '')
         elif args.problem == "program-repair":
             run = run_dir.split("/runs/", 1)[1]  
             temperature = 1.0

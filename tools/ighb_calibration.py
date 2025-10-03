@@ -72,7 +72,6 @@ class IGHB_calibration:
         self.max_error = c[np.argmax(c)]
         if self.debug:
             print(f"Max error: {self.max_error}")
-
         return self
 
     def predict(self, X, groups, test=False, is_correct=None):
@@ -88,7 +87,8 @@ class IGHB_calibration:
         """
         assigned_bins = binning.round_model_to_grid(X, self.grid)
 
-        # Select the bin-group combiation with max probability for a sample to be in the bin-group combintation times the deltas squared
+        # Select the bin-group combiation with max probability for 
+        # a sample to be in the bin-group combintation times the deltas squared
         bin, group = np.unravel_index(
             (self.P_S_p_g * self.deltas_square).argmax(), self.deltas.shape
         )
