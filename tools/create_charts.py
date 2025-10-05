@@ -18,36 +18,41 @@ class charts():
         self.debug = binning_type
         self.save_dir = save_dir
         self.grid = grid
+        
+        cmaps = [plt.cm.tab20, plt.cm.tab20b, plt.cm.tab20c]
+        
+        self.colors = [item for sublist in [cm.colors for cm in cmaps] for item in sublist]
+        
 
-        self.colors = [  
-                        'tab:blue',
-                        'tab:orange',
-                        'tab:green',
-                        'tab:red',
-                        'tab:purple',
-                        'tab:brown',
-                        'tab:pink',
-                        'tab:gray',
-                        'tab:olive',
-                        'tab:cyan',
-                        'yellow', 
-                        'indigo', 
-                        'violet', 
-                        'navy', 
-                        'teal', 
-                        'maroon', 
-                        'silver', 
-                        'tan', 
-                        'gold', 
-                        'purple',
-                        'moccasin', 
-                        'bisque', 
-                        'wheat', 
-                        'peachpuff', 
-                        'navajowhite', 
-                        'salmon', 
-                        'crimson'
-                    ]
+        # self.colors = [  
+        #                 'tab:blue',
+        #                 'tab:orange',
+        #                 'tab:green',
+        #                 'tab:red',
+        #                 'tab:purple',
+        #                 'tab:brown',
+        #                 'tab:pink',
+        #                 'tab:gray',
+        #                 'tab:olive',
+        #                 'tab:cyan',
+        #                 'yellow', 
+        #                 'indigo', 
+        #                 'violet', 
+        #                 'navy', 
+        #                 'teal', 
+        #                 'maroon', 
+        #                 'silver', 
+        #                 'tan', 
+        #                 'gold', 
+        #                 'purple',
+        #                 'moccasin', 
+        #                 'bisque', 
+        #                 'wheat', 
+        #                 'peachpuff', 
+        #                 'navajowhite', 
+        #                 'salmon', 
+        #                 'crimson'
+        #             ]
 
         # define chart ranges for display reasons
         if binning_type == 'linear':

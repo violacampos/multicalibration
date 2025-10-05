@@ -17,19 +17,29 @@ if __name__ == "__main__":
     # loads commandline parameter
     args = cmd_input.load_parser()
     
-    if args.benchmark == "livecodebench":
+    if args.benchmark in ["livecodebench", "mceval"]:
         # TODO replace hardcoded config
-        config = GroupConfig(add_counter=False, 
-                 larger_than_median_loc=True, 
-                 larger_than_median_prompt=True,
-                 larger_than_median_output=True,
-                 difficulty_easy=True,
-                 difficulty_medium=True,
-                 difficulty_hard=True)
+        config_lcb = GroupConfig(add_counter=False, 
+                larger_than_median_loc=True,
+                larger_than_median_prompt=True,
+                larger_than_median_output=True,
+                difficulty_easy=True,
+                difficulty_medium=True,
+                difficulty_hard=True)
+        config_mce = GroupConfig(add_counter=False, 
+                language=True,
+                larger_than_median_loc=False, # TODO extract code
+                larger_than_median_prompt=True,
+                larger_than_median_output=True,
+                difficulty_easy=True,
+                difficulty_medium=True, 
+                difficulty_hard=True)
+        config = config_lcb if args.benchmark == 'livecodebench' else config_mce
         split_obj = LiveCodeBenchDataset(
                 jsonl_path =args.data_path, 
-                 split='train', 
-                 group_config=config)
+                split='train', 
+                benchmark=args.benchmark,
+                group_config=config)
         
     else:
 
