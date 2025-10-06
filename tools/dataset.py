@@ -19,7 +19,7 @@ class GroupConfig:
         difficulty_hard=True,
     ):
         self.add_counter = add_counter
-        self.language = True
+        self.language = language
         self.larger_than_median_loc = larger_than_median_loc
         self.larger_than_median_prompt = larger_than_median_prompt
         self.larger_than_median_output = larger_than_median_output

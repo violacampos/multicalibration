@@ -20,6 +20,7 @@ if __name__ == "__main__":
     if args.benchmark in ["livecodebench", "mceval"]:
         # TODO replace hardcoded config
         config_lcb = GroupConfig(add_counter=False, 
+                                 language=False,
                 larger_than_median_loc=True,
                 larger_than_median_prompt=True,
                 larger_than_median_output=True,
@@ -28,7 +29,7 @@ if __name__ == "__main__":
                 difficulty_hard=True)
         config_mce = GroupConfig(add_counter=False, 
                 language=True,
-                larger_than_median_loc=False, # TODO extract code
+                larger_than_median_loc=True, # TODO extract code
                 larger_than_median_prompt=True,
                 larger_than_median_output=True,
                 difficulty_easy=True,

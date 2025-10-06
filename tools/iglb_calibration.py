@@ -163,11 +163,11 @@ class IGLB_calibration:
 
         return deltas
 
-    def get_P_S_p_g(self, assigned_bins, groups):
+    def get_P_S_p_g(self, probs, groups):
         """
         Calculates the probability that a sample is in the different tau-bin-group combinations
 
-        :param assigned_bins: Discretized sample probabilities
+        :param probs: Sample probabilities
         :param groups: Group matrix
 
         :return: 3D probaility array
@@ -175,7 +175,7 @@ class IGLB_calibration:
         # Create sets with tau <= bin, for each bin and group
         P_S_p_g_smaller = [
             [
-                len(assigned_bins[(assigned_bins <= i) & (g == 1)]) / len(assigned_bins)
+                len(probs[(probs <= i) & (g == 1)]) / len(probs)
                 for g in groups.T
             ]
             for i in self.grid
@@ -184,7 +184,7 @@ class IGLB_calibration:
         # Create sets with tau >= bin, for each bin and group
         P_S_p_g_greater = [
             [
-                len(assigned_bins[(assigned_bins >= i) & (g == 1)]) / len(assigned_bins)
+                len(probs[(probs >= i) & (g == 1)]) / len(probs)
                 for g in groups.T
             ]
             for i in self.grid
