@@ -29,15 +29,37 @@ class split:
         self.fix_groups()
         self.check_data_set()
 
-    def split_in_train_test(self, data_obj):
+    def split_in_train_test(self, data_obj, fractions = [0.5, 0.25, 0.25]):
         """
             Split the data into 60% train, 20% validation and 20% test. And sets them as object variables
 
             :param data_obj: Object that contains the data for the run
         """  
-        train_data, self.test_data = train_test_split(data_obj.data, test_size=0.2, random_state=42)
+        df = data_obj.data
+        # clean split along problems
+        group_names = ["train", "val", "test"]
+        rng = np.random.default_rng(42)
+        unique_names = df['names'].unique()
+        rng.shuffle(unique_names)
+        
+        n = len(unique_names)
+        sizes = (np.array(fractions) * n).astype(int)
+        sizes[-1] = n - sizes[:-1].sum()  # fix rounding
+        splits = np.split(unique_names, np.cumsum(sizes)[:-1])
 
-        self.train_data, self.val_data = train_test_split(train_data,  test_size=0.25, random_state=42)
+
+        name_to_split = {name: group for group, names in zip(group_names, splits) for name in names}
+        df["split"] = df["names"].map(name_to_split)
+
+        # --- 4. get split dataframes ---
+        self.train_data = df[df["split"] == "train"]
+        self.val_data = df[df["split"] == "val"]
+        self.test_data = df[df["split"] == "test"]
+        
+        
+        #train_data, self.test_data = train_test_split(data_obj.data, test_size=0.2, random_state=42)
+
+        #self.train_data, self.val_data = train_test_split(train_data,  test_size=0.25, random_state=42)
 
 
     def no_split(self, data_obj):

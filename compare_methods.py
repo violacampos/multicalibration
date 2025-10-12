@@ -11,31 +11,45 @@ from tools.split import split
 from tools.data import data_loader
 import pickle
 
-from tools.dataset import GroupConfig, LiveCodeBenchDataset
+from tools.dataset import GroupConfig, HumanEvalDataset, LiveCodeBenchDataset
 
 if __name__ == "__main__":
     # loads commandline parameter
     args = cmd_input.load_parser()
     
+    
+        # TODO replace hardcoded configs
+        
+    configs = {"livecodebench": GroupConfig(add_counter=False, 
+                                language=False,
+            larger_than_median_loc=True,
+            larger_than_median_prompt=True,
+            larger_than_median_output=True,
+            difficulty_easy=True,
+            difficulty_medium=True,
+            difficulty_hard=True),
+        "mceval": GroupConfig(add_counter=False, 
+            language=True,
+            larger_than_median_loc=True, 
+            larger_than_median_prompt=True,
+            larger_than_median_output=True,
+            difficulty_easy=True,
+            difficulty_medium=True, 
+            difficulty_hard=True),
+        "humaneval": GroupConfig(
+            add_counter=False,
+            larger_than_median_loc=True,
+            larger_than_median_prompt=True,
+            difficulty_easy=False,
+            difficulty_medium=False,
+            difficulty_hard=False,
+            language=True
+        )}
+    
+    config = configs[args.benchmark]
+        
     if args.benchmark in ["livecodebench", "mceval"]:
-        # TODO replace hardcoded config
-        config_lcb = GroupConfig(add_counter=False, 
-                                 language=False,
-                larger_than_median_loc=True,
-                larger_than_median_prompt=True,
-                larger_than_median_output=True,
-                difficulty_easy=True,
-                difficulty_medium=True,
-                difficulty_hard=True)
-        config_mce = GroupConfig(add_counter=False, 
-                language=True,
-                larger_than_median_loc=True, # TODO extract code
-                larger_than_median_prompt=True,
-                larger_than_median_output=True,
-                difficulty_easy=True,
-                difficulty_medium=True, 
-                difficulty_hard=True)
-        config = config_lcb if args.benchmark == 'livecodebench' else config_mce
+        
         split_obj = LiveCodeBenchDataset(
                 jsonl_path =args.data_path, 
                 split='train', 
@@ -49,11 +63,17 @@ if __name__ == "__main__":
         run_dirs.sort()
 
         run_dir = run_dirs[0]
+        
+        split_obj = HumanEvalDataset(
+            jsonl_path =args.data_path, 
+            run_dir=run_dir, 
+            group_config=config)
+        
 
         # Load data and setup grid/chartmaker
-        data_obj = data_loader(args, run_dir, False, "comparison")
+        #data_obj = data_loader(args, run_dir, False, "comparison")
         # Splits the loaded data
-        split_obj = split(args.split, data_obj)
+        #split_obj = split(args.split, data_obj)
         
 
 
@@ -70,7 +90,10 @@ if __name__ == "__main__":
     hb_results = run_hb.main(extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)    
     
     print("Linear regression:")
-    lr_results = run_lr.main(extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)  
+    lr_results = run_lr.main(type='linear', extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)  
+
+    print("Logistic regression:")
+    logr_results = run_lr.main(type='logistic', extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)  
 
     print("Iterative group histogram binning:")
     ighb_results = run_ighb.main(extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker)
@@ -83,6 +106,7 @@ if __name__ == "__main__":
     table_print.append(["Uncalib"]+list(list(baseline_results["scores_uncalibrated"].values())[0].values()))
     table_print.append(["HB"]+list(list(hb_results["scores_calibrated"].values())[0].values()))
     table_print.append(["LR"]+list(list(lr_results["scores_calibrated"].values())[0].values()))
+    table_print.append(["LOGR"]+list(list(logr_results["scores_calibrated"].values())[0].values()))
     table_print.append(["IGHB"]+list(list(ighb_results["scores_calibrated"].values())[0].values()))
     table_print.append(["IGLB"]+list(list(iglb_results["scores_calibrated"].values())[0].values()))
 
