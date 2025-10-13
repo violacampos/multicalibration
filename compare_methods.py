@@ -20,15 +20,18 @@ if __name__ == "__main__":
     
         # TODO replace hardcoded configs
         
-    configs = {"livecodebench": GroupConfig(add_counter=False, 
-                                language=False,
+    configs = {
+        "livecodebench": GroupConfig(
+            add_counter=False, 
+            language=False,
             larger_than_median_loc=True,
             larger_than_median_prompt=True,
             larger_than_median_output=True,
             difficulty_easy=True,
             difficulty_medium=True,
             difficulty_hard=True),
-        "mceval": GroupConfig(add_counter=False, 
+        "mceval": GroupConfig(
+            add_counter=False, 
             language=True,
             larger_than_median_loc=True, 
             larger_than_median_prompt=True,
@@ -69,11 +72,6 @@ if __name__ == "__main__":
             run_dir=run_dir, 
             group_config=config)
         
-
-        # Load data and setup grid/chartmaker
-        #data_obj = data_loader(args, run_dir, False, "comparison")
-        # Splits the loaded data
-        #split_obj = split(args.split, data_obj)
         
 
 
@@ -120,7 +118,7 @@ if __name__ == "__main__":
     print(table_print)
 
     if args.save_table:
-        with open(split_obj.save_dir+'scores.txt', 'w') as f:
+        with open(split_obj.save_dir+f'scores_{args.prob_method}.txt', 'w') as f:
             f.write(table_print)
 
     # Create charts for comparison

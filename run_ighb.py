@@ -30,16 +30,16 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
             exit("Can't use split while using K-Fold!")
 
         kf = KFold(n_splits=5)
-        kf.get_n_splits(data_provider.get_train_probs())
+        kf.get_n_splits(data_provider.get_train_probs(args.prob_method))
 
         history = {}
         for i, (train_index, test_index) in enumerate(
-            kf.split(data_provider.get_train_probs())
+            kf.split(data_provider.get_train_probs(args.prob_method))
         ):
             print(f"Fold {i}:")
 
-            train_X = data_provider.get_train_probs()[train_index]
-            test_X = data_provider.get_train_probs()[test_index]
+            train_X = data_provider.get_train_probs(args.prob_method)[train_index]
+            test_X = data_provider.get_train_probs(args.prob_method)[test_index]
             train_y = data_provider.get_train_is_correct()[train_index]
             test_y = data_provider.get_train_is_correct()[test_index]
             train_groups = data_provider.get_train_groups()[train_index]
@@ -135,18 +135,18 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                 args,
                 data_provider.save_dir,
                 extern,
-                probs=data_provider.get_train_probs(),
+                probs=data_provider.get_train_probs(args.prob_method),
             )
 
         ighb = IGHB_calibration(grid, m, 1 / m, OUTPUTS, DEBUG).fit(
-            data_provider.get_train_probs(),
+            data_provider.get_train_probs(args.prob_method),
             data_provider.get_train_is_correct(),
             data_provider.get_train_groups(),
         )
 
         # Calculate values for uncalibrated test set
         scores_uncalibrated = ighb.score_obj.calc_all(
-            data_provider.get_test_probs(),
+            data_provider.get_test_probs(args.prob_method),
             data_provider.get_test_is_correct(),
             groups=data_provider.get_test_groups(),
             set_brier_ref=True,
@@ -158,7 +158,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
             total_bin_uncalibrated,
             correctness_bin_uncalibrated,
         ) = ighb.score_obj.get_total_and_correctness(
-            data_provider.get_test_probs(),
+            data_provider.get_test_probs(args.prob_method),
             data_provider.get_test_is_correct(),
             data_provider.get_test_groups(),
         )
@@ -167,8 +167,8 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
         temp_bin_correctness = correctness_bin_uncalibrated
 
         # set the conf to calibrate on
-        train_conf = data_provider.get_train_probs().copy()
-        test_conf = data_provider.get_test_probs().copy()
+        train_conf = data_provider.get_train_probs(args.prob_method).copy()
+        test_conf = data_provider.get_test_probs(args.prob_method).copy()
         history = {}
         while ighb.max_error > ighb.alpha:
             # print(f"Max Error: {ighb.max_error}")
@@ -263,7 +263,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                 "average_group_confidence": average_group_confidence,
                 "total_group": total_group,
                 "scores_calibrated": scores_calibrated,
-                "calibrated_probs": data_provider.get_test_probs(),
+                "calibrated_probs": data_provider.get_test_probs(args.prob_method),
             }
         else:
             if args.save_charts:

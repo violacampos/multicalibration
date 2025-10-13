@@ -24,22 +24,22 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                                            args,
                                                            data_provider.save_dir,
                                                            extern, 
-                                                           probs=data_provider.get_train_probs())
+                                                           probs=data_provider.get_train_probs(args.prob_method))
    
             
     score_obj = score(grid, OUTPUTS, DEBUG)
 
     # calculate scores for the uncalibrated test set
-    scores_uncalibrated = score_obj.calc_all(data_provider.get_test_probs(),
+    scores_uncalibrated = score_obj.calc_all(data_provider.get_test_probs(args.prob_method),
                                                     data_provider.get_test_is_correct(),
                                                     groups=data_provider.get_test_groups(),
                                                     set_brier_ref=True)
 
-    _, _, total_bin_uncalibrated, correctness_bin_uncalibrated = score_obj.get_total_and_correctness(data_provider.get_test_probs(),
+    _, _, total_bin_uncalibrated, correctness_bin_uncalibrated = score_obj.get_total_and_correctness(data_provider.get_test_probs(args.prob_method),
                                                                                                      data_provider.get_test_is_correct(),
                                                                                                      data_provider.get_test_groups())
 
-    total_group_uncalib, correctness_group_uncalib, average_group_confidence_uncalib = score_obj.get_correctness_per_group(data_provider.get_test_probs(),
+    total_group_uncalib, correctness_group_uncalib, average_group_confidence_uncalib = score_obj.get_correctness_per_group(data_provider.get_test_probs(args.prob_method),
                                                                                                                            data_provider.get_test_is_correct(),
                                                                                                                            data_provider.get_test_groups())
 
@@ -54,7 +54,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                 "average_group_confidence_uncalib": average_group_confidence_uncalib,
                 "total_group_uncalib": total_group_uncalib,
                 "scores_uncalibrated": scores_uncalibrated,
-                "uncalibrated_probs": data_provider.get_test_probs(),
+                "uncalibrated_probs": data_provider.get_test_probs(args.prob_method),
                 "is_correct": data_provider.get_test_is_correct(),
                 "groups": data_provider.get_test_groups(),
                 "language": data_provider.get_test_languages(),

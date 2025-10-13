@@ -35,14 +35,14 @@ def main(data_provider, type='linear', extern=False, grid=None, chartmaker=None)
         y = data_provider.get_train_is_correct()
         X = data_provider.get_train_groups()
         print(X)
-        print(data_provider.get_train_probs().to_numpy())
-        print(np.append(X, [data_provider.get_train_probs()], ))
+        print(data_provider.get_train_probs(args.prob_method).to_numpy())
+        print(np.append(X, [data_provider.get_train_probs(args.prob_method)], ))
         exit()
     else:
-        #y = data_provider.get_train_is_correct() - data_provider.get_train_probs()
+        #y = data_provider.get_train_is_correct() - data_provider.get_train_probs(args.prob_method)
         #X = data_provider.get_train_groups()
         y = data_provider.get_train_is_correct()
-        X = np.hstack([data_provider.get_train_probs().values.reshape(-1,1), data_provider.get_train_groups()]) 
+        X = np.hstack([data_provider.get_train_probs(args.prob_method).values.reshape(-1,1), data_provider.get_train_groups()]) 
     
     if grid is None or chartmaker is None:
         # get the grid for binning type and the chartmaker obj        
@@ -50,29 +50,29 @@ def main(data_provider, type='linear', extern=False, grid=None, chartmaker=None)
                                                         args, 
                                                         data_provider.save_dir, 
                                                         extern, 
-                                                        probs=data_provider.get_train_probs())
+                                                        probs=data_provider.get_train_probs(args.prob_method))
 
     # Train the linear regression on the train data split
     lr = LR_calibration(grid, OUTPUTS, DEBUG, type).fit(X, y)
 
     # Calculate scores on uncalibrated test set
-    scores_uncalibrated = lr.score_obj.calc_all(data_provider.get_test_probs(), 
+    scores_uncalibrated = lr.score_obj.calc_all(data_provider.get_test_probs(args.prob_method), 
                                                     data_provider.get_test_is_correct(), 
                                                     groups=data_provider.get_test_groups(),
                                                     set_brier_ref=True)
-    total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = lr.score_obj.get_total_and_correctness(data_provider.get_test_probs(), 
+    total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = lr.score_obj.get_total_and_correctness(data_provider.get_test_probs(args.prob_method), 
                                                                                                                                                             data_provider.get_test_is_correct(), 
                                                                                                                                                             data_provider.get_test_groups())
     
     # Make predictions
-    predictions = lr.predict(np.hstack([data_provider.get_test_probs().values.reshape(-1,1), data_provider.get_test_groups()]) )
+    predictions = lr.predict(np.hstack([data_provider.get_test_probs(args.prob_method).values.reshape(-1,1), data_provider.get_test_groups()]) )
         #data_provider.get_test_groups())
 
     # use predictions to calibrate
     if args.control_exp:
         calibrated_predictions = predictions
     else:
-        calibrated_predictions = predictions #+ data_provider.get_test_probs()
+        calibrated_predictions = predictions #+ data_provider.get_test_probs(args.prob_method)
 
     # Calculate scores on uncalibrated test set
     scores_calibrated = lr.score_obj.calc_all(  calibrated_predictions, 

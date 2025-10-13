@@ -44,7 +44,7 @@ def main(extern=False):
     split_obj = split(args.split, data_obj)
 
     # Control experiment to check which groups helps the model to make correct predictions
-    y = data_provider.get_train_is_correct() - data_provider.get_train_probs()
+    y = data_provider.get_train_is_correct() - data_provider.get_train_probs(args.prob_method)
 
     # Create histograms for the token distribtion of each sample
     bin_edges = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
@@ -52,18 +52,18 @@ def main(extern=False):
     histograms_test = np.array([np.histogram([np.round(np.exp(list(l.values())[0][0]),2) for l in sample], bins=bin_edges)[0] for sample in split_obj.test_data["token_logprobs"]])
 
     # Stack input features into one array
-    X = np.hstack((data_provider.get_train_groups(), np.array(data_provider.get_train_probs()).reshape(-1, 1), histograms_train, np.array(split_obj.train_data["probs_quantitativ"]).reshape(-1, 1),np.array(split_obj.train_data["probs_qualitativ"]).reshape(-1, 1)))
-    X_test = np.hstack((data_provider.get_test_groups(), np.array(data_provider.get_test_probs()).reshape(-1, 1), histograms_test, np.array(split_obj.test_data["probs_quantitativ"]).reshape(-1, 1),np.array(split_obj.test_data["probs_qualitativ"]).reshape(-1, 1)))
+    X = np.hstack((data_provider.get_train_groups(), np.array(data_provider.get_train_probs(args.prob_method)).reshape(-1, 1), histograms_train, np.array(split_obj.train_data["probs_quantitativ"]).reshape(-1, 1),np.array(split_obj.train_data["probs_qualitativ"]).reshape(-1, 1)))
+    X_test = np.hstack((data_provider.get_test_groups(), np.array(data_provider.get_test_probs(args.prob_method)).reshape(-1, 1), histograms_test, np.array(split_obj.test_data["probs_quantitativ"]).reshape(-1, 1),np.array(split_obj.test_data["probs_qualitativ"]).reshape(-1, 1)))
 
     print(np.array(data_provider.get_test_groups()).sum(axis=0))
-    print(len(data_provider.get_test_probs()))
+    print(len(data_provider.get_test_probs(args.prob_method)))
 
     # get the grid for binning type and the chartmaker obj        
     grid, chartmaker = binning.get_grid_and_chartmaker(data_provider.run, 
                                                        args, 
                                                        data_provider.save_dir, 
                                                        extern, 
-                                                       probs=data_provider.get_train_probs())
+                                                       probs=data_provider.get_train_probs(args.prob_method))
 
     # Train the linear regression on the train data split
     reg = regressor_calibration(grid, args, OUTPUTS, DEBUG).fit(X,y)
@@ -71,19 +71,19 @@ def main(extern=False):
 
 
     # Calculate scores on uncalibrated test set
-    scores_uncalibrated = reg.score_obj.calc_all(data_provider.get_test_probs(), 
+    scores_uncalibrated = reg.score_obj.calc_all(data_provider.get_test_probs(args.prob_method), 
                                                     data_provider.get_test_is_correct(), 
                                                     groups=data_provider.get_test_groups(),
                                                     set_brier_ref=True)
     
-    total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = reg.score_obj.get_total_and_correctness(data_provider.get_test_probs(), 
+    total_group_uncalibrated, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = reg.score_obj.get_total_and_correctness(data_provider.get_test_probs(args.prob_method), 
                                                                                                                                                             data_provider.get_test_is_correct(), 
                                                                                                                                                             data_provider.get_test_groups())
     
     # Make predictions
     predictions = reg.predict(X_test)
 
-    calibrated_predictions = predictions + data_provider.get_test_probs()
+    calibrated_predictions = predictions + data_provider.get_test_probs(args.prob_method)
 
     # Calculate scores on uncalibrated test set
     scores_calibrated = reg.score_obj.calc_all( calibrated_predictions, 

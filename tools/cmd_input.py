@@ -61,8 +61,13 @@ def load_parser():
     
     parser.add_argument(
         "--prob-method", 
-        choices=["avg_logprob", "qualitativ", "quantitativ"],
-        default="avg_logprob",
+        choices=["avg_prob", 
+                 "qualitativ", 
+                 "quantitativ", 
+                 "code_prob",
+                 "code_top20_prob",
+                 "tail"],
+        default="avg_prob",
         help="Choose which probability to use.")      
 
     parser.add_argument(

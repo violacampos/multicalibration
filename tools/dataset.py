@@ -90,10 +90,14 @@ class LiveCodeBenchDataset(Dataset):
             self.data[split] = pd.DataFrame(data)
             # some postprocessing:
             self.data[split]["is_correct"] = self.data[split]["is_correct"].astype(int)
-            self.data[split]["probs"] = np.exp(
+            self.data[split]["avg_prob"] = np.exp(
                 self.data[split]["cumulative_logprob"] / self.data[split]["token_count"]
             )
             self.add_group_info(split=split)
+
+            self.data[split]["code_prob"] = np.exp(self.data[split]['code_logprob'])
+            self.data[split]["code_top20_prob"] = np.exp(self.data[split]['avg_top20_code_probs'])
+            self.data[split]["tail"] = np.exp(self.data[split]['avg_top20_tail'])
 
     @staticmethod
     def get_run_and_outdir_from_path(path: str, benchmark_name: str):
@@ -173,8 +177,8 @@ class LiveCodeBenchDataset(Dataset):
 
     ########################################################
 
-    def get_train_probs(self):
-        return self.data["train"]["probs"]
+    def get_train_probs(self, prob_type:str):
+        return self.data["train"][prob_type]
 
     def get_train_is_correct(self):
         return self.data["train"]["is_correct"]
@@ -184,8 +188,8 @@ class LiveCodeBenchDataset(Dataset):
 
     ########################################################
 
-    def get_test_probs(self):
-        return self.data["test"]["probs"]
+    def get_test_probs(self, prob_type:str):
+        return self.data["test"][prob_type]
 
     def set_test_probs(self, new_probs):
         self.data["test"]["probs"] = new_probs
@@ -213,8 +217,8 @@ class LiveCodeBenchDataset(Dataset):
 
     #########################################################
 
-    def get_val_probs(self):
-        return self.data["val"]["probs"]
+    def get_val_probs(self, prob_type:str):
+        return self.data["val"][prob_type]
 
     def get_val_is_correct(self):
         return self.data["val"]["is_correct"]

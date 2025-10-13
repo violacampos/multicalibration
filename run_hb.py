@@ -35,24 +35,24 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                                            args,
                                                            data_provider.save_dir,
                                                            extern, 
-                                                           probs=data_provider.get_train_probs())
+                                                           probs=data_provider.get_train_probs(args.prob_method))
             
     # Create calibration object and calculates the deltas
-    hb = hb_calibration(grid, args, OUTPUTS, DEBUG).fit(data_provider.get_train_probs(), 
+    hb = hb_calibration(grid, args, OUTPUTS, DEBUG).fit(data_provider.get_train_probs(args.prob_method), 
                                                   data_provider.get_train_is_correct())
 
     # calculate scores for the uncalibrated test set
-    scores_uncalibrated = hb.score_obj.calc_all(data_provider.get_test_probs(), 
+    scores_uncalibrated = hb.score_obj.calc_all(data_provider.get_test_probs(args.prob_method), 
                                                     data_provider.get_test_is_correct(),
                                                     groups=data_provider.get_test_groups(), 
                                                     set_brier_ref=True)
     
-    _, _, total_bin_uncalibrated, correctness_bin_uncalibrated = hb.score_obj.get_total_and_correctness(data_provider.get_test_probs(), 
+    _, _, total_bin_uncalibrated, correctness_bin_uncalibrated = hb.score_obj.get_total_and_correctness(data_provider.get_test_probs(args.prob_method), 
                                                                                                         data_provider.get_test_is_correct(), 
                                                                                                         data_provider.get_test_groups())
 
     # Uses the deltas to calculate the corrected values
-    corrected_probs = hb.predict(data_provider.get_test_probs()) 
+    corrected_probs = hb.predict(data_provider.get_test_probs(args.prob_method)) 
 
     # calculate scores for the calibrated test set
     scores_calibrated = hb.score_obj.calc_all(  corrected_probs, 

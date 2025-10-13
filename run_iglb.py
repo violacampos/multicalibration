@@ -39,32 +39,32 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                                        args, 
                                                        data_provider.save_dir,  
                                                        extern, 
-                                                       probs=data_provider.get_train_probs())
+                                                       probs=data_provider.get_train_probs(args.prob_method))
 
     # Create object and calculate first deltas and so on
     iglb = IGLB_calibration(grid, 
                             args.epsilon, 
                             args.bin_count, 
                             OUTPUTS, 
-                            DEBUG).fit(data_provider.get_train_probs(), 
+                            DEBUG).fit(data_provider.get_train_probs(args.prob_method), 
                                        data_provider.get_train_is_correct(), 
                                        data_provider.get_train_groups())
     
-    scores_uncalibrated = iglb.score_obj.calc_all(  data_provider.get_test_probs(), 
+    scores_uncalibrated = iglb.score_obj.calc_all(  data_provider.get_test_probs(args.prob_method), 
                                                         data_provider.get_test_is_correct(), 
                                                         groups=data_provider.get_test_groups(), 
                                                         set_brier_ref=True)
     
-    _, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = iglb.score_obj.get_total_and_correctness( data_provider.get_test_probs(), 
+    _, correctness_group_uncalibrated, total_bin_uncalibrated, correctness_bin_uncalibrated = iglb.score_obj.get_total_and_correctness( data_provider.get_test_probs(args.prob_method), 
                                                                                                                                         data_provider.get_test_is_correct(), 
                                                                                                                                         data_provider.get_test_groups()) 
     
     temp_group_correctness = correctness_group_uncalibrated
     temp_bin_correctness = correctness_bin_uncalibrated
 
-    train_probs = data_provider.get_train_probs().to_numpy(copy=True)
-    test_probs = data_provider.get_test_probs().to_numpy(copy=True)
-    val_probs = data_provider.get_val_probs().to_numpy(copy=True)
+    train_probs = data_provider.get_train_probs(args.prob_method).to_numpy(copy=True)
+    test_probs = data_provider.get_test_probs(args.prob_method).to_numpy(copy=True)
+    val_probs = data_provider.get_val_probs(args.prob_method).to_numpy(copy=True)
 
     history = {}
 
