@@ -365,7 +365,7 @@ class score:
         if set_brier_ref:
             self.p_r, self.brier_ref_score = self.brier_ref(num_correct, num_samples)
             if self.outputs:
-                print(f"{colored(prefix, color)} Baseline: {self.p_r}")
+                print(f"{colored(prefix, color)} Base rate (p(correct)): {self.p_r}")
                 print(f"{colored(prefix, color)} Brier ref: {self.brier_ref_score}")
 
         # Calculate the Skill score

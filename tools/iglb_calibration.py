@@ -137,8 +137,8 @@ class IGLB_calibration:
         deltas_smaller = [
             [
                 np.mean(
-                    y[(assigned_bins <= i) & (g == 1)]
-                    - assigned_bins[(assigned_bins <= i) & (g == 1)]
+                    y[(X <= i) & (g == 1)]
+                    - X[(X <= i) & (g == 1)]
                 )
                 for g in groups.T
             ]
@@ -149,8 +149,8 @@ class IGLB_calibration:
         deltas_greater = [
             [
                 np.mean(
-                    y[(assigned_bins >= i) & (g == 1)]
-                    - assigned_bins[(assigned_bins >= i) & (g == 1)]
+                    y[(X >= i) & (g == 1)]
+                    - X[(X >= i) & (g == 1)]
                 )
                 for g in groups.T
             ]

@@ -57,7 +57,8 @@ if __name__ == "__main__":
                 jsonl_path =args.data_path, 
                 split='train', 
                 benchmark=args.benchmark,
-                group_config=config)
+                group_config=config,
+                args=args)
         
     else:
 
@@ -123,7 +124,8 @@ if __name__ == "__main__":
 
     # Create charts for comparison
     if args.save_charts:
-        chartmaker.calibration_method_comp_chart(grid,
+        chartmaker.calibration_method_comp_chart(args.prob_method,
+                                                 grid,
                                             grid[hb_results["total_bin_calibrated"] != 0],
                                             grid[lr_results["total_bin_calibrated"] != 0],
                                             grid[ighb_results["total_bin_calibrated"] != 0],
@@ -136,7 +138,8 @@ if __name__ == "__main__":
         
 
         
-        chartmaker.calibration_method_comp_bar_chart(baseline_results["total_bin_uncalibrated"],
+        chartmaker.calibration_method_comp_bar_chart(args.prob_method,
+                                                     baseline_results["total_bin_uncalibrated"],
                                             hb_results["total_bin_calibrated"],
                                             lr_results["total_bin_calibrated"],
                                             ighb_results["total_bin_calibrated"],
@@ -147,7 +150,8 @@ if __name__ == "__main__":
                                             ighb_results["correctness_bin_calibrated"], 
                                             iglb_results["correctness_bin_calibrated"])
         
-        chartmaker.group_calibration_scatter(baseline_results["correctness_group_uncalib"], 
+        chartmaker.group_calibration_scatter(args.prob_method,
+                                             baseline_results["correctness_group_uncalib"], 
                                             baseline_results["average_group_confidence_uncalib"], 
                                             baseline_results["total_group_uncalib"],
                                             hb_results["correctness_group"], 

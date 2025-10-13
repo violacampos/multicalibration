@@ -65,8 +65,9 @@ def load_parser():
                  "qualitativ", 
                  "quantitativ", 
                  "code_prob",
+                 "tail_prob",
                  "code_top20_prob",
-                 "tail"],
+                 "tail_top20_prob"],
         default="avg_prob",
         help="Choose which probability to use.")      
 

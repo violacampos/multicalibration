@@ -130,8 +130,8 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                             data_provider.get_val_is_correct(), 
                                             len(data_provider.get_val_is_correct()))
         
-        if mse_h_t_plus_1 > mse_f_t:
-            if OUTPUTS: print(f"MSE h_t+1: {mse_h_t_plus_1} > MSE f_t: {mse_f_t}")
+        if mse_h_t_plus_1 >= mse_f_t:
+            if OUTPUTS: print(f"MSE h_t+1: {mse_h_t_plus_1} >= MSE f_t: {mse_f_t}")
             break
         
         # Set the new model for the next iteration

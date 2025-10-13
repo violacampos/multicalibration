@@ -24,35 +24,7 @@ class charts():
         self.colors = [item for sublist in [cm.colors for cm in cmaps] for item in sublist]
         
 
-        # self.colors = [  
-        #                 'tab:blue',
-        #                 'tab:orange',
-        #                 'tab:green',
-        #                 'tab:red',
-        #                 'tab:purple',
-        #                 'tab:brown',
-        #                 'tab:pink',
-        #                 'tab:gray',
-        #                 'tab:olive',
-        #                 'tab:cyan',
-        #                 'yellow', 
-        #                 'indigo', 
-        #                 'violet', 
-        #                 'navy', 
-        #                 'teal', 
-        #                 'maroon', 
-        #                 'silver', 
-        #                 'tan', 
-        #                 'gold', 
-        #                 'purple',
-        #                 'moccasin', 
-        #                 'bisque', 
-        #                 'wheat', 
-        #                 'peachpuff', 
-        #                 'navajowhite', 
-        #                 'salmon', 
-        #                 'crimson'
-        #             ]
+        
 
         # define chart ranges for display reasons
         if binning_type == 'linear':
@@ -102,7 +74,7 @@ class charts():
         plt.savefig(self.save_dir+"calibration_comparison.png")
         plt.close()
 
-    def calibration_method_comp_chart(self, y1, y2, y3, y4, y5, x1, x2, x3, x4, x5):
+    def calibration_method_comp_chart(self, scoring_method:str, y1, y2, y3, y4, y5, x1, x2, x3, x4, x5):
         """
             Creates a line plot with all calibration methods for comparison
 
@@ -128,10 +100,10 @@ class charts():
         plt.yticks(np.arange(0, 1.1, 0.1))
         plt.xlabel('Confidence')
         plt.ylabel('Correct')
-        plt.savefig(self.save_dir+"calibration_method_comparison.pdf")
+        plt.savefig(self.save_dir+f"{scoring_method}_calibration_method_comparison.pdf")
         plt.close()
 
-    def calibration_method_comp_bar_chart(self, y1, y2, y3, y4, y5, x1, x2, x3, x4, x5):
+    def calibration_method_comp_bar_chart(self, scoring_method:str, y1, y2, y3, y4, y5, x1, x2, x3, x4, x5):
         """
             Creates a bar chart for the baseline and each caliibration method for comparison
 
@@ -154,7 +126,7 @@ class charts():
         self.calibration_bar_chart(axs[2, 0], 'IGHB', x4, self.get_bar_colors(y4), y4)    
         self.calibration_bar_chart(axs[2, 1], 'IGLB', x5, self.get_bar_colors(y5), y5)
         axs[0,1].axis('off')
-        plt.savefig(self.save_dir+"calibration_comparison_bar.pdf")
+        plt.savefig(self.save_dir+f"{scoring_method}_calibration_comparison_bar.pdf")
         plt.close()
 
     """def histogram(self, data, path, typ):
@@ -219,6 +191,7 @@ class charts():
         ax.set(ylabel ='Correct')   
 
     def group_calibration_scatter(self, 
+                                  scoring_method:str,
                                   uncalib_corr,
                                   uncalib_conf,
                                   uncalib_total, 
@@ -249,7 +222,7 @@ class charts():
         self.scatter_plot(axs[2, 0], 'IGHB', ighb_conf, ighb_corr, ighb_total)    
         self.scatter_plot(axs[2, 1], 'IGLB', iglb_conf, iglb_corr, iglb_total)
         axs[0,1].axis('off')
-        plt.savefig(self.save_dir+"group_calibration.pdf")
+        plt.savefig(self.save_dir+f"{scoring_method}_group_calibration.pdf")
         plt.close()
 
     def calibration_info(self, total_uncalibrated, correctness_uncalibrated, total_calibrated, correctness_calibrated):

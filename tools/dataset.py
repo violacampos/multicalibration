@@ -46,6 +46,7 @@ class LiveCodeBenchDataset(Dataset):
         n: int = 10,
         val_ratio: float = 0.25,
         seed: int = 42,
+        args = None
     ):
         self.data = {"train": [], "val": [], "test": []}
         self.data_path = jsonl_path
@@ -64,6 +65,7 @@ class LiveCodeBenchDataset(Dataset):
         with open(jsonl_path, "r") as f:
             for line in f:
                 entry = json.loads(line)
+                
                 entries.append(entry)
 
         # Shuffle and split
@@ -88,6 +90,8 @@ class LiveCodeBenchDataset(Dataset):
                     else:
                         data[key].extend([value] * self.n)
             self.data[split] = pd.DataFrame(data)
+            if args and args.prob_method=='code_prob':
+                self.data[split].dropna(subset=['code_logprob'], inplace=True)
             # some postprocessing:
             self.data[split]["is_correct"] = self.data[split]["is_correct"].astype(int)
             self.data[split]["avg_prob"] = np.exp(
@@ -96,8 +100,9 @@ class LiveCodeBenchDataset(Dataset):
             self.add_group_info(split=split)
 
             self.data[split]["code_prob"] = np.exp(self.data[split]['code_logprob'])
+            self.data[split]["tail_prob"] = np.exp(self.data[split]['tail_logprob'])
             self.data[split]["code_top20_prob"] = np.exp(self.data[split]['avg_top20_code_probs'])
-            self.data[split]["tail"] = np.exp(self.data[split]['avg_top20_tail'])
+            self.data[split]["tail_top20_prob"] = np.exp(self.data[split]['avg_top20_tail'])
 
     @staticmethod
     def get_run_and_outdir_from_path(path: str, benchmark_name: str):
