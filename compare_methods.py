@@ -7,6 +7,7 @@ import compute_baseline
 from tabulate import tabulate
 import os
 from tools import binning, cmd_input
+from tools.create_latex_comands import print_latex_commands
 from tools.split import split
 from tools.data import data_loader
 import pickle
@@ -117,6 +118,16 @@ if __name__ == "__main__":
                                                 'skill_score',
                                                 'GASCE'], tablefmt='orgtbl')
     print(table_print)
+    
+    print_latex_commands(model=split_obj.get_model(), 
+                         benchmark=args.benchmark,
+                         initial_scoring=args.prob_method, 
+                         results={"Uncalib": baseline_results,
+                                            "HB": hb_results,
+                                            "LR": lr_results,
+                                            "LOGR": logr_results,
+                                            "IGHB": ighb_results,
+                                            "IGLB": iglb_results})
 
     if args.save_table:
         with open(split_obj.save_dir+f'scores_{args.prob_method}.txt', 'w') as f:

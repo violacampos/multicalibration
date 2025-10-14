@@ -112,6 +112,9 @@ class LiveCodeBenchDataset(Dataset):
         dir = "runs/" + run + "/output/"
         os.makedirs(dir, exist_ok=True)
         return run, dir
+    
+    def get_model(self)->str:
+        return self.data_path.split("/")[-3]
 
     def add_group_info(self, split=None):
         """

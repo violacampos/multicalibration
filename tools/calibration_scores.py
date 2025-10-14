@@ -345,6 +345,10 @@ class score:
         expected_variance = self.expected_variance(
             assigned_bins, labels, assigned_bins, self.grid, num_samples
         )
+        
+        # get accuracy
+        y_pred = (confidences > 0.5).astype(int)
+        acc = np.mean(y_pred == labels)
 
         # Output results if set
         if self.outputs:
@@ -354,6 +358,7 @@ class score:
             print(f"{colored(prefix, color)} ASCE: {asce}")
             print(f"{colored(prefix, color)} ASCE: {asce_not_rounded} (not rounded)")
             print(f"{colored(prefix, color)} Expected Variance: {expected_variance}")
+            print(f"{colored(prefix, color)} ACC: {acc}")
 
         # Get Group conditional unbiasedness VIOLA: unused?
         #if groups is not None:
@@ -381,6 +386,7 @@ class score:
                 "MSE": mse,
                 "Brier ref": self.brier_ref_score,
                 "Skill Score": skill_score,
+                "ACC": acc,
             }
         }
 
