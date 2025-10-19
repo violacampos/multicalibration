@@ -157,7 +157,7 @@ class LiveCodeBenchDataset(Dataset):
                     check.append(0 if len(row["prompt"]) > self.median_prompt else 1)
             if self.group_config.larger_than_median_loc:
                 check.append(
-                    1 if row["program"].count("\n") + 1 > self.median_loc else 0
+                    1 if row["program"] != None and row["program"].count("\n") + 1 > self.median_loc else 0
                 )
                 if self.group_config.add_counter:
                     check.append(
@@ -221,7 +221,7 @@ class LiveCodeBenchDataset(Dataset):
         return self.data["test"]["prompt"]
 
     def get_test_token_logprobs(self):
-        return self.data["test"]["token_logprobs"]
+        return self.data["test"]["token_logprobs"] if "token_logprobs" in self.data["test"] else None
 
     #########################################################
 
@@ -267,6 +267,16 @@ class HumanEvalDataset(LiveCodeBenchDataset):
         self.split_in_train_test(data)
         for split in self.data:
             self.add_group_info(split=split)
+            
+            
+    def get_test_probs(self, prob_type:str):
+        return self.data["test"]['probs'] # ignore type for humanEval
+    
+    def get_train_probs(self, prob_type:str):
+        return self.data["train"]['probs'] # ignore type for humanEval
+    
+    def get_val_probs(self, prob_type:str):
+        return self.data["val"]['probs'] # ignore type for humanEval
 
     def for_file(self, path: Path):
         """

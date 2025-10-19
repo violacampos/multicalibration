@@ -37,7 +37,7 @@ class charts():
             self.colors_uncalibrated = ['tab:blue']
             self.colors_calibrated = ['tab:blue']
 
-    def get_bar_colors(self, total):
+    def get_bar_colors(self, total, orange=False):
         """
             Calculates the shade of blue for each bar, based on the amount of samples in each bin.
 
@@ -49,7 +49,10 @@ class charts():
         total_bin_count_norm = (total-np.min(total))/(np.max(total)-np.min(total))
         
         for x in total_bin_count_norm:
-           colors.append((0.0, 0.0, 1.0, x))
+            if orange:
+                colors.append(('tab:orange', x))
+            else:
+                colors.append(('tab:blue', x))
 
         return colors
 
@@ -103,7 +106,7 @@ class charts():
         plt.savefig(self.save_dir+f"{scoring_method}_calibration_method_comparison.pdf")
         plt.close()
 
-    def calibration_method_comp_bar_chart(self, scoring_method:str, y1, y2, y3, y4, y5, x1, x2, x3, x4, x5):
+    def calibration_method_comp_bar_chart(self, scoring_method:str, y1, y2, y3, y4, y5, y6, y7, x1, x2, x3, x4, x5, x6, x7):
         """
             Creates a bar chart for the baseline and each caliibration method for comparison
 
@@ -118,14 +121,21 @@ class charts():
             :param x4: List of correctness values for each bin of the IGHB
             :param x5: List of correctness values for each bin of the IGLB
         """  
-        fig, axs = plt.subplots(3, 2, figsize=(10, 15))
         
-        self.calibration_bar_chart(axs[0, 0], 'Uncalibrated', x1, self.get_bar_colors(y1), y1)        
-        self.calibration_bar_chart(axs[1, 0], 'HB', x2, self.get_bar_colors(y2), y2)    
-        self.calibration_bar_chart(axs[1, 1], 'LR', x3, self.get_bar_colors(y3), y3)    
-        self.calibration_bar_chart(axs[2, 0], 'IGHB', x4, self.get_bar_colors(y4), y4)    
-        self.calibration_bar_chart(axs[2, 1], 'IGLB', x5, self.get_bar_colors(y5), y5)
-        axs[0,1].axis('off')
+        plt.rcParams['axes.labelsize'] = 14
+        plt.rcParams['xtick.labelsize'] = 12
+        plt.rcParams['ytick.labelsize'] = 12
+        fig, axs = plt.subplots(1, 7, figsize=(24, 4), sharey=True)
+        
+        self.calibration_bar_chart(axs[0], 'Uncalibrated', x1, self.get_bar_colors(y1, orange=True), ylabel=True)      
+        self.calibration_bar_chart(axs[1], 'Platt', x2, self.get_bar_colors(y2)) #, y2, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))     
+        self.calibration_bar_chart(axs[ 2], 'HB', x3, self.get_bar_colors(y3)) #, y3, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))    
+        self.calibration_bar_chart(axs[ 3], 'LINR', x4, self.get_bar_colors(y4)) #, y4, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))  
+        self.calibration_bar_chart(axs[ 4], 'LOGR', x5, self.get_bar_colors(y5)) #, y5, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))     
+        self.calibration_bar_chart(axs[ 5], 'IGHB', x6, self.get_bar_colors(y6)) #, y6, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))    
+        self.calibration_bar_chart(axs[ 6], 'IGLB', x7, self.get_bar_colors(y7)) #, y7, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))
+
+        plt.tight_layout()
         plt.savefig(self.save_dir+f"{scoring_method}_calibration_comparison_bar.pdf")
         plt.close()
 
@@ -152,7 +162,7 @@ class charts():
         ax.set(xlabel ='Confidence')
         ax.set(ylabel ='Count')
 
-    def calibration_bar_chart(self, ax, sub_title, x, bar_colors, totals=None):
+    def calibration_bar_chart(self, ax, sub_title, x, bar_colors, totals=None, x2=None, bar_colors2=None, ylabel:bool=None):
         """
             Creates a bar chart with the correctness values to display the calibration over the bins.
 
@@ -162,15 +172,20 @@ class charts():
             :param bar_colors: List of colors for the bars
             :param totals: Optional to add totals to each bar
         """  
-        ax.set_title(sub_title, fontsize=12, fontweight="bold")
+        ax.set_title(sub_title, fontsize=18, fontweight="bold")
+
+        
+        if bar_colors2 != None and any(x2 != None):
+            bars = ax.bar(self.grid, x2, width = self.bar_width, color=bar_colors2, edgecolor='black')
         bars = ax.bar(self.grid, x, width = self.bar_width, color=bar_colors, edgecolor='black')
         ax.plot([0, 1], [0, 1], linestyle='--')
         if totals is not None:
             ax.bar_label(bars, totals, fontsize=6)
-        ax.set_xticks(np.arange(0, 1.1, 0.1))
-        ax.set_yticks(np.arange(0, 1.1, 0.1))
+        ax.set_xticks(np.arange(0, 1.1, 0.2))
+        ax.set_yticks(np.arange(0, 1.1, 0.2))
         ax.set(xlabel ='Confidence')
-        ax.set(ylabel ='Correct')
+        if ylabel:
+            ax.set(ylabel ='Correctness')
 
     def scatter_plot(self, ax, method, x, y, area):
         """
@@ -184,23 +199,31 @@ class charts():
         """  
         colors = self.colors[:len(x)]
 
-        scatter = ax.scatter(x, y, s=area, c=colors, alpha=0.7, marker=r'$\odot$')
-        ax.set_title(method, fontsize=12, fontweight="bold")
-        ax.plot([0.150, 0.8], [0.150, 0.8], linestyle='--')
+        scatter = ax.scatter(x, y, s=area, c=colors, alpha=0.9, marker="o") #r'$\odot$')
+        ax.set_title(method, fontsize=18, fontweight="bold")
+        ax.plot([0.0, 1.0], [0.0, 1.0], linestyle='--')
+        ax.set_xticks(np.arange(0, 1.1, 0.2))
+        ax.set_yticks(np.arange(0, 1.1, 0.2))
         ax.set(xlabel ='Confidence')
-        ax.set(ylabel ='Correct')   
+        ax.set(ylabel ='Correctness')   
 
     def group_calibration_scatter(self, 
                                   scoring_method:str,
                                   uncalib_corr,
                                   uncalib_conf,
                                   uncalib_total, 
+                                  platt_corr,
+                                  platt_conf,
+                                  platt_total,
                                   hb_corr,
                                   hb_conf,
                                   hb_total, 
                                   lr_corr,
                                   lr_conf,
-                                  lr_total, 
+                                  lr_total,
+                                  logr_corr,
+                                  logr_conf,
+                                  logr_total,  
                                   ighb_corr,
                                   ighb_conf,
                                   ighb_total, 
@@ -214,14 +237,17 @@ class charts():
             :param ..._conf: confidence for each group of the given method
             :param ..._total: total for each group of the given method
         """          
-        fig, axs = plt.subplots(3, 2, figsize=(10, 15))
+        fig, axs = plt.subplots(1, 7, figsize=(24, 4), sharey=True)
 
-        self.scatter_plot(axs[0, 0], 'Uncalibrated', uncalib_conf, uncalib_corr, uncalib_total)        
-        self.scatter_plot(axs[1, 0], 'HB', hb_conf, hb_corr, hb_total)    
-        self.scatter_plot(axs[1, 1], 'LR', lr_conf, lr_corr, lr_total)    
-        self.scatter_plot(axs[2, 0], 'IGHB', ighb_conf, ighb_corr, ighb_total)    
-        self.scatter_plot(axs[2, 1], 'IGLB', iglb_conf, iglb_corr, iglb_total)
-        axs[0,1].axis('off')
+        self.scatter_plot(axs[0], 'Uncalibrated', uncalib_conf, uncalib_corr, uncalib_total/2)      
+        self.scatter_plot(axs[1], 'Platt', platt_conf, platt_corr, platt_total/2)     
+        self.scatter_plot(axs[2], 'HB', hb_conf, hb_corr, hb_total/2)    
+        self.scatter_plot(axs[3], 'LINR', lr_conf, lr_corr, lr_total/2)  
+        self.scatter_plot(axs[4], 'LOGR', logr_conf, logr_corr, logr_total/2)    
+        self.scatter_plot(axs[5], 'IGHB', ighb_conf, ighb_corr, ighb_total/2)    
+        self.scatter_plot(axs[6], 'IGLB', iglb_conf, iglb_corr, iglb_total/2)
+        #axs[0,1].axis('off')
+        plt.tight_layout()
         plt.savefig(self.save_dir+f"{scoring_method}_group_calibration.pdf")
         plt.close()
 

@@ -5,15 +5,20 @@ import numpy as np
 
 
 name_to_latex = {'Qwen3-Coder-30B-A3B': 'QwenIII',
+                 'Qwen3-Coder-30B-A3B-instruct': 'QwenIII',
+                 'Qwen3-Coder-30B-A3B-Instruct': 'QwenIII',
+                 'GPT-OSS-20B': 'GPTOSS',
+                 'DeepSeek-R1-Distill-Qwen-32B': 'DSR1',
                  'livecodebench': 'LCB',
-                 'humaneval': 'HE'}
+                 'humaneval': 'HE',
+                 'mceval': 'ME'}
 
 
 
 
 def define_latex_cmd(name, value):
     name = re.sub(r"[^a-zA-Z]", "", name)  # sanity check for valid latex commands
-    print("\\newcommand{\\%s }{ %s }" % (name, f"{value:.3f}"))
+    print("\\newcommand{\\%s}{ %s}" % (name, f"{value:.3f}"))
 
 
 def print_commands_for(
