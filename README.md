@@ -1,129 +1,124 @@
-# Masterarbeit
+## Replication Package — *Multicalibration for LLM-based Code Generation*
 
-The scripts are tested on the hsrm megagpu server. It is possible that the results differ when executed on other operation systems/other configurations. This is the case because the data is stored in files and are read up on execution. Therefore the order of the read files can change.
+This repository contains the replication package for the paper:
 
-## Structure
-In the downloaded folder following folder can be found:
-- masterarbeit (contains all scripts for calibration)
-    - analyse/sample_viewer.py: enables the exploration of individual samples
-    - analyse/ighb_history_viewer.py: enables the exploration changes that the ighb approach makes
-    - analyse/iglb_history_viewer.py: enables the exploration changes that the iglb approach makes
-    - calibration_data/*: contains the saved data from the comparison
-    - evaluator_llm/*: scripts to evaluate code samples with another LLM
-    - history_data/*: data from the IGHB/IGLB approach
-    - program_repair/*: scripts and data affilated to the program-repair problem
-    - runs_saved/*: some saved data from previous runs 
-    - scc/*: saved scc results for code generations
-    - tests/*: several test scripts for testing functionality
-    - tolls/*: contains main components for data loading, group creation, score calculation and the calibration logics
-    - verbalized_data/*: contains the saved verbalized probabilites from the evaluator LLM
-    - compute_baseline.py: Computes the baseline for the given data
-    - compare_methods.py: Compares all calibration methods
-    - run_hb.py: Uses histogram binning for calibration
-    - run_lr.py: Uses linear regression for calibration
-    - run_ighb.py: Uses iterative group histogram binning for calibration
-    - run_iglb.py: Uses iterative group linear binning for calibration
-    - run_regressor.py: Can use different regressors and extended input features for calibration
-    - create_programs.py: Creates for all code generations a file and evaluates them with scc
-- MultiPL-E
-    - Benchmark used for code generation, with the extension of returning the token scores.
+> **Multicalibration for LLM-based Code Generation**
+> [Viola Campos, Robin Kuschnereit and Adrian Ulges] (2025)
 
-Furthermore the code generations are stored under 'MultiPL-E/run/'. Currently the generations were made with one model.
+It includes all code and configuration files necessary to reproduce the experiments described in the paper.
+The accompanying dataset will be made publicly available via Hugging Face.
 
+---
 
-## Setup
+### 📦 Contents
 
-All required python packages for the calibration approaches can be found in the requirement.txt file. You need to be in the masterarbeit folder for all following commands.
+| Folder / File      | Description                                                       |
+| ------------------ | ----------------------------------------------------------------- |
+| `src/`             | Source code for running calibration and evaluation experiments    |
+| `configs/`         | Configuration files specifying experiment parameters              |
+| `results/`         | Example outputs and evaluation metrics                            |
+| `requirements.txt` | Python dependencies                                               |
+| `notebooks/`       | Optional Jupyter notebooks for visualization                      |
 
-Therefore navigate to the downloaded folder and use:
+---
+
+### 💾 Dataset
+
+The dataset used in our experiments will be released on **Hugging Face Datasets**:
+👉 [https://huggingface.co/datasets/lavis-nlp/CALIBRI](https://huggingface.co/datasetslavis-nlp/CALIBRI) 
+
+It includes:
+
+* Prompt–completion pairs for three function synthesis benchmarks (`MultiPL-E`, `LiveCodeBench` v6, `McEval`) generated with three reasoning models (`Qwen3-Coder-30B-A3B-Instruct`,
+OpenAI `GPT-OSS-20B` and `DeepSeek-R1-Distill-Qwen-
+32B` )
+* Model-generated token likelihoods
+* Unit test results indicating correctness
+
+---
+
+### ⚙️ Installation
+
+We recommend using a clean Python environment (Python ≥ 3.10):
+
 ```bash
-cd masterarbeit
+git clone https://github.com/violacampos/multicalibration
+cd multicalibration
+python -m venv venv
+source venv/bin/activate  # (on Windows: venv\Scripts\activate)
+pip install -r requirements.txt
 ```
 
+---
 
-To install them create a venv and use the command:
+### 🚀 Running Experiments
+
+To reproduce all experiments from the paper:
+
 ```bash
-pip install -r .\requirements.txt
+python src/compare_methods.py --config configs/experiment.yaml
 ```
 
+You can also specify parameters such as model, dataset, and calibration method:
 
-## Analysis
-To get an overview of the data streamlit can be used to explore individual examples.
-
-Therfore execute the following command:
 ```bash
-streamlit run analyse/sample_viewer.py 
+python src/run_experiments.py \
+    --model qwen3-coder \
+    --dataset livecodebench \
+    --method iglb
 ```
 
-## Commandline parameters
+Results (ECE, BSS, and reliability diagrams) will be saved in `results/`.
 
-| Command | Description |
-| --- | --- |
-| --dir | Directory of the MultiPL-E code generations |
-| --problem | Default: code-gen |
-| --prob-method | Default: avg_logprob. Options: [avg_logprob, qualitativ, quantitativ] |
-| --model | Options: [gpt_4o_mini]. Needs to be set for the qualitativ and quantitativ prob method |
-| --bin-count| Default: 20. Number of bins to calibrate on |
-| --grouping-style| Default: simple. Options: [simple, scc, categories, all] |
-| --counter-groups | Enables the usage of counter groups |
-| --save-table | Table will be saved in run folder |
-| --save-charts | Table will be saved in run folder |
-| --save-data | Saves the data of the comparison results |
-| --split | By adding this the data is splitted in train, test, val |
-| --k-fold | Option for run_ighb.py. Evaluates on 5-Fold split |
-| --epsilon | Only effects run_iglb.py. Hyperparamter for early stopping. |
-| --regressor | Default: LR. Options: [LR, SVR, XGBoost]. Only effects script run_regressor.py |
-| --binning-type | Default: linear. Options: [linear]. Only effects script run_regressor.py |
+---
 
-## Comparison of methods
-For a comparison of all methods the following command can be used:
+### 📊 Evaluation Metrics
+
+The following metrics are implemented:
+
+* **ECE (Expected Calibration Error)**
+* **ASCE (Average Squared Calibration Error)**
+* **Brier Score / Mean Squared Error (MSE)**
+* **Brier Skill Score (BSS)**
+* **Accuracy (ACC)**
+* **GASCE (Grouped Average Squared Calibration Error)**
+
+Reliability diagrams and group-based calibration plots can be generated by passing the parameter `--save-charts`:
+
 ```bash
-python compare_methods.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --counter-groups --save-charts --save-table
+python src/compare_methods.py --config configs/experiment.yaml --save-charts
 ```
 
-This will output the results of every calibration approach. Further more a runs directory will be cerated where the charts are stored.
+---
 
-## Baseline
-Command for calculating the baseline scores:
-```bash
-python compute_baseline.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --save-table --counter-groups
-```
-## Histogram binning
-Command for using only the histogram binning approach:
-```bash
-python run_hb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table
-```
+### 🧩 Citation
 
-## Linear regression
-Command for using only the linear regression approach:
-```bash
-python run_lr.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table
+If you use this code or dataset in your research, please cite:
+
+```bibtex
+@software{campos2025replication,
+  author       = {Viola Campos, Robin Kuschnereit},
+  title        = {Replication Package for: Multicalibration for LLM-based Code Generation},
+  year         = {2025},
+  version      = {1.0.0},
+  publisher    = {GitHub},
+  url          = {https://github.com/violacampos/multicalibration}
+}
 ```
 
-## Iterative group histogram binning
-Command for using only the iterative group histogram binning approach:
-```bash
-python run_ighb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table
-```
+---
 
-To run the k-fold experiment on the IGHB approch the following command can be used:
-```bash
-python run_ighb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --k-fold --bin-count 100
-```
+### 🔍 License
 
-## Iterative group linear binning
-Command for using only the iterative group histogram binning approach:
-```bash
-python run_iglb.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table
-```
+This project is released under the **MIT License** (see `LICENSE`).
 
-## Regressors
-Command for using the differen regressor approach with linear regression:
-```bash
-python run_regressor.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table --model gpt_4o_mini --grouping-style all
-```
+---
 
-Command for using the differen regressor approach with SVR:
-```bash
-python run_regressor.py --dir ../MultiPL-E/runs/humaneval-all-keep-Qwen2.5_Coder_7B-Instruct-1.0-comp-1/ --prob-method avg_logprob --problem code-gen --split --save-charts --counter-groups --save-table --model gpt_4o_mini --grouping-style all --regressor SVR
-```
+### 🧑‍💻 Contact
+
+For questions or issues, please contact:
+ *[viola.campos@hs-rm.de](mailto:viola.campos@hs-rm.de)*
+
+---
+
+
