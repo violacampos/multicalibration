@@ -160,7 +160,8 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                 "average_group_confidence":  average_group_confidence,
                 "total_group":  total_group, 
                 "scores_calibrated":  scores_calibrated,
-                "calibrated_probs": test_probs}
+                "calibrated_probs": test_probs,
+                "group_names": data_provider.group_names}
     else:
         if args.save_charts:
             chartmaker.calibration_info(total_bin_uncalibrated, correctness_bin_uncalibrated, total_bin_calibrated, correctness_bin_calibrated)

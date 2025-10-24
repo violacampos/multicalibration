@@ -78,7 +78,8 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                 "average_group_confidence": average_group_confidence, 
                 "total_group": total_group, 
                 "scores_calibrated": scores_calibrated, 
-                "calibrated_probs": corrected_probs}
+                "calibrated_probs": corrected_probs,
+                "group_names": data_provider.group_names}
     else:
         # Charts
         if args.save_charts:

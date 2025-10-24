@@ -57,6 +57,8 @@ class LiveCodeBenchDataset(Dataset):
         )
 
         self.group_config = group_config
+        self.group_names = []
+        self.is_names_set = False
         self.median_prompt = None
         self.median_loc = None
         self.median_output = None
@@ -99,10 +101,10 @@ class LiveCodeBenchDataset(Dataset):
             )
             self.add_group_info(split=split)
 
-            self.data[split]["code_prob"] = np.exp(self.data[split]['code_logprob'])
-            self.data[split]["tail_prob"] = np.exp(self.data[split]['tail_logprob'])
-            self.data[split]["code_top20_prob"] = np.exp(self.data[split]['avg_top20_code_probs'])
-            self.data[split]["tail_top20_prob"] = np.exp(self.data[split]['avg_top20_tail'])
+            #self.data[split]["code_prob"] = np.exp(self.data[split]['code_logprob'])
+            #self.data[split]["tail_prob"] = np.exp(self.data[split]['tail_logprob'])
+            #self.data[split]["code_top20_prob"] = np.exp(self.data[split]['avg_top20_code_probs'])
+            #self.data[split]["tail_top20_prob"] = np.exp(self.data[split]['avg_top20_tail'])
 
     @staticmethod
     def get_run_and_outdir_from_path(path: str, benchmark_name: str):
@@ -136,38 +138,64 @@ class LiveCodeBenchDataset(Dataset):
             if self.median_output == None
             else self.median_output
         )
+
         groups = []
         for idx, row in self.data[split].iterrows():
             check = []
-            if self.group_config.language:
-                if len(self.languages) == 0:
-                    self.languages = sorted(set(self.data[split]["language"]))
-                for language in self.languages:
-                    check.append(1) if row["language"] == language else check.append(0)
+            
             if self.group_config.difficulty_easy:
+                if not self.is_names_set:
+                        self.group_names.append('comp_easy')
                 check.append(1) if row["difficulty"] == "easy" else check.append(0)
             if self.group_config.difficulty_medium:
+                if not self.is_names_set:
+                        self.group_names.append('comp_medium')
                 check.append(1) if row["difficulty"] in ["medium", "middle"] else check.append(0)
             if self.group_config.difficulty_hard:
+                if not self.is_names_set:
+                        self.group_names.append('comp_hard')
                 check.append(1) if row["difficulty"] == "hard" else check.append(0)
 
             if self.group_config.larger_than_median_prompt:
+                if not self.is_names_set:
+                        self.group_names.append('prompt_len_high')
                 check.append(1 if len(row["prompt"]) > self.median_prompt else 0)
                 if self.group_config.add_counter:
+                    if not self.is_names_set:
+                        self.group_names.append('prompt_len_low')
                     check.append(0 if len(row["prompt"]) > self.median_prompt else 1)
             if self.group_config.larger_than_median_loc:
+                if not self.is_names_set:
+                        self.group_names.append('loc_high')
                 check.append(
                     1 if row["program"] != None and row["program"].count("\n") + 1 > self.median_loc else 0
                 )
                 if self.group_config.add_counter:
+                    if not self.is_names_set:
+                        self.group_names.append('loc_low')
+                    
                     check.append(
-                        0 if row["program"].count("\n") + 1 > self.median_loc else 1
+                        1 if row['program'] == None  or row["program"].count("\n") + 1 < self.median_loc else 0
                     )
             if self.group_config.larger_than_median_output:
+                if not self.is_names_set:
+                    self.group_names.append('len_high')
                 check.append(1 if row["output_size"] > self.median_output else 0)
                 if self.group_config.add_counter:
+                    if not self.is_names_set:
+                        self.group_names.append('len_low')
                     check.append(0 if row["output_size"] > self.median_output else 1)
+            if self.group_config.language:
+                if len(self.languages) == 0:
+                    self.languages = sorted(set(self.data[split]["language"]))
+                for language in self.languages:
+                    if not self.is_names_set:
+                        self.group_names.append('lang_' + language)
+                    check.append(1) if row["language"] == language else check.append(0)
             groups.append(check)
+            if not self.is_names_set:
+                self.is_names_set = True
+        
         self.data[split]["groups"] = groups
 
     # def collect_languages(self):

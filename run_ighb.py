@@ -264,6 +264,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                 "total_group": total_group,
                 "scores_calibrated": scores_calibrated,
                 "calibrated_probs": data_provider.get_test_probs(args.prob_method),
+                "group_names": data_provider.group_names,
             }
         else:
             if args.save_charts:

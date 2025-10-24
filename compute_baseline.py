@@ -61,7 +61,8 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                 "names": data_provider.get_test_names(),
                 "programs": data_provider.get_test_programs(),
                 "prompts": data_provider.get_test_prompts(),
-                "token_logprobs": data_provider.get_test_token_logprobs()}
+                "token_logprobs": data_provider.get_test_token_logprobs(),
+                "group_names": data_provider.group_names}
     else:
         if args.save_charts:
             _, axs = plt.subplots(1, 1, figsize=(6, 5))

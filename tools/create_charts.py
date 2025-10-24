@@ -138,6 +138,69 @@ class charts():
         plt.tight_layout()
         plt.savefig(self.save_dir+f"{scoring_method}_calibration_comparison_bar.pdf")
         plt.close()
+        
+    def calibration_bar_scatter_chart(self, scoring_method:str, y1, y2, y3, y4, y5, y6, y7, 
+                                      x1, x2, x3, x4, x5, x6, x7,
+                                       uncalib_corr,
+                                  uncalib_conf,
+                                  uncalib_total, 
+                                  platt_corr,
+                                  platt_conf,
+                                  platt_total,
+                                  hb_corr,
+                                  hb_conf,
+                                  hb_total, 
+                                  lr_corr,
+                                  lr_conf,
+                                  lr_total,
+                                  logr_corr,
+                                  logr_conf,
+                                  logr_total,  
+                                  ighb_corr,
+                                  ighb_conf,
+                                  ighb_total, 
+                                  iglb_corr,
+                                  iglb_conf,
+                                  iglb_total):
+        """
+            Creates a bar chart for the baseline and each caliibration method for comparison
+
+            :param y1: Grid points where the total is not null for uncalibrated data
+            :param y2: Grid points where the total is not null for HB
+            :param y3: Grid points where the total is not null for LR
+            :param y4: Grid points where the total is not null for IGHB
+            :param y5: Grid points where the total is not null for IGLB
+            :param x1: List of correctness values for each bin of the uncalibrated data 
+            :param x2: List of correctness values for each bin of the HB
+            :param x3: List of correctness values for each bin of the LR
+            :param x4: List of correctness values for each bin of the IGHB
+            :param x5: List of correctness values for each bin of the IGLB
+        """  
+        
+        plt.rcParams['axes.labelsize'] = 14
+        plt.rcParams['xtick.labelsize'] = 12
+        plt.rcParams['ytick.labelsize'] = 12
+        fig, axs = plt.subplots(2, 7, figsize=(24, 7), sharey=True)
+        
+        self.calibration_bar_chart(axs[0, 0], 'Uncalibrated', x1, self.get_bar_colors(y1, orange=True), ylabel=True)      
+        self.calibration_bar_chart(axs[0, 1], 'Platt', x2, self.get_bar_colors(y2)) #, y2, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))     
+        self.calibration_bar_chart(axs[0, 2], 'HB', x3, self.get_bar_colors(y3)) #, y3, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))    
+        self.calibration_bar_chart(axs[0, 3], 'LINR', x4, self.get_bar_colors(y4)) #, y4, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))  
+        self.calibration_bar_chart(axs[0, 4], 'LOGR', x5, self.get_bar_colors(y5)) #, y5, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))     
+        self.calibration_bar_chart(axs[0, 5], 'IGHB', x6, self.get_bar_colors(y6)) #, y6, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))    
+        self.calibration_bar_chart(axs[0, 6], 'IGLB', x7, self.get_bar_colors(y7)) #, y7, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))
+        
+        self.scatter_plot(axs[1,0], 'Uncalibrated', uncalib_conf, uncalib_corr, uncalib_total/2)      
+        self.scatter_plot(axs[1,1], 'Platt', platt_conf, platt_corr, platt_total/2)     
+        self.scatter_plot(axs[1,2], 'HB', hb_conf, hb_corr, hb_total/2)    
+        self.scatter_plot(axs[1,3], 'LINR', lr_conf, lr_corr, lr_total/2)  
+        self.scatter_plot(axs[1,4], 'LOGR', logr_conf, logr_corr, logr_total/2)    
+        self.scatter_plot(axs[1,5], 'IGHB', ighb_conf, ighb_corr, ighb_total/2)    
+        self.scatter_plot(axs[1,6], 'IGLB', iglb_conf, iglb_corr, iglb_total/2)
+
+        plt.tight_layout()
+        plt.savefig(self.save_dir+f"{scoring_method}_calibration_bar_scatter.pdf")
+        plt.close()
 
     """def histogram(self, data, path, typ):
         fig, ax = plt.subplots()  
@@ -200,7 +263,7 @@ class charts():
         colors = self.colors[:len(x)]
 
         scatter = ax.scatter(x, y, s=area, c=colors, alpha=0.9, marker="o") #r'$\odot$')
-        ax.set_title(method, fontsize=18, fontweight="bold")
+        #ax.set_title(method, fontsize=18, fontweight="bold")
         ax.plot([0.0, 1.0], [0.0, 1.0], linestyle='--')
         ax.set_xticks(np.arange(0, 1.1, 0.2))
         ax.set_yticks(np.arange(0, 1.1, 0.2))

@@ -42,7 +42,7 @@ if __name__ == "__main__":
             difficulty_medium=True, 
             difficulty_hard=True),
         "humaneval": GroupConfig(
-            add_counter=False,
+            add_counter=True,
             larger_than_median_loc=True,
             larger_than_median_prompt=True,
             difficulty_easy=False,
@@ -134,7 +134,8 @@ if __name__ == "__main__":
                                             "LR": lr_results,
                                             "LOGR": logr_results,
                                             "IGHB": ighb_results,
-                                            "IGLB": iglb_results})
+                                            "IGLB": iglb_results},
+                         group_names = split_obj.group_names)
 
     if args.save_table:
         with open(split_obj.save_dir+f'scores_{args.prob_method}.txt', 'w') as f:
@@ -172,6 +173,44 @@ if __name__ == "__main__":
                                             ighb_results["correctness_bin_calibrated"], 
                                             iglb_results["correctness_bin_calibrated"])
         
+        chartmaker.calibration_bar_scatter_chart(args.prob_method,
+                                            baseline_results["total_bin_uncalibrated"],
+                                            platt_results["total_bin_calibrated"],
+                                            hb_results["total_bin_calibrated"],
+                                            lr_results["total_bin_calibrated"],
+                                            logr_results["total_bin_calibrated"],
+                                            ighb_results["total_bin_calibrated"],
+                                            iglb_results["total_bin_calibrated"],
+                                            baseline_results["correctness_bin_uncalibrated"], 
+                                            platt_results["correctness_bin_calibrated"], 
+                                            hb_results["correctness_bin_calibrated"], 
+                                            lr_results["correctness_bin_calibrated"], 
+                                            logr_results["correctness_bin_calibrated"], 
+                                            ighb_results["correctness_bin_calibrated"], 
+                                            iglb_results["correctness_bin_calibrated"],
+
+                                            baseline_results["correctness_group_uncalib"], 
+                                            baseline_results["average_group_confidence_uncalib"], 
+                                            baseline_results["total_group_uncalib"],
+                                            platt_results["correctness_group"], 
+                                            platt_results["average_group_confidence"], 
+                                            platt_results["total_group"],
+                                            hb_results["correctness_group"], 
+                                            hb_results["average_group_confidence"], 
+                                            hb_results["total_group"],
+                                            lr_results["correctness_group"], 
+                                            lr_results["average_group_confidence"], 
+                                            lr_results["total_group"], 
+                                            logr_results["correctness_group"], 
+                                            logr_results["average_group_confidence"], 
+                                            logr_results["total_group"], 
+                                            ighb_results["correctness_group"], 
+                                            ighb_results["average_group_confidence"], 
+                                            ighb_results["total_group"],
+                                            iglb_results["correctness_group"], 
+                                            iglb_results["average_group_confidence"], 
+                                            iglb_results["total_group"])
+        
         chartmaker.group_calibration_scatter(args.prob_method,
                                              baseline_results["correctness_group_uncalib"], 
                                             baseline_results["average_group_confidence_uncalib"], 
@@ -194,6 +233,7 @@ if __name__ == "__main__":
                                             iglb_results["correctness_group"], 
                                             iglb_results["average_group_confidence"], 
                                             iglb_results["total_group"])
+        
     
     # save the results for further analysis
     if args.save_data:      

@@ -22,7 +22,7 @@ def define_latex_cmd(name, value):
 
 
 def print_commands_for(
-    calibration_result: Dict, scoring: str, calibration: str, model: str, benchmark: str
+    calibration_result: Dict, scoring: str, calibration: str, model: str, benchmark: str, group_names: List[str]
 ):
 
     scores = (
@@ -34,6 +34,11 @@ def print_commands_for(
         if not isinstance(val, np.ndarray):
             name = f"{benchmark}{model}{scoring}{calibration}{score}"
             define_latex_cmd(name, val)
+        else:
+            for gasce_val, group_name in zip(val, group_names):
+                name = f"{benchmark}{model}{scoring}{calibration}gASCE{group_name}"
+                define_latex_cmd(name, gasce_val)
+            
 
 
 def print_latex_commands(
@@ -41,6 +46,7 @@ def print_latex_commands(
     benchmark: str,
     initial_scoring: str,
     results: Dict[str, Dict[str, dict]],
+    group_names: List[str]
 ) -> str:
     for method, result_dict in results.items():
 
@@ -50,4 +56,5 @@ def print_latex_commands(
             scoring=initial_scoring,
             model=name_to_latex[model],
             benchmark=name_to_latex[benchmark],
+            group_names=group_names
         )
