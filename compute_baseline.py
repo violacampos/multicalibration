@@ -9,7 +9,7 @@ DEBUG = False
 OUTPUTS = True
 BIGCODEBENCH = True
 
-np.seterr(divide='ignore', invalid='ignore')
+##np.seterr(divide='ignore', invalid='ignore')
 
 def main(data_provider, extern=False, grid=None, chartmaker=None):
 

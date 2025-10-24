@@ -1,16 +1,17 @@
+import os
+
+from tabulate import tabulate
+
 import numpy as np
 import run_hb
 import run_lr
 import run_ighb
 import run_iglb
 import compute_baseline
-from tabulate import tabulate
-import os
 import run_platt
 from tools import binning, cmd_input
 from tools.create_latex_comands import print_latex_commands
-from tools.split import split
-from tools.data import data_loader
+
 import pickle
 
 from tools.dataset import GroupConfig, HumanEvalDataset, LiveCodeBenchDataset
@@ -125,55 +126,15 @@ if __name__ == "__main__":
                                                 'GASCE'], tablefmt='orgtbl')
     print(table_print)
     
-    print_latex_commands(model=split_obj.get_model(), 
-                         benchmark=args.benchmark,
-                         initial_scoring=args.prob_method, 
-                         results={"Uncalib": baseline_results,
-                                  "PLATT": platt_results,
-                                            "HB": hb_results,
-                                            "LR": lr_results,
-                                            "LOGR": logr_results,
-                                            "IGHB": ighb_results,
-                                            "IGLB": iglb_results},
-                         group_names = split_obj.group_names)
 
     if args.save_table:
         with open(split_obj.save_dir+f'scores_{args.prob_method}.txt', 'w') as f:
             f.write(table_print)
 
-    # Create charts for comparison
+    # Create charts 
     if args.save_charts:
-        chartmaker.calibration_method_comp_chart(args.prob_method,
-                                                 grid,
-                                            grid[hb_results["total_bin_calibrated"] != 0],
-                                            grid[lr_results["total_bin_calibrated"] != 0],
-                                            grid[ighb_results["total_bin_calibrated"] != 0],
-                                            grid[iglb_results["total_bin_calibrated"] != 0],
-                                            baseline_results["correctness_bin_uncalibrated"], 
-                                            hb_results["correctness_bin_calibrated"][hb_results["total_bin_calibrated"] != 0], 
-                                            lr_results["correctness_bin_calibrated"][lr_results["total_bin_calibrated"] != 0], 
-                                            ighb_results["correctness_bin_calibrated"][ighb_results["total_bin_calibrated"]  != 0], 
-                                            iglb_results["correctness_bin_calibrated"][iglb_results["total_bin_calibrated"] != 0])
-        
-
         
         chartmaker.calibration_method_comp_bar_chart(args.prob_method,
-                                                     baseline_results["total_bin_uncalibrated"],
-                                                     platt_results["total_bin_calibrated"],
-                                            hb_results["total_bin_calibrated"],
-                                            lr_results["total_bin_calibrated"],
-                                            logr_results["total_bin_calibrated"],
-                                            ighb_results["total_bin_calibrated"],
-                                            iglb_results["total_bin_calibrated"],
-                                            baseline_results["correctness_bin_uncalibrated"], 
-                                            platt_results["correctness_bin_calibrated"], 
-                                            hb_results["correctness_bin_calibrated"], 
-                                            lr_results["correctness_bin_calibrated"], 
-                                            logr_results["correctness_bin_calibrated"], 
-                                            ighb_results["correctness_bin_calibrated"], 
-                                            iglb_results["correctness_bin_calibrated"])
-        
-        chartmaker.calibration_bar_scatter_chart(args.prob_method,
                                             baseline_results["total_bin_uncalibrated"],
                                             platt_results["total_bin_calibrated"],
                                             hb_results["total_bin_calibrated"],
@@ -187,29 +148,7 @@ if __name__ == "__main__":
                                             lr_results["correctness_bin_calibrated"], 
                                             logr_results["correctness_bin_calibrated"], 
                                             ighb_results["correctness_bin_calibrated"], 
-                                            iglb_results["correctness_bin_calibrated"],
-
-                                            baseline_results["correctness_group_uncalib"], 
-                                            baseline_results["average_group_confidence_uncalib"], 
-                                            baseline_results["total_group_uncalib"],
-                                            platt_results["correctness_group"], 
-                                            platt_results["average_group_confidence"], 
-                                            platt_results["total_group"],
-                                            hb_results["correctness_group"], 
-                                            hb_results["average_group_confidence"], 
-                                            hb_results["total_group"],
-                                            lr_results["correctness_group"], 
-                                            lr_results["average_group_confidence"], 
-                                            lr_results["total_group"], 
-                                            logr_results["correctness_group"], 
-                                            logr_results["average_group_confidence"], 
-                                            logr_results["total_group"], 
-                                            ighb_results["correctness_group"], 
-                                            ighb_results["average_group_confidence"], 
-                                            ighb_results["total_group"],
-                                            iglb_results["correctness_group"], 
-                                            iglb_results["average_group_confidence"], 
-                                            iglb_results["total_group"])
+                                            iglb_results["correctness_bin_calibrated"])
         
         chartmaker.group_calibration_scatter(args.prob_method,
                                              baseline_results["correctness_group_uncalib"], 
@@ -235,7 +174,6 @@ if __name__ == "__main__":
                                             iglb_results["total_group"])
         
     
-    # save the results for further analysis
     if args.save_data:      
         data = {
             "calibrated_probs_hb": hb_results["calibrated_probs"],
