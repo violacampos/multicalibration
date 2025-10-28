@@ -1,44 +1,21 @@
 import numpy as np
 import os
 from tools import binning, cmd_input
+from tools.create_charts import Charts
 from tools.hb_calibration import Hb_calibration
-from tools.data import data_loader
-from tools.split import split
 
-DEBUG = False
-OUTPUTS = True
 
-#np.seterr(divide='ignore', invalid='ignore')
-
-def main(data_provider, extern=False, grid=None, chartmaker=None):
+def main(data_provider, extern=False, bins=None, plots=None):
     # loads commandline parameter
     args = cmd_input.load_parser()
     
-    # # get run dir
-    # run_dirs = [x[0] for x in os.walk(args.dir[0])]
-    # run_dirs.sort()
 
-    # run_dir = run_dirs[0]
+    if bins is None:
+        bins = binning.Binning(args.bin_count, args.binning_type)
 
-    # if run_dir == args.dir[0] and ("humaneval" not in run_dir and "mbpp" not in run_dir) and args.problem == 'code-gen':
-    #     exit()
-
-    # # Loads all the necessary data into an dict
-    # data_obj = data_loader(args, run_dir, extern, "hb")
-
-    # # Splits the loaded data
-    # split_obj = split(args.split, data_obj)
-
-    if grid is None or chartmaker is None:
-        # get the grid for binning type and the chartmaker obj
-        grid, chartmaker = binning.get_grid_and_chartmaker(data_provider.run,
-                                                           args,
-                                                           data_provider.save_dir,
-                                                           extern, 
-                                                           probs=data_provider.get_train_probs(args.prob_method))
             
     # Create calibration object and calculates the deltas
-    hb = Hb_calibration(grid, args).fit(data_provider.get_train_probs(args.prob_method), 
+    hb = Hb_calibration(bins, args).fit(data_provider.get_train_probs(args.prob_method), 
                                                   data_provider.get_train_is_correct())
 
     # calculate scores for the uncalibrated test set
@@ -83,7 +60,12 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
     else:
         # Charts
         if args.save_charts:
-            chartmaker.calibration_info(total_bin_uncalibrated, correctness_bin_uncalibrated, total_bin_calibrated, correctness_bin_calibrated)
+            if plots is None:
+                plots = Charts(
+                    data_provider.run, args.binning_type, bins.grid, data_provider.save_dir
+                )
+                
+            plots.calibration_info(total_bin_uncalibrated, correctness_bin_uncalibrated, total_bin_calibrated, correctness_bin_calibrated)
         
     # display score table for all runs
     hb.score_obj.display_score_table()

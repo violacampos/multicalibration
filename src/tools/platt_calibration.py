@@ -1,23 +1,21 @@
-from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.linear_model import LogisticRegression
 from tools.calibration_scores import Score
 
 class Platt_calibration:
     
-    def __init__(self, grid, args):
+    def __init__(self, bins, args):
         """
             Initilaizes a linear regression object
 
-            :param grid: used grid for calibration
-            :param outputs: flag to enable optional outputs
-            :param debug: flag to enable debug outputs
-            :param type: Regression type. One of 'linear' and 'logistic'
+            :param bins: used binning object for calibration
+            :param args: command line args
         """
-        self.grid = grid
+        self.bins = bins
         self.debug = args.debug
         self.outputs = args.print_info
         self.platt = None
 
-        self.score_obj = Score(grid, args)
+        self.score_obj = Score(bins, args)
  
     def fit(self, X, y):
         """

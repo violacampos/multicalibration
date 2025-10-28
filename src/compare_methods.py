@@ -68,28 +68,28 @@ def load_dataset(args, config):
         )
 
 
-def run_calibration_methods(split_obj, grid, chartmaker):
+def run_calibration_methods(split_obj, bins, plots):
     """Execute all calibration approaches and return results."""
     methods = {
         "Baseline": lambda: compute_baseline.main(
-            data_provider=split_obj, bins=grid),
+            data_provider=split_obj, bins=bins),
         "Platt scaling": lambda: run_platt.main(
-            extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker
+            extern=True, data_provider=split_obj, bins=bins, plots=plots
         ),
         "Histogram binning": lambda: run_hb.main(
-            extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker
+            extern=True, data_provider=split_obj, bins=bins, plots=plots
         ),
         "Linear regression": lambda: run_lr.main(
-            type='linear', extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker
+            type='linear', extern=True, data_provider=split_obj, bins=bins, plots=plots
         ),
         "Logistic regression": lambda: run_lr.main(
-            type='logistic', extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker
+            type='logistic', extern=True, data_provider=split_obj, bins=bins, plots=plots
         ),
         "Iterative group histogram binning": lambda: run_ighb.main(
-            extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker
+            extern=True, data_provider=split_obj, bins=bins, plots=plots
         ),
         "Iterative group linear binning": lambda: run_iglb.main(
-            extern=True, data_provider=split_obj, grid=grid, chartmaker=chartmaker
+            extern=True, data_provider=split_obj, bins=bins, plots=plots
         )
     }
     
@@ -140,7 +140,7 @@ def main():
     # Load dataset
     split_obj = load_dataset(args, config)
     
-    # Set up grid and plotting
+    # Set up bins and plotting
     bins = binning.Binning(args.bin_count, args.binning_type)
     plots = Charts(split_obj.run, args.binning_type, bins.grid, split_obj.save_dir)
     

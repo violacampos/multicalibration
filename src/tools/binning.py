@@ -1,5 +1,4 @@
 import numpy as np
-from tools.create_charts import Charts
 
 class Binning:
 
@@ -72,32 +71,4 @@ class Binning:
 
 
     
-
-
-def get_grid_and_chartmaker(run, args, save_dir, probs=None):
-    """
-    Create a grid and chart object for the selected binning method.
-    
-    Args:
-        run: Name of the calibration run
-        args: Command line arguments containing binning_type and bin_count
-        save_dir: Save directory for charts and scores
-        probs: List of probabilities (required for quantile binning)
-    
-    Returns:
-        tuple: (grid, chartmaker) objects for calibration
-    """
-    binning_step_size = 1 / args.bin_count
-    
-    if args.binning_type == 'linear':
-        grid = create_uniform_grid(args.bin_count)
-        chartmaker = Charts(run, args.binning_type, grid, save_dir)
-        
-    elif args.binning_type == 'quantil':
-        bin_edges = create_quantile_grid(probs, binning_step_size)
-        # Calculate bin centers
-        grid = (bin_edges[1:] + bin_edges[:-1]) / 2
-        chartmaker = Charts(run, args.binning_type, grid, save_dir, bin_edges=bin_edges)
-    
-    return grid, chartmaker
 

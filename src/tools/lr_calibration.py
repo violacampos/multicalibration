@@ -8,9 +8,7 @@ class LR_calibration:
             Initilaizes a linear regression object
 
             :param grid: used grid for calibration
-            :param outputs: flag to enable optional outputs
-            :param debug: flag to enable debug outputs
-            :param type: Regression type. One of 'linear' and 'logistic'
+            :param args: command line arguments
         """
         self.grid = grid
         self.debug = args.debug

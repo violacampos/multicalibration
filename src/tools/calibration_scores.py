@@ -7,18 +7,25 @@ from tools import binning
 
 
 class Score:
+    """
+    Class for calculating calibration scores and metrics.
+    
+    Supports various calibration metrics including ECE, ASCE, MSE, 
+    Brier score, skill score, and group-aware metrics.
+    """
+    
     def __init__(self, bins: binning.Binning, args: dict):
         """
-        Initatlization of the score class
+        Initialize the Score Class
 
-        :param bins: grid to calculate scores on
-        :param outputs: controls possible optional outputs
-        :param debug: controls possible debug outputs
+        Args:
+            bins: Binning object with grid for calculating scores
+            args: Configuration arguments containing debug and print_info flags
+
         """
         self.debug = args.debug
         self.outputs = args.print_info
         self.bins = bins
-        # self.score_grid = np.arange(0.0, 1+(1/m_score), 1/m_score)
         self.p_r = 0
         self.brier_ref_score = 0
 
@@ -27,258 +34,246 @@ class Score:
 
     def ece(self, correctness_per_bin, confidence_per_bin, total_per_bin, num_samples):
         """
-        Calculates the expected calibration error. Weighted average of the absolut deviation from the
-        fraction of predictions that are correct and the average estimated probability.
-
-        :param correctness_per_bin: Probality for the correctnes per bin
-        :param confidence_per_bin: Average confidence of the model per bin
-        :param total_bin_count: Count of samples per bin
-        :param num_samples: Total count of samples in the dataset
-
-        :return: ECE score
+        Calculate Expected Calibration Error (ECE).
+        
+        Weighted average of the absolute deviation between the fraction of 
+        predictions that are correct and the average estimated probability.
+        
+        Args:
+            correctness_per_bin: Probability of correctness per bin
+            confidence_per_bin: Average confidence of the model per bin
+            total_per_bin: Count of samples per bin
+            num_samples: Total count of samples in the dataset
+        
+        Returns:
+            ECE score
         """
         ece = 0
-        for corr_s_i, conf_s_i, s_i_count in zip(
-            correctness_per_bin, confidence_per_bin, total_per_bin
-        ):
-            ece += (abs(s_i_count) / abs(num_samples)) * abs(corr_s_i - conf_s_i)
-
+        for corr, conf, count in zip(correctness_per_bin, confidence_per_bin, total_per_bin):
+            ece += (abs(count) / abs(num_samples)) * abs(corr - conf)
         return ece
+        
+
 
     def ece_not_rounded(self, labels: np.array, confidences: np.array) -> float:
-        n_bins = len(self.bins.grid)
-        n = len(labels)
-        bin_indices = (
-            np.digitize(confidences, self.bins.grid) - 1
-        )  # Bin index for each prediction
 
-        # abs_errors = []
-        cummulative_error = 0.0
+        """
+        Calculate ECE without rounding probabilities to grid.
+        
+        Args:
+            labels: Ground truth labels (0 or 1)
+            confidences: Predicted probabilities
+        
+        Returns:
+            ECE score
+        """
+        n_bins = len(self.bins.grid) - 1
+        n = len(labels)
+        bin_indices = np.digitize(confidences, self.bins.grid) - 1
+        
+        cumulative_error = 0.0
         for i in range(n_bins):
             mask = bin_indices == i
             if np.any(mask):
                 bin_count = np.sum(mask)
                 prob_avg = np.mean(confidences[mask])
                 true_avg = np.mean(labels[mask])
-                # abs_errors.append(abs(prob_avg - true_avg))
-                cummulative_error += (bin_count / n) * abs(prob_avg - true_avg)
+                cumulative_error += (bin_count / n) * abs(prob_avg - true_avg)
+        
+        return cumulative_error
+    
 
-        # test = np.mean(abs_errors)
-        return cummulative_error
 
     def asce(
-        self, correctness_per_bin, confidence_per_bin, total_bin_count, num_samples
+        self, correctness_per_bin, confidence_per_bin, total_per_bin, num_samples
     ):
         """
-        Calculates the average squared calibration error. Weighted average of the squared deviation from the
-        fraction of predictions that are correct and the average estimated probability.
-
-        :param correctness_per_bin: Probality for the correctnes per bin
-        :param confidence_per_bin: Average confidence of the model per bin
-        :param total_bin_count: Count of samples per bin
-        :param num_samples: Total count of samples in the dataset
-
-        :return: ASCE score
+        Calculate Average Squared Calibration Error (ASCE).
+        
+        Weighted average of the squared deviation between the fraction of 
+        predictions that are correct and the average estimated probability.
+        
+        Args:
+            correctness_per_bin: Probability of correctness per bin
+            confidence_per_bin: Average confidence of the model per bin
+            total_per_bin: Count of samples per bin
+            num_samples: Total count of samples in the dataset
+        
+        Returns:
+            ASCE score
         """
         asce = 0
-        for corr_s_i, conf_s_i, bin_count in zip(
-            correctness_per_bin, confidence_per_bin, total_bin_count
-        ):
-            asce += (bin_count / num_samples) * (corr_s_i - conf_s_i) ** 2
+        for corr, conf, count in zip(correctness_per_bin, confidence_per_bin, total_per_bin):
+            asce += (count / num_samples) * (corr - conf) ** 2
         return asce
 
+
     def asce_not_rounded(self, labels: np.array, confidences: np.array) -> float:
-        n_bins = len(self.bins.grid)
+        """
+        Calculate ASCE without rounding probabilities to grid.
+        
+        Args:
+            labels: Ground truth labels (0 or 1)
+            confidences: Predicted probabilities
+        
+        Returns:
+            ASCE score
+        """
+        n_bins = len(self.bins.grid) - 1
         n = len(labels)
-        bin_indices = (
-            np.digitize(confidences, self.bins.grid) - 1
-        )  # Bin index for each prediction
+        bin_indices = np.digitize(confidences, self.bins.grid) - 1
+        
         asce = 0.0
-        squared_errors = []
         for i in range(n_bins):
             mask = bin_indices == i
             if np.any(mask):
                 bin_count = np.sum(mask)
                 prob_avg = np.mean(confidences[mask])
                 true_avg = np.mean(labels[mask])
-                squared_errors.append((prob_avg - true_avg) ** 2)
                 asce += (bin_count / n) * (prob_avg - true_avg) ** 2
-        test = np.mean(squared_errors)
+        
         return asce
+        
+
 
     def brier_ref(self, correct_sample_count, num_samples):
         """
-        Calculates the baseline score of the naive estimator, where every prediction is put into one bin.
-        p_r is the average correctness in this bin.
-
-        :param correct_sample_count: Correct samples in the dataset
-        :param num_samples: Total count of samples in the dataset
-
-        :return: p_r, brier_ref
+        Calculate the baseline Brier score of the naive estimator.
+        
+        The naive estimator puts every prediction into one bin, where p_r 
+        is the average correctness.
+        
+        Args:
+            correct_sample_count: Number of correct samples in the dataset
+            num_samples: Total count of samples in the dataset
+        
+        Returns:
+            tuple: (p_r, brier_ref) - base rate and reference Brier score
         """
         p_r = correct_sample_count / num_samples
         return p_r, p_r * (1 - p_r)
+        
 
     def mse(self, confidences, labels, num_problems):
         """
-        Caculates the actual brier score for the given data.
-        Also known as the MSE
-
-        :param confidences: List of all prediction probailities
-        :param label: list of label if the given sample is correct
-        :param num_problems: Total number of samples
-
-        :return: MSE score
+        Calculate the Mean Squared Error (Brier score).
+        
+        Args:
+            confidences: List of prediction probabilities
+            labels: List of labels indicating if the sample is correct
+            num_samples: Total number of samples
+        
+        Returns:
+            MSE score
         """
-        brier_score_actual = 0
-        for conf, label in zip(confidences, labels):
-            brier_score_actual += (label - conf) ** 2
-        return brier_score_actual / num_problems
+        brier_score = np.mean((labels - confidences) ** 2)
+        return brier_score
+
 
     def skill_score(self, brier_ref, brier_actual):
         """
-        Caculates the skill score. Perfect score is 1.0. Negativ mean worse than the baseline. Small positiv values indicate good skill
+        Calculate the skill score.
 
-        :param brier_ref: Brier baseline score
-        :param brier_actual: Actual brier score of the dataset
-
-        :return: skill score
+        Baseline score is 0.0. Negative scores indicate deterioration, 
+        positive scores indicate improvement.
+        
+        Args:
+            brier_ref: Brier baseline score
+            brier_actual: Actual Brier score of the dataset
+        
+        Returns:
+            Skill score
         """
         return (brier_ref - brier_actual) / brier_ref
 
-    def gcu(self, label, confidence, groups):
-        """
-        Calculates group conditional unbiasedness
 
-        :param label: List of labels
-        :param confidence: List of probabilities
-        :param groups: 2D Array of assigned groups
-
-        :return: gcu
-        """
-        gcu = np.array(
-            [
-                np.mean(abs(label[(col == 1)] - confidence[(col == 1)]))
-                for col in groups.T
-            ]
-        )  # VIOLA: unused? needs abs()
-        gcu[np.isnan(gcu)] = 0
-        return gcu
-
-    def expected_variance(self, probs, label, bin_assignement, grid, num_samples):
-        """
-        Calculates expected variance
-
-        :param probs: List of probabilities
-        :param label: List of labels
-        :param bin_assignement: Assigned bins for each probability
-        :param grid: List of grid points
-        :param num_samples: Total of samples
-
-        :return: expected variance -> VIOLA: where do we use it? Depends only on bin weights (and grid size) not the actual probabilities
-        """
-        expec_var = 0.0
-        for i in grid:
-            bin_probs = probs[bin_assignement == i]
-            bin_labels = label[bin_assignement == i]
-            if len(bin_probs) == 0:
-                continue
-
-            E = np.mean(
-                bin_probs
-            )  # VIOLA: useless, probs are already rounded to grid -> expected behaviour?
-            if math.isnan(E):
-                E = 0
-
-            variance = E * (1 - E) ** 2
-
-            weight = len(bin_labels) / num_samples
-            expec_var += weight * variance
-
-        return np.round(expec_var, 3)
+    
 
     def gasce(self, assigned_bins, labels, groups, grid=None):
         """
-        Calculates group average squared calibration error
-
-        :param assigned_bins: Assigned bins for each probability
-        :param labels: List of labels
-        :param groups: List of probabilities
-        :param grid: List of grid points
-
-        :return: List of GASCE
+        Calculate Group Average Squared Calibration Error (GASCE).
+        
+        Args:
+            assigned_bins: Assigned bins for each probability
+            labels: List of labels
+            groups: 2D array of group assignments
+            grid: List of grid points (uses self.bins.grid if None)
+        
+        Returns:
+            Array of GASCE values per group
         """
         if grid is None:
             grid = self.bins.grid
-        num_samples = len(assigned_bins)
+            
         n_per_group = np.sum(groups, axis=0)
-
-        # calculate the total correct per bin
-        correct_per_bin_group = np.array(
+        
+        # Calculate correctness per bin and group
+        correct_per_bin_group = np.array([
             [
-                [
-                    np.divide(
-                        len(
-                            assigned_bins[
-                                (np.round(assigned_bins, 3) == np.round(i, 3)) & (labels == 1) & (g == 1)
-                            ]
-                        ),
-                        len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)]),
-                    )
-                    for g in groups.T
-                ]
-                for i in grid
+                self._safe_divide(
+                    len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & 
+                                     (labels == 1) & (g == 1)]),
+                    len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)])
+                )
+                for g in groups.T
             ]
-        )
-        # correct_per_bin_group[np.isnan(correct_per_bin_group)] = 0
+            for i in grid
+        ])
         correct_per_bin_group = np.nan_to_num(correct_per_bin_group)
-
-        # calculate the total count per bin
-        total_per_bin_group = np.array(
-            [
-                [len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)]) for g in groups.T]
-                for i in grid
-            ]
-        )
-        total_per_bin_group[np.isnan(total_per_bin_group)] = 0
-
-        # sum the probabilities per bin
-        bin_sums_group = np.array(
-            [
-                [assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)].sum() for g in groups.T]
-                for i in grid
-            ]
-        )
-
-        # calculate the average confidence per bin
+        
+        # Calculate total per bin and group
+        total_per_bin_group = np.array([
+            [len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)]) 
+             for g in groups.T]
+            for i in grid
+        ])
+        
+        # Calculate bin sums per group
+        bin_sums_group = np.array([
+            [assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)].sum() 
+             for g in groups.T]
+            for i in grid
+        ])
+        
+        # Calculate average confidence per bin and group
         average_bin_group_confidence = np.divide(
             bin_sums_group,
             total_per_bin_group,
-            where=np.array(total_per_bin_group) != 0,
+            where=total_per_bin_group != 0,
+            out=np.zeros_like(bin_sums_group, dtype=float)
         )
+        
+        # Calculate GASCE
+        gasce = np.sum(
+            (total_per_bin_group / n_per_group) * 
+            (correct_per_bin_group - average_bin_group_confidence) ** 2,
+            axis=0
+        )
+        
+        return gasce
 
-        gasce = 0
-        for corr_bin_group, conf_bin_group, bin_group_count in zip(
-            correct_per_bin_group, average_bin_group_confidence, total_per_bin_group
-        ):
-            gasce += (bin_group_count / n_per_group) * (
-                (corr_bin_group - conf_bin_group) ** 2
-            )  # VIOLA: fix weighted sum
-
-        return np.array(gasce)
 
     def gasce_not_rounded(
         self, confidences: np.array, labels: np.array, groups: np.array
     ) -> np.array:
-        n_bins = len(self.bins.grid)
+        """
+        Calculate GASCE without rounding probabilities to grid.
+        
+        Args:
+            confidences: Predicted probabilities
+            labels: Ground truth labels
+            groups: 2D array of group assignments
+        
+        Returns:
+            Array of GASCE values per group
+        """
+        n_bins = len(self.bins.grid) - 1
         n_per_group = np.sum(groups, axis=0)
-        bin_indices = (
-            np.digitize(confidences, self.bins.grid) - 1
-        )  # Bin index for each prediction
+        bin_indices = np.digitize(confidences, self.bins.grid) - 1
         n_groups = groups.shape[1]
-
+        
         gasce = np.zeros(n_groups)
-
+        
         for g in range(n_groups):
             g_mask = groups[:, g] == 1
             for i in range(n_bins):
@@ -288,98 +283,67 @@ class Score:
                     bin_count = np.sum(mask)
                     prob_avg = np.mean(confidences[mask])
                     true_avg = np.mean(labels[mask])
-                    gasce[g] += (bin_count / n_per_group[g]) * (
-                        prob_avg - true_avg
-                    ) ** 2
-
+                    gasce[g] += (bin_count / n_per_group[g]) * (prob_avg - true_avg) ** 2
+        
         return gasce
+
 
     def calc_all(self, confidences, labels, groups=None, set_brier_ref=False):
         """
-        Calculates every score for the given data and returns a dict with all values
-
-        :param confidences: List of probability
-        :param labels: List of labels
-        :param groups: List of probabilities
-        :param set_brier_ref: Flag to set the brier reference score initially
-
-        :return: Result dict
+        Calculate all calibration scores for the given data.
+        
+        Args:
+            confidences: List of probabilities
+            labels: List of labels
+            groups: 2D array of group assignments (optional)
+            set_brier_ref: Flag to set the Brier reference score initially
+        
+        Returns:
+            Dictionary containing all calculated scores
         """
-        if set_brier_ref:
-            prefix = "Uncalib"
-            color = "red"
-        else:
-            prefix = "Calib"
-            color = "green"
-
-        # Assign the values in X to the corresponding bin (discretize values)
+        prefix = "Uncalib" if set_brier_ref else "Calib"
+        color = "red" if set_brier_ref else "green"
+        
+        # Discretize probabilities to bins
         assigned_bins = self.bins.round_probabilities_to_grid(confidences)
-
-        # Calculate total, correctness and confidence per bin
-        # [VIOLA] confidence_per_bin is rounded -> expected behaviour?
+        
+        # Calculate bin statistics
         total_per_bin, correctness_per_bin, confidence_per_bin = (
-            self.bin_round_probabilities_discret(assigned_bins, labels, self.bins.grid)
-        )
-
-        num_samples = len(assigned_bins)
-        num_correct = sum(labels)
-
-        # Get Expected Calibration Error
-        ece = self.ece(
-            correctness_per_bin, confidence_per_bin, total_per_bin, num_samples
-        )
-        ece_not_rounded = self.ece_not_rounded(labels, confidences)
-
-        # Get Mean Squared Error
-        mse = self.mse(
-            confidences, labels, num_samples
-        )  # VIOLA use original confidences instead of discretized bin values
-
-        # Get Average Squared Error
-        asce = self.asce(
-            correctness_per_bin, confidence_per_bin, total_per_bin, num_samples
-        )
-
-        asce_not_rounded = self.asce_not_rounded(labels, confidences)
-
-        # Get expected Variance
-        expected_variance = self.expected_variance(
-            assigned_bins, labels, assigned_bins, self.bins.grid, num_samples
+            self._compute_bin_statistics(assigned_bins, labels, self.bins.grid)
         )
         
-        # get accuracy
+        num_samples = len(assigned_bins)
+        num_correct = sum(labels)
+        
+        # Calculate metrics
+        ece = self.ece(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
+        ece_not_rounded = self.ece_not_rounded(labels, confidences)
+        mse = self.mse(confidences, labels, num_samples)
+        asce = self.asce(correctness_per_bin, confidence_per_bin, total_per_bin, num_samples)
+        asce_not_rounded = self.asce_not_rounded(labels, confidences)
+        
+        # Calculate accuracy
         y_pred = (confidences > 0.5).astype(int)
         acc = np.mean(y_pred == labels)
-
-        # Output results if set
+        
+        # Print results if enabled
         if self.outputs:
-            print(f"{colored(prefix, color)} ECE: {ece}")
-            print(f"{colored(prefix, color)} ECE: {ece_not_rounded} (not rounded)")
-            print(f"{colored(prefix, color)} MSE: {mse}")
-            print(f"{colored(prefix, color)} ASCE: {asce}")
-            print(f"{colored(prefix, color)} ASCE: {asce_not_rounded} (not rounded)")
-            print(f"{colored(prefix, color)} Expected Variance: {expected_variance}")
-            print(f"{colored(prefix, color)} ACC: {acc}")
-
-        # Get Group conditional unbiasedness VIOLA: unused?
-        #if groups is not None:
-        #    gcu = self.gcu(labels, confidences, groups)
-        #    if self.outputs:
-        #        print(f"{colored(prefix, color)} GCU: {gcu}")
-
-        # Set the reference Score for the Skill Score calculation
+            self._print_metrics(prefix, color, ece, ece_not_rounded, mse, 
+                              asce, asce_not_rounded, acc)
+        
+        # Set reference score if needed
         if set_brier_ref:
             self.p_r, self.brier_ref_score = self.brier_ref(num_correct, num_samples)
             if self.outputs:
                 print(f"{colored(prefix, color)} Base rate (p(correct)): {self.p_r}")
                 print(f"{colored(prefix, color)} Brier ref: {self.brier_ref_score}")
-
-        # Calculate the Skill score
+        
+        # Calculate skill score
         skill_score = self.skill_score(self.brier_ref_score, mse)
         if self.outputs:
             print(f"{colored(prefix, color)} Skill Score: {skill_score}")
-
-        # create dict for better overview
+        
+        # Build results dictionary
         results = {
             prefix: {
                 "ECE": ece,
@@ -390,234 +354,238 @@ class Score:
                 "ACC": acc,
             }
         }
-
-        # Calculate GASCE and add to dict
-        gasce = self.gasce(assigned_bins, labels, groups)
-        gasce_not_rounded = self.gasce_not_rounded(confidences, labels, groups)
-        if self.outputs:
-            print(f"{colored(prefix, color)} GASCE: {np.round(gasce, 3)}")
-            print(
-                f"{colored(prefix, color)} GASCE: {np.round(gasce_not_rounded, 3)} (not rounded)"
-            )
-        results[prefix]["GASCE"] = np.round(gasce, 3)
-
+        
+        # Calculate and add GASCE if groups are provided
+        if groups is not None:
+            gasce = self.gasce(assigned_bins, labels, groups)
+            gasce_not_rounded = self.gasce_not_rounded(confidences, labels, groups)
+            if self.outputs:
+                print(f"{colored(prefix, color)} GASCE: {np.round(gasce, 3)}")
+                print(f"{colored(prefix, color)} GASCE (not rounded): {np.round(gasce_not_rounded, 3)}")
+            results[prefix]["GASCE"] = np.round(gasce, 3)
+        
         return results
 
-    def bin_round_probabilities_discret(self, assigned_bins, is_correct, grid):
+
+    def _compute_bin_statistics(self, assigned_bins, is_correct, grid):
         """
-        Calculates the bin probabilities with the discretized values
-
-        :param assigned_bins: List of discretized probabilities
-        :param is_correct: List of labels
-        :param grid: List of grid points
-
-        :return: total per bin, correctness per bin, average confidence per bin
+        Calculate bin probabilities with discretized values.
+        
+        Args:
+            assigned_bins: List of discretized probabilities
+            is_correct: List of labels
+            grid: List of grid points
+        
+        Returns:
+            tuple: (total_per_bin, correctness_per_bin, average_confidence_per_bin)
         """
-        # calculate the total correct per bin
-        correct_per_bin = np.array(
-            [
-                np.divide(
-                    len(
-                        assigned_bins[
-                            (np.round(assigned_bins, 2) == np.round(i, 2))
-                            & (is_correct == 1)
-                        ]
-                    ),
-                    len(assigned_bins[(np.round(assigned_bins, 2) == np.round(i, 2))]),
-                )
-                for i in grid
-            ]
-        )
-        correct_per_bin[np.isnan(correct_per_bin)] = 0
-
-        # calculate the total count per bin
-        total_per_bin = np.array(
-            [
+        # Calculate correctness per bin
+        correct_per_bin = np.array([
+            self._safe_divide(
+                len(assigned_bins[(np.round(assigned_bins, 2) == np.round(i, 2)) & 
+                                 (is_correct == 1)]),
                 len(assigned_bins[(np.round(assigned_bins, 2) == np.round(i, 2))])
-                for i in grid
-            ]
-        )
-        total_per_bin[np.isnan(total_per_bin)] = 0
-
-        # sum the probabilities per bin
-        bin_sums = np.array(
-            [
-                assigned_bins[np.round(assigned_bins, 2) == np.round(i, 2)].sum()
-                for i in grid
-            ]
-        )
-
-        # calculate the average confidence per bin
+            )
+            for i in grid
+        ])
+        correct_per_bin[np.isnan(correct_per_bin)] = 0
+        
+        # Calculate total per bin
+        total_per_bin = np.array([
+            len(assigned_bins[(np.round(assigned_bins, 2) == np.round(i, 2))])
+            for i in grid
+        ])
+        
+        # Calculate bin sums
+        bin_sums = np.array([
+            assigned_bins[np.round(assigned_bins, 2) == np.round(i, 2)].sum()
+            for i in grid
+        ])
+        
+        # Calculate average confidence per bin
         average_bin_confidence = np.divide(
-            bin_sums, total_per_bin, where=np.array(total_per_bin) != 0
+            bin_sums, 
+            total_per_bin, 
+            where=total_per_bin != 0,
+            out=np.zeros_like(bin_sums, dtype=float)
         )
-
+        
         return total_per_bin, correct_per_bin, average_bin_confidence
+
+    
 
     def get_total_and_correctness(self, confidences, labels, groups):
         """
-        Calculates the total and correctness values per bin and per group
-
-        :param confidences: List of probabilities
-        :param labels: List of labels
-        :param groups: 2D array of assigned groups
-
-        :return: total per group, correctness per group, total per bin, correctness per bin
+        Calculate total and correctness values per bin and per group.
+        
+        Args:
+            confidences: List of probabilities
+            labels: List of labels
+            groups: 2D array of group assignments
+        
+        Returns:
+            tuple: (total_per_group, correctness_per_group, 
+                   total_per_bin, correctness_per_bin)
         """
-        # Assign the values in X to the corresponding bin (discretize values)
         assigned_bins = self.bins.round_probabilities_to_grid(confidences)
-
-        # fraction of total samples per bin and group
-        correctness_group = np.array(
+        
+        # Correctness per bin and group
+        correctness_group = np.array([
             [
-                [
-                    np.divide(
-                        len(labels[(np.round(assigned_bins, 3) == np.round(i, 3)) & (labels == 1) & (g == 1)]),
-                        len(labels[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)]),
-                    )
-                    for g in groups.T
-                ]
-                for i in self.bins.grid
-            ]
-        )
-        correctness_group[np.isnan(correctness_group)] = 0
-
-        total_group = np.array(
-            [
-                [len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)]) for g in groups.T]
-                for i in self.bins.grid
-            ]
-        )
-        total_group[np.isnan(total_group)] = 0
-
-        # fraction of correct samples per bin
-        correctness_bin = np.array(
-            [
-                np.divide(
-                    len(labels[(np.round(assigned_bins, 3) == np.round(i, 3)) & (labels == 1)]),
-                    len(labels[(np.round(assigned_bins, 3) == np.round(i, 3))]),
+                self._safe_divide(
+                    len(labels[(np.round(assigned_bins, 3) == np.round(i, 3)) & 
+                              (labels == 1) & (g == 1)]),
+                    len(labels[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)])
                 )
-                for i in self.bins.grid
+                for g in groups.T
             ]
-        )
+            for i in self.bins.grid
+        ])
+        correctness_group[np.isnan(correctness_group)] = 0
+        
+        # Total per bin and group
+        total_group = np.array([
+            [len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)]) 
+             for g in groups.T]
+            for i in self.bins.grid
+        ])
+        
+        # Correctness per bin (overall)
+        correctness_bin = np.array([
+            self._safe_divide(
+                len(labels[(np.round(assigned_bins, 3) == np.round(i, 3)) & (labels == 1)]),
+                len(labels[(np.round(assigned_bins, 3) == np.round(i, 3))])
+            )
+            for i in self.bins.grid
+        ])
         correctness_bin[np.isnan(correctness_bin)] = 0
-
-        total_bin = np.array(
-            [len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3))]) for i in self.bins.grid]
-        )
-        total_bin[np.isnan(total_bin)] = 0
-
+        
+        # Total per bin (overall)
+        total_bin = np.array([
+            len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3))]) 
+            for i in self.bins.grid
+        ])
+        
         return total_group, correctness_group, total_bin, correctness_bin
+        
 
     def get_correctness_per_group(self, confidences, labels, groups):
         """
-        Calculates the total, correctness and average confidence per group
-
-        :param confidences: List of probabilities
-        :param labels: List of labels
-        :param groups: 2D array of assigned groups
-
-        :return: total per group, correctness per group, average confidence per group
+        Calculate total, correctness and average confidence per group.
+        
+        Args:
+            confidences: List of probabilities
+            labels: List of labels
+            groups: 2D array of group assignments
+        
+        Returns:
+            tuple: (total_per_group, correctness_per_group, average_confidence_per_group)
         """
-        correctness_group = np.array(
-            [
-                np.divide(len(labels[(labels == 1) & (g == 1)]), len(labels[(g == 1)]))
-                for g in groups.T
-            ]
-        )
+        # Correctness per group
+        correctness_group = np.array([
+            self._safe_divide(
+                len(labels[(labels == 1) & (g == 1)]), 
+                len(labels[(g == 1)])
+            )
+            for g in groups.T
+        ])
         correctness_group[np.isnan(correctness_group)] = 0
-
+        
+        # Total per group
         total_group = np.array([len(confidences[(g == 1)]) for g in groups.T])
-        total_group[np.isnan(total_group)] = 0
-
-        # sum the probabilities per bin
+        
+        # Average confidence per group
         bin_sums_group = np.array([confidences[(g == 1)].sum() for g in groups.T])
-
-        # calculate the average confidence per bin
         average_group_confidence = np.divide(
-            bin_sums_group, total_group, where=np.array(total_group) != 0
+            bin_sums_group, 
+            total_group, 
+            where=total_group != 0,
+            out=np.zeros_like(bin_sums_group, dtype=float)
         )
-
+        
         return total_group, correctness_group, average_group_confidence
+        
 
     def add_to_score_table(self, run, uncalib_scores, calib_scores, baseline=False):
         """
-        Adds given scores to a printable table in the score obj
-
-        :param run: Name of the run for the scores
-        :param uncalib_scores: Dict of scores
-        :param calib_scores: Dict of scores
-        :param baseline: Flag to only use uncalib scores for the baseline
+        Add scores to the printable score table.
+        
+        Args:
+            run: Name of the run
+            uncalib_scores: Dictionary of uncalibrated scores
+            calib_scores: Dictionary of calibrated scores
+            baseline: Flag to only use uncalibrated scores for baseline
         """
-        uncalib_scores = list(list(uncalib_scores.values())[0].values())
-        uncalib_gasce = uncalib_scores[-1]
-        uncalib_scores = uncalib_scores[:-1]
-
+        uncalib_values = list(list(uncalib_scores.values())[0].values())
+        uncalib_gasce = uncalib_values[-1]
+        uncalib_values = uncalib_values[:-1]
+        
+        self.add_entry(run, "Uncalib", uncalib_values + [uncalib_gasce])
+        
         if not baseline:
-            calib_scores = list(list(calib_scores.values())[0].values())
-            calib_gasce = calib_scores[-1]
-            calib_scores = calib_scores[:-1]
+            calib_values = list(list(calib_scores.values())[0].values())
+            calib_gasce = calib_values[-1]
+            calib_values = calib_values[:-1]
+            
+            score_diff = np.round(
+                np.array(calib_values) - np.array(uncalib_values), 4
+            ).tolist()
+            gasce_diff = np.round(calib_gasce - uncalib_gasce, 4)
+            
+            self.add_entry(run, "Calib", calib_values + [calib_gasce])
+            self.add_entry(run, "Diff", score_diff + [gasce_diff])
+        
+        
+       
 
-            score_difference = list(
-                np.round(np.array(calib_scores) - np.array(uncalib_scores), 4)
-            )
-
-            gasce_diff = np.round(np.array(calib_gasce) - np.array(uncalib_gasce), 4)
-
-            score_difference.append(gasce_diff)
-
-            calib_scores.append(calib_gasce)
-
-        uncalib_scores.append(uncalib_gasce)
-        self.add_entry(run, "Uncalib", uncalib_scores)
-
-        if not baseline:
-            self.add_entry(run, "Calib", calib_scores)
-            self.add_entry(run, "Diff", score_difference)
-
-    def add_entry(self, run, type, scores):
+    def add_entry(self, run:str, score_type:str, scores:dict):
         """
-        Adds given entry to score table
-
-        :param run: Name of the run for the scores
-        :param type: Type of score (Uncalib, Calib, Diff)
-        :param scores: List of scores
+        Add an entry to the score table.
+        
+        Args:
+            run: Name of the run
+            score_type: Type of score (Uncalib, Calib, Diff)
+            scores: List of score values
         """
-        entry = []
-
-        if type == "Uncalib":
-            entry.append(run)
-        else:
-            entry.append("")
-        entry.append(type)
-        for s in scores:
-            entry.append(s)
-
+        entry = [run if score_type == "Uncalib" else "", score_type] + list(scores)
         self.score_table.append(entry)
 
+
+
     def display_score_table(self):
-        """
-        Prints the score table of the score class obj
-        """
+        """Print the formatted score table."""
         self.printable_table = tabulate(
             self.score_table,
-            headers=[
-                "Run",
-                "Type",
-                "ECE",
-                "ASCE",
-                "MSE",
-                "brier_ref",
-                "skill_score",
-                "GASCE",
-            ],
+            headers=["Run", "Type", "ECE", "ASCE", "MSE", "brier_ref", 
+                    "skill_score", "ACC", "GASCE"],
             tablefmt="orgtbl",
         )
         print(self.printable_table)
+        
+
 
     def save_scores_table(self, save_dir:str):
-        """Save the scores table to a text file."""
+        """
+        Save the scores table to a text file.
         
+        Args:
+            save_dir: Directory to save the scores file
+        """
         output_path = os.path.join(save_dir, 'scores.txt')
         with open(output_path, 'w') as f:
             f.write(self.printable_table)
+
+    @staticmethod
+    def _safe_divide(numerator, denominator):
+        """Safely divide, returning 0 if denominator is 0."""
+        return numerator / denominator if denominator != 0 else 0
+
+    def _print_metrics(self, prefix, color, ece, ece_not_rounded, mse, 
+                      asce, asce_not_rounded, acc):
+        """Print all calculated metrics with color formatting."""
+        print(f"{colored(prefix, color)} ECE: {ece}")
+        print(f"{colored(prefix, color)} ECE (not rounded): {ece_not_rounded}")
+        print(f"{colored(prefix, color)} MSE: {mse}")
+        print(f"{colored(prefix, color)} ASCE: {asce}")
+        print(f"{colored(prefix, color)} ASCE (not rounded): {asce_not_rounded}")
+        print(f"{colored(prefix, color)} ACC: {acc}")    

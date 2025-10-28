@@ -111,7 +111,7 @@ class LiveCodeBenchDataset(Dataset):
         model = path.split("/")[-3]
         filename = path.split("/")[-1].rstrip(".jsonl")
         run = benchmark_name + "_" + model + "_" + filename
-        dir = "results" + run + "/output/"
+        dir = os.path.join("results", run, "output")
         os.makedirs(dir, exist_ok=True)
         return run, dir
     
