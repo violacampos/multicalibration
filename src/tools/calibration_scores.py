@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import math
 from termcolor import colored
@@ -5,18 +6,18 @@ from tabulate import tabulate
 from tools import binning
 
 
-class score:
-    def __init__(self, grid, outputs, debug):
+class Score:
+    def __init__(self, bins: binning.Binning, args: dict):
         """
         Initatlization of the score class
 
-        :param grid: grid to calculate scores on
+        :param bins: grid to calculate scores on
         :param outputs: controls possible optional outputs
         :param debug: controls possible debug outputs
         """
-        self.debug = debug
-        self.outputs = outputs
-        self.grid = grid
+        self.debug = args.debug
+        self.outputs = args.print_info
+        self.bins = bins
         # self.score_grid = np.arange(0.0, 1+(1/m_score), 1/m_score)
         self.p_r = 0
         self.brier_ref_score = 0
@@ -45,10 +46,10 @@ class score:
         return ece
 
     def ece_not_rounded(self, labels: np.array, confidences: np.array) -> float:
-        n_bins = len(self.grid)
+        n_bins = len(self.bins.grid)
         n = len(labels)
         bin_indices = (
-            np.digitize(confidences, self.grid) - 1
+            np.digitize(confidences, self.bins.grid) - 1
         )  # Bin index for each prediction
 
         # abs_errors = []
@@ -87,10 +88,10 @@ class score:
         return asce
 
     def asce_not_rounded(self, labels: np.array, confidences: np.array) -> float:
-        n_bins = len(self.grid)
+        n_bins = len(self.bins.grid)
         n = len(labels)
         bin_indices = (
-            np.digitize(confidences, self.grid) - 1
+            np.digitize(confidences, self.bins.grid) - 1
         )  # Bin index for each prediction
         asce = 0.0
         squared_errors = []
@@ -208,7 +209,7 @@ class score:
         :return: List of GASCE
         """
         if grid is None:
-            grid = self.grid
+            grid = self.bins.grid
         num_samples = len(assigned_bins)
         n_per_group = np.sum(groups, axis=0)
 
@@ -269,10 +270,10 @@ class score:
     def gasce_not_rounded(
         self, confidences: np.array, labels: np.array, groups: np.array
     ) -> np.array:
-        n_bins = len(self.grid)
+        n_bins = len(self.bins.grid)
         n_per_group = np.sum(groups, axis=0)
         bin_indices = (
-            np.digitize(confidences, self.grid) - 1
+            np.digitize(confidences, self.bins.grid) - 1
         )  # Bin index for each prediction
         n_groups = groups.shape[1]
 
@@ -312,12 +313,12 @@ class score:
             color = "green"
 
         # Assign the values in X to the corresponding bin (discretize values)
-        assigned_bins = binning.round_model_to_grid(confidences, self.grid)
+        assigned_bins = self.bins.round_probabilities_to_grid(confidences)
 
         # Calculate total, correctness and confidence per bin
         # [VIOLA] confidence_per_bin is rounded -> expected behaviour?
         total_per_bin, correctness_per_bin, confidence_per_bin = (
-            self.bin_round_probabilities_discret(assigned_bins, labels, self.grid)
+            self.bin_round_probabilities_discret(assigned_bins, labels, self.bins.grid)
         )
 
         num_samples = len(assigned_bins)
@@ -343,7 +344,7 @@ class score:
 
         # Get expected Variance
         expected_variance = self.expected_variance(
-            assigned_bins, labels, assigned_bins, self.grid, num_samples
+            assigned_bins, labels, assigned_bins, self.bins.grid, num_samples
         )
         
         # get accuracy
@@ -464,7 +465,7 @@ class score:
         :return: total per group, correctness per group, total per bin, correctness per bin
         """
         # Assign the values in X to the corresponding bin (discretize values)
-        assigned_bins = binning.round_model_to_grid(confidences, self.grid)
+        assigned_bins = self.bins.round_probabilities_to_grid(confidences)
 
         # fraction of total samples per bin and group
         correctness_group = np.array(
@@ -476,7 +477,7 @@ class score:
                     )
                     for g in groups.T
                 ]
-                for i in self.grid
+                for i in self.bins.grid
             ]
         )
         correctness_group[np.isnan(correctness_group)] = 0
@@ -484,7 +485,7 @@ class score:
         total_group = np.array(
             [
                 [len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3)) & (g == 1)]) for g in groups.T]
-                for i in self.grid
+                for i in self.bins.grid
             ]
         )
         total_group[np.isnan(total_group)] = 0
@@ -496,13 +497,13 @@ class score:
                     len(labels[(np.round(assigned_bins, 3) == np.round(i, 3)) & (labels == 1)]),
                     len(labels[(np.round(assigned_bins, 3) == np.round(i, 3))]),
                 )
-                for i in self.grid
+                for i in self.bins.grid
             ]
         )
         correctness_bin[np.isnan(correctness_bin)] = 0
 
         total_bin = np.array(
-            [len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3))]) for i in self.grid]
+            [len(assigned_bins[(np.round(assigned_bins, 3) == np.round(i, 3))]) for i in self.bins.grid]
         )
         total_bin[np.isnan(total_bin)] = 0
 
@@ -613,3 +614,10 @@ class score:
             tablefmt="orgtbl",
         )
         print(self.printable_table)
+
+    def save_scores_table(self, save_dir:str):
+        """Save the scores table to a text file."""
+        
+        output_path = os.path.join(save_dir, 'scores.txt')
+        with open(output_path, 'w') as f:
+            f.write(self.printable_table)

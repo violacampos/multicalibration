@@ -1,29 +1,27 @@
 import numpy as np
-from tools.calibration_scores import score
+from tools.calibration_scores import Score
 from tools import binning, groups
 
 
 class IGHB_calibration:
 
-    def __init__(self, grid, m, alpha, outputs, debug):
+    def __init__(self, bins, args):
         """
         Initilaizes a iterative group histogram binning object
 
-        :param grid: used grid for calibration
-        :param m: Number of bins
-        :param alpha: Value to determine if the algorithm should stop
+        :param bins: used grid for calibration
+        
         :param outputs: flag to enable optional outputs
         :param debug: flag to enable debug outputs
         """
 
-        assert len(grid) - 1 == m, "Grid size and m do not match"
-        assert alpha == 1 / m, "Alpha and m do not match"
-        self.grid = grid
-        self.alpha = alpha
-        self.m = m          
-        self.debug = debug
-        self.outputs = outputs
-        self.score_obj = score(grid, outputs, debug)
+        self.bins = bins
+        self.m = len(bins.grid) - 1 
+        self.alpha = 1 / self.m
+        
+        self.debug = args.debug
+        self.outputs = args.print_info
+        self.score_obj = Score(bins, args)
 
         self.deltas = None
         self.deltas_square = None
@@ -85,7 +83,6 @@ class IGHB_calibration:
 
         :return: adjusted probabilities
         """
-        assigned_bins = binning.round_model_to_grid(X, self.grid)
 
         # Select the bin-group combiation with max probability for 
         # a sample to be in the bin-group combintation times the deltas squared
@@ -101,29 +98,11 @@ class IGHB_calibration:
             print(f"Max delta: {max_delta}")
 
         # Adjust samples in that combination
-        bin_indices = np.digitize(X, self.grid) - 1
+        bin_indices = np.digitize(X, self.bins.grid) - 1
         mask = (bin_indices == bin) & (groups[:, group] == 1)
         X_ = X.copy()
         X_[mask] += self.deltas[bin, group]
         
-
-        # Save changes on test subset # VIOLA: did not check this
-        if test:
-            ab_test = binning.round_model_to_grid(X_, self.grid)
-            self.changes.append(
-                [
-                    bin,
-                    group,
-                    max_delta,
-                    len(ab_test[ab_test != assigned_bins]),
-                    [
-                        ab_test[ab_test != assigned_bins],
-                        groups[ab_test != assigned_bins],
-                        is_correct[ab_test != assigned_bins],
-                    ],
-                    self.P_S_p_g[bin, group],
-                ]
-            )
 
         return X_
     
@@ -140,13 +119,12 @@ class IGHB_calibration:
         :return: 2D array of counts
         """
         # Assign each sample to a bin index (0-based)
-        bin_indices = np.digitize(X, self.grid) - 1  
+        bin_indices = np.digitize(X, self.bins.grid) - 1  
 
-        n_bins = len(self.grid)
         n_groups = groups.shape[1]
-        counts = np.zeros((n_bins, n_groups), dtype=int)
+        counts = np.zeros((self.m, n_groups), dtype=int)
 
-        for i in range(n_bins):
+        for i in range(self.m):
             for j in range(n_groups):
                 # Select samples in bin i and group j
                 mask = (bin_indices == i) & (groups[:, j] == 1)
@@ -165,13 +143,12 @@ class IGHB_calibration:
         :return: 2D array of counts of correct samples
         """
         # Assign each sample to a bin index (0-based)
-        bin_indices = np.digitize(X, self.grid) - 1  
+        bin_indices = np.digitize(X, self.bins.grid) - 1  
 
-        n_bins = len(self.grid)
         n_groups = groups.shape[1]
-        counts = np.zeros((n_bins, n_groups), dtype=int)
+        counts = np.zeros((self.m, n_groups), dtype=int)
 
-        for i in range(n_bins):
+        for i in range(self.m):
             for j in range(n_groups):
                 # Select samples in bin i and group j
                 mask = (bin_indices == i) & (y == 1) & (groups[:, j] == 1)
@@ -188,12 +165,12 @@ class IGHB_calibration:
 
         :return: 2D array of mean values
         """
-        bin_indices = np.digitize(X, self.grid) - 1
-        n_bins = len(self.grid)
-        n_groups = groups.shape[1]
-        means = np.zeros((n_bins, n_groups), dtype=float)
+        bin_indices = np.digitize(X, self.bins.grid) - 1
 
-        for i in range(n_bins):
+        n_groups = groups.shape[1]
+        means = np.zeros((self.m, n_groups), dtype=float)
+
+        for i in range(self.m):
             for j in range(n_groups):
                 mask = (bin_indices == i) & (groups[:, j] == 1)
                 if np.any(mask):
@@ -212,8 +189,6 @@ class IGHB_calibration:
 
         :return: 2D Array of deltas (between likelihood and correctness) for each bin-group combination
         """
-        # round to grid
-        # assigned_bins = binning.round_model_to_grid(X, self.grid)
         
         counts = self.get_bin_group_counts(X, groups)
         correct_counts = self.get_correct_per_bin_group_counts(X, y, groups)

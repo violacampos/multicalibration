@@ -51,7 +51,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
             )
 
             # Fit calibrator
-            ighb = IGHB_calibration(grid, m, 1 / args.bin_count, OUTPUTS, DEBUG).fit(
+            ighb = IGHB_calibration(grid, args).fit(
                 train_X, train_y, train_groups
             )
 
@@ -90,14 +90,14 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                         test_X, test_y, test_groups
                     )
                 )
-                history_item[len(ighb.changes)] = [
-                    temp_group_correctness,
-                    curr_group_correctness,
-                    ighb.changes[-1],
-                    curr_group_total,
-                    temp_bin_correctness,
-                    curr_bin_correctness,
-                ]
+                # history_item[len(ighb.changes)] = [
+                #     temp_group_correctness,
+                #     curr_group_correctness,
+                #     ighb.changes[-1],
+                #     curr_group_total,
+                #     temp_bin_correctness,
+                #     curr_bin_correctness,
+                # ]
                 temp_group_correctness = curr_group_correctness
                 temp_bin_correctness = curr_bin_correctness
 
@@ -138,7 +138,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                 probs=data_provider.get_train_probs(args.prob_method),
             )
 
-        ighb = IGHB_calibration(grid, m, 1 / m, OUTPUTS, DEBUG).fit(
+        ighb = IGHB_calibration(grid, args).fit(
             data_provider.get_train_probs(args.prob_method),
             data_provider.get_train_is_correct(),
             data_provider.get_train_groups(),
@@ -207,14 +207,14 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                 )
             )
             # Storing history
-            history[len(ighb.changes)] = [
-                temp_group_correctness,
-                curr_group_correctness,
-                ighb.changes[-1],
-                curr_group_total,
-                temp_bin_correctness,
-                curr_bin_correctness,
-            ]  # chartmaker.map_correctness_to_eleven_bins(
+            # history[len(ighb.changes)] = [
+            #     temp_group_correctness,
+            #     curr_group_correctness,
+            #     ighb.changes[-1],
+            #     curr_group_total,
+            #     temp_bin_correctness,
+            #     curr_bin_correctness,
+            # ]  # chartmaker.map_correctness_to_eleven_bins(
             temp_group_correctness = curr_group_correctness
             temp_bin_correctness = curr_bin_correctness
 

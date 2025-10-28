@@ -53,7 +53,7 @@ def main(data_provider, type='linear', extern=False, grid=None, chartmaker=None)
                                                         probs=data_provider.get_train_probs(args.prob_method))
 
     # Train the linear regression on the train data split
-    lr = LR_calibration(grid, OUTPUTS, DEBUG, type).fit(X, y)
+    lr = LR_calibration(grid, args, type).fit(X, y)
 
     # Calculate scores on uncalibrated test set
     scores_uncalibrated = lr.score_obj.calc_all(data_provider.get_test_probs(args.prob_method), 

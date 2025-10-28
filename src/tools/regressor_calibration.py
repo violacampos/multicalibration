@@ -1,11 +1,11 @@
 from sklearn.svm import SVR
 from xgboost.sklearn import XGBRegressor
-from tools.calibration_scores import score
+from tools.calibration_scores import Score
 from sklearn.linear_model import LinearRegression
 
 class regressor_calibration:
     
-    def __init__(self, grid, args, outputs, debug):
+    def __init__(self, grid, args):
         """
             Initilaizes a regressor object
 
@@ -15,11 +15,11 @@ class regressor_calibration:
             :param debug: flag to enable debug outputs
         """
         self.grid = grid
-        self.debug = debug
-        self.outputs = outputs
+        self.debug = args.debug
+        self.outputs = args.print_info
         self.reg = None
         self.regressor = args.regressor
-        self.score_obj = score(grid, outputs, debug)
+        self.score_obj = Score(grid, args)
  
     def fit(self, X, y):
         """

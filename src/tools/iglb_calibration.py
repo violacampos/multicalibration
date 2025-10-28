@@ -1,5 +1,5 @@
 import numpy as np
-from tools.calibration_scores import score
+from tools.calibration_scores import Score
 from tools import binning
 from scipy.special import logit, expit
 from scipy.optimize import minimize
@@ -7,24 +7,21 @@ from scipy.optimize import minimize
 
 class IGLB_calibration:
 
-    def __init__(self, grid, alpha, m, outputs, debug):
+    def __init__(self, bins, args):
         """
         Initilaizes a iterative group linear binning object
 
-        :param grid: used grid for calibration
+        :param bins: used bins for calibration
         :param m: Number of bins
-        :param alpha: Value to determine if the algorithm should stop
-        :param outputs: flag to enable optional outputs
-        :param debug: flag to enable debug outputs
+        :param args: passed commandline parameter
         """
-        assert len(grid) - 1 == m, "Grid size and m do not match"
-        # assert alpha == 1 / m, "Alpha and m do not match"
-        self.grid = grid
-        # self.alpha = alpha
-        self.debug = debug
-        self.m = m
-        self.outputs = outputs
-        self.score_obj = score(grid, outputs, debug)
+
+        self.bins = bins
+        self.epsilon = args.epsilon
+        self.debug = args.debug
+        self.m = args.bin_count
+        self.outputs = args.print_info
+        self.score_obj = Score(bins, args)
 
         self.deltas = None
         self.deltas_square = None
@@ -100,23 +97,6 @@ class IGLB_calibration:
                 ]
             )
 
-        # Save changes on test subset VIOLA: unchecked
-        if test:
-            ab_test = binning.round_model_to_grid(X_, self.grid)
-            self.changes.append(
-                [
-                    tau,
-                    bin,
-                    group,
-                    (alpha_star, beta_star),
-                    len(ab_test[ab_test != assigned_bins]),
-                    [
-                        ab_test[ab_test != assigned_bins],
-                        groups[ab_test != assigned_bins],
-                        is_correct[ab_test != assigned_bins],
-                    ],
-                ]
-            )
 
         return X_
 
@@ -130,8 +110,6 @@ class IGLB_calibration:
 
         :return: 3D delta array
         """
-        # get the assigned bins of the confidences
-        assigned_bins = binning.round_model_to_grid(X, self.grid)
 
         # Calculate correcteness bias in the given bin, group and use smaller then
         deltas_smaller = [
@@ -142,7 +120,7 @@ class IGLB_calibration:
                 )
                 for g in groups.T
             ]
-            for i in self.grid
+            for i in self.bins.grid
         ]
 
         # Calculate correcteness bias in the given bin, group and use greater then
@@ -154,7 +132,7 @@ class IGLB_calibration:
                 )
                 for g in groups.T
             ]
-            for i in self.grid
+            for i in self.bins.grid
         ]
 
         # Stack both arrays index 0 is <= and 1 is >=
@@ -178,7 +156,7 @@ class IGLB_calibration:
                 len(probs[(probs <= i) & (g == 1)]) / len(probs)
                 for g in groups.T
             ]
-            for i in self.grid
+            for i in self.bins.grid
         ]
 
         # Create sets with tau >= bin, for each bin and group
@@ -187,7 +165,7 @@ class IGLB_calibration:
                 len(probs[(probs >= i) & (g == 1)]) / len(probs)
                 for g in groups.T
             ]
-            for i in self.grid
+            for i in self.bins.grid
         ]
 
         # Stack both arrays index 0 is <= and 1 is >=
@@ -214,7 +192,7 @@ class IGLB_calibration:
                 )
                 for g in groups.T
             ]
-            for i in self.grid
+            for i in self.bins.grid
         ]
 
         # Get alpha and beta values for >= subsets
@@ -225,7 +203,7 @@ class IGLB_calibration:
                 )
                 for g in groups.T
             ]
-            for i in self.grid
+            for i in self.bins.grid
         ]
 
         # Stack both arrays index 0 is <= and 1 is >=

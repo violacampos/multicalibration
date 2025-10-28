@@ -38,7 +38,7 @@ def main(data_provider, type='linear', extern=False, grid=None, chartmaker=None)
                                                         probs=data_provider.get_train_probs(args.prob_method))
 
     # Train the logisitc regression on the train data split
-    platt = Platt_calibration(grid, OUTPUTS, DEBUG).fit(X, y)
+    platt = Platt_calibration(grid, args).fit(X, y)
 
     # Calculate scores on uncalibrated test set
     scores_uncalibrated = platt.score_obj.calc_all(data_provider.get_test_probs(args.prob_method), 

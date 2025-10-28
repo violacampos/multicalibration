@@ -1,9 +1,9 @@
 from sklearn.linear_model import LinearRegression, LogisticRegression
-from tools.calibration_scores import score
+from tools.calibration_scores import Score
 
 class LR_calibration:
     
-    def __init__(self, grid, outputs, debug, type:str):
+    def __init__(self, grid, args, type:str):
         """
             Initilaizes a linear regression object
 
@@ -13,12 +13,12 @@ class LR_calibration:
             :param type: Regression type. One of 'linear' and 'logistic'
         """
         self.grid = grid
-        self.debug = debug
-        self.outputs = outputs
+        self.debug = args.debug
+        self.outputs = args.print_info
         self.reg = None
         self.type = type
-        self.score_obj = score(grid, outputs, debug)
- 
+        self.score_obj = Score(grid, args)
+
     def fit(self, X, y):
         """
             Learns the weight and bias for the given probabilities and labels

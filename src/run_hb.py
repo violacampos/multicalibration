@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from tools import binning, cmd_input
-from tools.hb_calibration import hb_calibration
+from tools.hb_calibration import Hb_calibration
 from tools.data import data_loader
 from tools.split import split
 
@@ -38,7 +38,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                                            probs=data_provider.get_train_probs(args.prob_method))
             
     # Create calibration object and calculates the deltas
-    hb = hb_calibration(grid, args, OUTPUTS, DEBUG).fit(data_provider.get_train_probs(args.prob_method), 
+    hb = Hb_calibration(grid, args).fit(data_provider.get_train_probs(args.prob_method), 
                                                   data_provider.get_train_is_correct())
 
     # calculate scores for the uncalibrated test set

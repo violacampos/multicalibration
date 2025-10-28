@@ -1,81 +1,103 @@
 import numpy as np
-from tools.create_charts import charts
+from tools.create_charts import Charts
 
-def get_grid_and_chartmaker(run, args, save_dir, extern, probs=None):
+class Binning:
+
+    def __init__(self, num_bins, binning_type='linear'):
+        """
+        Initializes a binning object with the specified grid.
+
+        :param grid: The grid points for binning
+        """
+        self.grid = self.init_grid(num_bins, binning_type)
+        
+
+   
+
+    def init_grid(self, num_bins:int, bin_type:str) -> np.array:
+        """
+        Initialize the grid for the specified binning type.
+
+        :param num_bins: Number of bins
+        :param bin_type: Type of binning ('linear' or 'quantile') TODO check quantiles
+
+        :return: np.array of grid points
+        """
+        if bin_type == 'linear':
+            return self.create_uniform_grid(num_bins)
+        else:
+            raise ValueError(f"Unknown binning type: {bin_type}")
+
+    def round_probabilities_to_grid(self, probs):
+        """
+        Discretize probabilities by mapping each to the nearest grid point.
+        
+        Args:
+            probs: List of probabilities
+            grid: List of grid points
+        
+        Returns:
+            np.array: Discretized probabilities mapped to grid points
+        """
+        bin_assignments = []
+        
+        for prob in probs:
+            # Find the nearest grid point
+            nearest_idx = np.argmin(np.abs(prob - self.grid))
+            bin_assignments.append(self.grid[nearest_idx])
+        
+        return np.array(bin_assignments)
+
+
+    @staticmethod
+    def create_uniform_grid(num_bins):
+        """
+        Create a uniform grid with the specified number of bins.
+        
+        Args:
+            num_bins: Number of grid points
+        
+        Returns:
+            np.array: Uniform grid points from 0.0 to 1.0
+        """
+        step_size = 1 / num_bins
+        decimal_str = str(step_size)
+        decimal_places = len(decimal_str) - 2  # Subtract "0."
+        
+        if decimal_places > 10:
+            return np.linspace(0.0, 1.0, num_bins + 1)
+        else:
+            # Round to avoid floating point precision issues
+            return np.round(np.arange(0.0, 1.0 + step_size, step_size), decimal_places)
+
+
+    
+
+
+def get_grid_and_chartmaker(run, args, save_dir, probs=None):
     """
-        Creates a grid and chart object for the selected binning method.
-
-        :param run: name of the calibration run
-        :param binning_type: binning type to use
-        :param save_dir: save directory for charts and scores
-        :param extern: is the method called from an external method (comparison)
-        :param probs: list of probabilities
-
-        :return: grid, chartmaker
+    Create a grid and chart object for the selected binning method.
+    
+    Args:
+        run: Name of the calibration run
+        args: Command line arguments containing binning_type and bin_count
+        save_dir: Save directory for charts and scores
+        probs: List of probabilities (required for quantile binning)
+    
+    Returns:
+        tuple: (grid, chartmaker) objects for calibration
     """
-    binning_step_size=1/args.bin_count
-
+    binning_step_size = 1 / args.bin_count
+    
     if args.binning_type == 'linear':
-        # uniform grid 1/m
-        grid = create_unform_grid(args.bin_count)
-
-        # only create chart object for direct usage of a calibration method
-        if not extern:
-            chartmaker = charts(run, args.binning_type, grid, save_dir)
+        grid = create_uniform_grid(args.bin_count)
+        chartmaker = Charts(run, args.binning_type, grid, save_dir)
+        
     elif args.binning_type == 'quantil':
-        # get quantils for step size n
-        bin_edges = create_qunatil_grid(probs, binning_step_size)
-        # get the middle of the bins for hb
-        grid = np.array(((bin_edges[1:]-bin_edges[:-1])/2)+bin_edges[:-1]) 
-        if not extern:
-            chartmaker = charts(run, args.binning_type, grid, save_dir, bin_edges=bin_edges)
+        bin_edges = create_quantile_grid(probs, binning_step_size)
+        # Calculate bin centers
+        grid = (bin_edges[1:] + bin_edges[:-1]) / 2
+        chartmaker = Charts(run, args.binning_type, grid, save_dir, bin_edges=bin_edges)
     
-    if extern:
-        return grid, None
-    else:
-        return grid, chartmaker
+    return grid, chartmaker
 
-def create_unform_grid(m):
-    """
-        Creates a unform grid with the number m.
-
-        :param m: number of grid points
-
-        :return: list of uniform grid points
-    """
-    d = str(1/m)
-    round_to = len(d)-2
-    if round_to > 10:
-        return np.linspace(0.0, 1.0, m + 1)
-    else:
-        return np.round(np.arange(0.0, 1+(1/m), 1/m), round_to) # VIOLA: extra bin for p=1.0? somehow weird
-    #
-
-def create_qunatil_grid(probs, m):
-    """
-        Creates a grid for given probabilties and the number of qunatils.
-
-        :param probs: List of probailities
-        :param m: number of quantils
-
-        :return: list of quantil grid points
-    """
-    return np.array([(np.quantile(probs, i) if (i != 0) and (i != 1) else i) for i in np.arange(0, 1+m, m)])  
-            
-
-def round_model_to_grid(probs, grid):
-    """
-        Calculates the closest grid point for every probability and assigns the probability ot the
-        selecte grid point.
-
-        :param probs: List of probailities
-        :param grid: list of grid points
-
-        :return: list of disctreized probabilities
-    """
-    bin_assignment = []    
-
-    for f_x in probs:             
-        bin_assignment.append(grid[np.argmin(np.abs(f_x - grid))])         
-    
-    return np.array(bin_assignment)

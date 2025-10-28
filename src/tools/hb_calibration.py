@@ -1,26 +1,25 @@
 import numpy as np
 from tools import binning
-from tools.calibration_scores import score
+from tools.calibration_scores import Score
 from termcolor import colored
 
-class hb_calibration:
+class Hb_calibration:
     
-    def __init__(self, grid, args, outputs, debug):
+    def __init__(self, grid:binning.Binning, args:dict):
         """
-            Initilaizes a histogram binning object
+            Initializes a histogram binning object
 
             :param grid: used grid for calibration
             :param args: passed arguments from command line
-            :param outputs: flag to enable optional outputs
-            :param debug: flag to enable debug outputs
+
         """
 
-        self.grid = grid
-        self.debug = debug
-        self.outputs = outputs
+        self.bins = grid
+        self.debug = args.debug
+        self.outputs = args.print_info
         self.delta_p_f_ = []
         self.m = args.bin_count
-        self.score_obj = score(grid, outputs, debug)
+        self.score_obj = Score(grid, args)
 
     def fit(self, X, y):
         """
@@ -46,11 +45,11 @@ class hb_calibration:
             :return: Adjusted probabilities
         """
         # Assign the values in X to the corresponding bin (discretize values)
-        assigned_bins = binning.round_model_to_grid(X, self.grid)
+        assigned_bins = self.bins.round_probabilities_to_grid(X)
         if self.debug: print(f"TEST Assigned Bins: {assigned_bins}")
 
         # Correct the model confidence with the calculated deltas
-        X_ = np.array([bin_a+self.delta_p_f_[np.where(self.grid == bin_a)[0][0]] for bin_a in assigned_bins])
+        X_ = np.array([bin_a+self.delta_p_f_[np.where(self.bins.grid == bin_a)[0][0]] for bin_a in assigned_bins])
 
         return X_
         
@@ -64,10 +63,10 @@ class hb_calibration:
             :return: deltas
         """
         # Assign the values in X to the corresponding bin (discretize values)
-        assigned_bins = binning.round_model_to_grid(X, self.grid)
+        assigned_bins = self.bins.round_probabilities_to_grid(X)
         
         # Calculate the deltas
-        deltas= np.array([np.mean(y[(assigned_bins == i)]) -  i for i in self.grid])
+        deltas= np.array([np.mean(y[(assigned_bins == i)]) -  i for i in self.bins.grid])
         deltas[np.isnan(deltas)] = 0
         
         return deltas

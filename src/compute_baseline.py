@@ -1,89 +1,103 @@
-import numpy as np
-import os
-
 from tools import  binning, cmd_input
-from tools.calibration_scores import score
-import matplotlib.pyplot as plt
+from tools.calibration_scores import Score
+from tools.create_charts import Charts
 
-DEBUG = False
-OUTPUTS = True
-BIGCODEBENCH = True
 
-##np.seterr(divide='ignore', invalid='ignore')
 
-def main(data_provider, extern=False, grid=None, chartmaker=None):
+
+
+def compute_uncalibrated_scores(score_obj, data_provider, args):
+    """Calculate all scores for the uncalibrated test set."""
+    test_probs = data_provider.get_test_probs(args.prob_method)
+    test_is_correct = data_provider.get_test_is_correct()
+    test_groups = data_provider.get_test_groups()
+    
+    scores = score_obj.calc_all(
+        test_probs,
+        test_is_correct,
+        groups=test_groups,
+        set_brier_ref=True
+    )
+    
+    return scores
+
+def build_return_dict(data_provider, args, scores, total_bin, correctness_bin,
+                      total_group, correctness_group, avg_group_confidence):
+    """Build dictionary of results to return when called externally."""
+    return {
+        "correctness_bin_uncalibrated": correctness_bin,
+        "total_bin_uncalibrated": total_bin,
+        "correctness_group_uncalib": correctness_group,
+        "average_group_confidence_uncalib": avg_group_confidence,
+        "total_group_uncalib": total_group,
+        "scores_uncalibrated": scores,
+        "uncalibrated_probs": data_provider.get_test_probs(args.prob_method),
+        "is_correct": data_provider.get_test_is_correct(),
+        "groups": data_provider.get_test_groups(),
+        "language": data_provider.get_test_languages(),
+        "names": data_provider.get_test_names(),
+        "programs": data_provider.get_test_programs(),
+        "prompts": data_provider.get_test_prompts(),
+        "token_logprobs": data_provider.get_test_token_logprobs(),
+        "group_names": data_provider.group_names
+    }
+
+
+def main(data_provider, bins=None):
+    """
+    Compute baseline (uncalibrated) scores for model predictions.
+    
+    Args:
+        data_provider: Object providing access to test data
+
+        grid: Optional pre-computed binning grid
 
     
-    # loads commandline parameter
+    Returns:
+        Dictionary of results 
+    """
     args = cmd_input.load_parser()
     
-
-    if grid is None or chartmaker is None:
-        # get the grid for binning type and the chartmaker obj
-        grid, chartmaker = binning.get_grid_and_chartmaker(data_provider.run,
-                                                           args,
-                                                           data_provider.save_dir,
-                                                           extern, 
-                                                           probs=data_provider.get_train_probs(args.prob_method))
-   
-            
-    score_obj = score(grid, OUTPUTS, DEBUG)
-
-    # calculate scores for the uncalibrated test set
-    scores_uncalibrated = score_obj.calc_all(data_provider.get_test_probs(args.prob_method),
-                                                    data_provider.get_test_is_correct(),
-                                                    groups=data_provider.get_test_groups(),
-                                                    set_brier_ref=True)
-
-    _, _, total_bin_uncalibrated, correctness_bin_uncalibrated = score_obj.get_total_and_correctness(data_provider.get_test_probs(args.prob_method),
-                                                                                                     data_provider.get_test_is_correct(),
-                                                                                                     data_provider.get_test_groups())
-
-    total_group_uncalib, correctness_group_uncalib, average_group_confidence_uncalib = score_obj.get_correctness_per_group(data_provider.get_test_probs(args.prob_method),
-                                                                                                                           data_provider.get_test_is_correct(),
-                                                                                                                           data_provider.get_test_groups())
-
-    # Add entry for the run in the score table
+    # Setup grid
+    if bins is None:
+        bins = binning.Binning(args.bin_count, args.binning_type)
+    
+    # Initialize scoring object
+    score_obj = Score(bins, args)
+    
+    # Compute all metrics
+    test_probs = data_provider.get_test_probs(args.prob_method)
+    test_is_correct = data_provider.get_test_is_correct()
+    test_groups = data_provider.get_test_groups()
+    
+    scores_uncalibrated = compute_uncalibrated_scores(score_obj, data_provider, args)
+    # binning stats
+    _, _, total_bin, correctness_bin = score_obj.get_total_and_correctness(
+        test_probs,
+        test_is_correct,
+        test_groups
+    )
+    # group stats
+    total_group, correctness_group, avg_group_confidence = score_obj.get_correctness_per_group(
+        test_probs,
+        test_is_correct,
+        test_groups
+    )
+    
+    # Add entry to score table
     score_obj.add_to_score_table(data_provider.run, scores_uncalibrated, [], baseline=True)
     
-    # only return values when script is called from another script
-    if extern:
-        return {"correctness_bin_uncalibrated": correctness_bin_uncalibrated, 
-                "total_bin_uncalibrated": total_bin_uncalibrated,
-                "correctness_group_uncalib": correctness_group_uncalib, 
-                "average_group_confidence_uncalib": average_group_confidence_uncalib,
-                "total_group_uncalib": total_group_uncalib,
-                "scores_uncalibrated": scores_uncalibrated,
-                "uncalibrated_probs": data_provider.get_test_probs(args.prob_method),
-                "is_correct": data_provider.get_test_is_correct(),
-                "groups": data_provider.get_test_groups(),
-                "language": data_provider.get_test_languages(),
-                "names": data_provider.get_test_names(),
-                "programs": data_provider.get_test_programs(),
-                "prompts": data_provider.get_test_prompts(),
-                "token_logprobs": data_provider.get_test_token_logprobs(),
-                "group_names": data_provider.group_names}
-    else:
-        if args.save_charts:
-            _, axs = plt.subplots(1, 1, figsize=(6, 5))
-            
-            chartmaker.calibration_bar_chart(axs, 
-                                             'Uncalibrated', 
-                                             correctness_bin_uncalibrated, 
-                                             chartmaker.get_bar_colors(total_bin_uncalibrated), 
-                                             total_bin_uncalibrated)        
-            
-            plt.savefig(chartmaker.save_dir+"calibration.pdf")
-            plt.close() 
-        
-    # display score table for all runs
+    
+    # Display and save results
     score_obj.display_score_table()
-
-    # saves the score table
     if args.save_table:
-        with open(data_provider.save_dir+'scores.txt', 'w') as f:
-            f.write(score_obj.printable_table)
+        score_obj.save_scores_table(data_provider.save_dir)
 
+    return build_return_dict(
+        data_provider, args, scores_uncalibrated,
+        total_bin, correctness_bin,
+        total_group, correctness_group, avg_group_confidence
+    )
 
 
 if __name__ == "__main__":

@@ -125,6 +125,18 @@ def load_parser():
         required=("quantitativ" in sys.argv or "qualitativ" in sys.argv),
         help="Model with which the verbalized data was created") 
          
+    parser.add_argument(
+        "--debug", 
+        action="store_true",
+        default=False,
+        help="Print debug information.")      
+
+    parser.add_argument(
+        "--print-info", 
+        action="store_true",
+        default=False,
+        help="Print intermediate states to command line.")           
+    
     args = parser.parse_args()
 
     return args

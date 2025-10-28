@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-class charts:
+class Charts:
 
     def __init__(self, run, binning_type, grid, save_dir, bin_edges=None):
         """
@@ -401,3 +401,56 @@ class charts:
 
         plt.savefig(self.save_dir + "calibration_infos.pdf")
         plt.close()
+        
+    def create_charts(self, results, args):
+        """Generate calibration charts."""
+        baseline = results["Baseline"]
+        platt = results["Platt scaling"]
+        hb = results["Histogram binning"]
+        lr = results["Linear regression"]
+        logr = results["Logistic regression"]
+        ighb = results["Iterative group histogram binning"]
+        iglb = results["Iterative group linear binning"]
+        
+        self.calibration_method_comp_bar_chart(
+            args.prob_method,
+            baseline["total_bin_uncalibrated"],
+            platt["total_bin_calibrated"],
+            hb["total_bin_calibrated"],
+            lr["total_bin_calibrated"],
+            logr["total_bin_calibrated"],
+            ighb["total_bin_calibrated"],
+            iglb["total_bin_calibrated"],
+            baseline["correctness_bin_uncalibrated"],
+            platt["correctness_bin_calibrated"],
+            hb["correctness_bin_calibrated"],
+            lr["correctness_bin_calibrated"],
+            logr["correctness_bin_calibrated"],
+            ighb["correctness_bin_calibrated"],
+            iglb["correctness_bin_calibrated"]
+        )
+        
+        self.group_calibration_scatter(
+            args.prob_method,
+            baseline["correctness_group_uncalib"],
+            baseline["average_group_confidence_uncalib"],
+            baseline["total_group_uncalib"],
+            platt["correctness_group"],
+            platt["average_group_confidence"],
+            platt["total_group"],
+            hb["correctness_group"],
+            hb["average_group_confidence"],
+            hb["total_group"],
+            lr["correctness_group"],
+            lr["average_group_confidence"],
+            lr["total_group"],
+            logr["correctness_group"],
+            logr["average_group_confidence"],
+            logr["total_group"],
+            ighb["correctness_group"],
+            ighb["average_group_confidence"],
+            ighb["total_group"],
+            iglb["correctness_group"],
+            iglb["average_group_confidence"],
+            iglb["total_group"]
+        )

@@ -1,9 +1,9 @@
 from sklearn.linear_model import LinearRegression, LogisticRegression
-from tools.calibration_scores import score
+from tools.calibration_scores import Score
 
 class Platt_calibration:
     
-    def __init__(self, grid, outputs, debug):
+    def __init__(self, grid, args):
         """
             Initilaizes a linear regression object
 
@@ -13,11 +13,11 @@ class Platt_calibration:
             :param type: Regression type. One of 'linear' and 'logistic'
         """
         self.grid = grid
-        self.debug = debug
-        self.outputs = outputs
+        self.debug = args.debug
+        self.outputs = args.print_info
         self.platt = None
 
-        self.score_obj = score(grid, outputs, debug)
+        self.score_obj = Score(grid, args)
  
     def fit(self, X, y):
         """

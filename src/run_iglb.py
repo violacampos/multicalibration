@@ -42,10 +42,8 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
 
     # Create object and calculate first deltas and so on
     iglb = IGLB_calibration(grid, 
-                            args.epsilon, 
-                            args.bin_count, 
-                            OUTPUTS, 
-                            DEBUG).fit(data_provider.get_train_probs(args.prob_method), 
+ 
+                            args).fit(data_provider.get_train_probs(args.prob_method), 
                                        data_provider.get_train_is_correct(), 
                                        data_provider.get_train_groups())
     
@@ -75,7 +73,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
 
         # Assign bins an calculate the probability for each bin,group and tau combination
         # VIOLA: removed from predict iteration, only used for robins saved changes if test==True -> TODO check
-        assigned_bins = binning.round_model_to_grid(train_probs, grid)   
+        assigned_bins = grid.round_probabilities_to_grid(train_probs)   
         P_S_p_g = iglb.get_P_S_p_g(train_probs, data_provider.get_train_groups()) 
         
         # get the tau, bin, group for which the probality * deltas_squared maximises
@@ -96,7 +94,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                                      group)
 
         # get the calibrated confidences for the test subset
-        assigned_bins_test = binning.round_model_to_grid(test_probs, grid)   
+        assigned_bins_test = grid.round_probabilities_to_grid(test_probs)   
         test_probs= iglb.predict(   test_probs, 
                                     data_provider.get_test_groups(), 
                                     assigned_bins_test, 
@@ -107,7 +105,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                     is_correct=data_provider.get_test_is_correct())
 
         # get the calibrated confidences for the validation subset to calculate MSE
-        assigned_bins_val = binning.round_model_to_grid(val_probs, grid)   
+        assigned_bins_val = grid.round_probabilities_to_grid(val_probs)   
         val_probs = iglb.predict(   val_probs, 
                                     data_provider.get_val_groups(),
                                     assigned_bins_val, 
@@ -120,7 +118,7 @@ def main(data_provider, extern=False, grid=None, chartmaker=None):
                                                                                                                                   data_provider.get_test_groups())
         
         # Add history element to track changes
-        history[len(iglb.changes)] = [temp_group_correctness, curr_group_correctness, iglb.changes[-1], curr_group_total, temp_bin_correctness, curr_bin_correctness] 
+        #history[len(iglb.changes)] = [temp_group_correctness, curr_group_correctness, iglb.changes[-1], curr_group_total, temp_bin_correctness, curr_bin_correctness] 
         temp_group_correctness = curr_group_correctness
         temp_bin_correctness = curr_bin_correctness    
 
