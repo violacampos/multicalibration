@@ -3,12 +3,12 @@ import os
 from tabulate import tabulate
 
 
-import run_hb
-import run_lr
-import run_ighb
-import run_iglb
-import compute_baseline
-import run_platt
+import methods.run_hb as run_hb
+import methods.run_lr as run_lr
+import methods.run_ighb as run_ighb
+import methods.run_iglb as run_iglb
+import tools.compute_baseline as compute_baseline
+import methods.run_platt as run_platt
 from tools import binning, cmd_input
 from tools.create_charts import Charts
 from tools.dataset import GroupConfig, HumanEvalDataset, LiveCodeBenchDataset

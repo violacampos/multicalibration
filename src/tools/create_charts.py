@@ -1,3 +1,4 @@
+import os
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -120,7 +121,7 @@ class Charts:
         )  # , y7, x2=x1, bar_colors2=self.get_bar_colors(y1, orange=True))
 
         plt.tight_layout()
-        plt.savefig(self.save_dir + f"{scoring_method}_calibration_comparison_bar.pdf")
+        plt.savefig(os.path.join(self.save_dir, f"{scoring_method}_calibration_comparison_bar.pdf"))
         plt.close()
 
     def calibration_bar_scatter_chart(
@@ -219,7 +220,7 @@ class Charts:
         self.scatter_plot(axs[1, 6], "IGLB", iglb_conf, iglb_corr, iglb_total / 2)
 
         plt.tight_layout()
-        plt.savefig(self.save_dir + f"{scoring_method}_calibration_bar_scatter.pdf")
+        plt.savefig(os.path.join(self.save_dir, f"{scoring_method}_calibration_bar_scatter.pdf"))
         plt.close()
 
     """def histogram(self, data, path, typ):
@@ -360,7 +361,7 @@ class Charts:
         self.scatter_plot(axs[6], "IGLB", iglb_conf, iglb_corr, iglb_total / 2)
         # axs[0,1].axis('off')
         plt.tight_layout()
-        plt.savefig(self.save_dir + f"{scoring_method}_group_calibration.pdf")
+        plt.savefig(os.path.join(self.save_dir, f"{scoring_method}_group_calibration.pdf"))
         plt.close()
 
     def calibration_info(
@@ -399,7 +400,7 @@ class Charts:
             axs[1, 1], "Test calibrated distribution", total_calibrated
         )
 
-        plt.savefig(self.save_dir + "calibration_infos.pdf")
+        plt.savefig(os.path.join(self.save_dir, "calibration_infos.pdf"))
         plt.close()
         
     def create_charts(self, results, args):

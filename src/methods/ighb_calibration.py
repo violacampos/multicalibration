@@ -72,14 +72,12 @@ class IGHB_calibration:
             print(f"Max error: {self.max_error}")
         return self
 
-    def predict(self, X, groups, test=False, is_correct=None):
+    def predict(self, X, groups):
         """
         Uses the learned delta on a selected bin-group combination for adjustement.
 
         :param X: Probabilities for calibration
         :param groups: Group matrix
-        :param test: Flag to store changes on test subset
-        :param is_correct: Labels of correctness for history
 
         :return: adjusted probabilities
         """

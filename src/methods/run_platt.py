@@ -4,7 +4,7 @@ import os
 from tools import binning, cmd_input
 
 from tools.create_charts import Charts
-from tools.platt_calibration import Platt_calibration
+from methods.platt_calibration import Platt_calibration
 
 
 def main(

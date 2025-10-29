@@ -99,6 +99,3 @@ def main(data_provider, bins=None):
         total_group, correctness_group, avg_group_confidence
     )
 
-
-if __name__ == "__main__":
-    main()

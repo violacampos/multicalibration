@@ -2,7 +2,7 @@ import numpy as np
 import os
 from tools import binning, cmd_input
 from tools.create_charts import Charts
-from tools.lr_calibration import LR_calibration
+from methods.lr_calibration import LR_calibration
 
 
 def main(data_provider, type="linear", extern=False, bins=None, plots=None):
@@ -106,5 +106,3 @@ def main(data_provider, type="linear", extern=False, bins=None, plots=None):
             f.write(lr.score_obj.printable_table)
 
 
-if __name__ == "__main__":
-    main()

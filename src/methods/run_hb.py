@@ -2,7 +2,7 @@ import numpy as np
 import os
 from tools import binning, cmd_input
 from tools.create_charts import Charts
-from tools.hb_calibration import Hb_calibration
+from methods.hb_calibration import Hb_calibration
 
 
 def main(data_provider, extern=False, bins=None, plots=None):
