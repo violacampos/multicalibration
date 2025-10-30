@@ -53,20 +53,21 @@ pip install -r requirements.txt
 
 ### 🚀 Running Experiments
 
-To reproduce all experiments from the paper:
+To reproduce the experiments from the paper:
 
-```bash
-python src/compare_methods.py --config configs/experiment.yaml
-```
 
-You can also specify parameters such as model, dataset, and calibration method:
 
 ```bash
 python src/run_experiments.py \
-    --model qwen3-coder \
-    --dataset livecodebench \
-    --method iglb
+    --data_path <PATH TO DATA> \ # until dataset is published
+    --benchmark livecodebench \
+    --prob-method avg_logprob \
+    --save-charts \
+    --save-table \
+    --print-info"
 ```
+
+For an overview of available parameters see `src/toold/cmd_input.py`.
 
 Results (ECE, BSS, and reliability diagrams) will be saved in `results/`.
 

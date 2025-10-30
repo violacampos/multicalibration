@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from tools import binning, cmd_input
-from tools.create_charts import Charts
+from tools.create_charts import CalibrationCharts
 from methods.hb_calibration import Hb_calibration
 
 
@@ -61,7 +61,7 @@ def main(data_provider, extern=False, bins=None, plots=None):
         # Charts
         if args.save_charts:
             if plots is None:
-                plots = Charts(
+                plots = CalibrationCharts(
                     data_provider.run, args.binning_type, bins.grid, data_provider.save_dir
                 )
                 

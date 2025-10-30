@@ -1,142 +1,91 @@
-import sys
 import argparse
+
 
 def load_parser():
     """
-        Creates a parser for command line inputs
+    Creates a parser for command line inputs
 
-    """  
+    """
     parser = argparse.ArgumentParser()
-    
-    parser.add_argument(
-        "--dir", 
-        type=str,  
-        help="Directory with results.", 
-        nargs="+")
+
+    parser.add_argument("--dir", type=str, help="Directory with results.", nargs="+")
 
     parser.add_argument(
-        "--data_path", 
-        type=str,  
-        help="Path to jsonlines-file with results.", 
-        default=None)
+        "--data_path",
+        type=str,
+        help="Path to jsonlines-file with results.",
+        default=None,
+    )
 
     parser.add_argument(
-        "--problem", 
-        choices=["code-gen", "program-repair"],
-        default="code-gen",
-        help="Which set to evaluate")
-    
-    parser.add_argument(
-        "--benchmark", 
+        "--benchmark",
         choices=["livecodebench", "humaneval", "mceval"],
         default="humaneval",
-        help="The evaluation benchmark.")
-        
-    parser.add_argument(
-        "--split", 
-        action="store_true",
-        help="Flag to split dataset.")  
-      
-    parser.add_argument(
-        "--k-fold", 
-        action="store_true",
-        default=False,
-        help="Use k-fold in IGHB method")   
-        
-    parser.add_argument(
-        "--grouping-style", 
-        choices=["simple", "scc", "categories", "all"],
-        default="simple",
-        help="Choose ways of grouping the samples.")       
+        help="The evaluation benchmark.",
+    )
 
     parser.add_argument(
-        "--counter-groups", 
-        action="store_true",
-        help="Usage of counter groups.")   
+        "--save-table", action="store_true", help="Flag to save the result table."
+    )
 
     parser.add_argument(
-        "--save-table", 
-        action="store_true",
-        help="Flag to save the result table.")      
-    
-    parser.add_argument(
-        "--prob-method", 
-        choices=["avg_prob", 
-                 "qualitativ", 
-                 "quantitativ", 
-                 "code_prob",
-                 "tail_prob",
-                 "code_top20_prob",
-                 "tail_top20_prob"],
+        "--prob-method",
+        choices=[
+            "avg_prob",
+            "qualitativ",
+            "quantitativ",
+            "code_prob",
+            "tail_prob",
+            "code_top20_prob",
+            "tail_top20_prob",
+        ],
         default="avg_prob",
-        help="Choose which probability to use.")      
+        help="Choose which probability to use.",
+    )
 
     parser.add_argument(
-        "--regressor", 
-        choices=["LR", "SVR", "XGBoost"],
-        default="LR",
-        help="Choose which regressor to use (only used with the run_regressor script).")   
-
-    parser.add_argument(
-        "--binning-type", 
+        "--binning-type",
         choices=["linear"],
-        default='linear',
-        help="Choose which binning type to use.")    
-    
-    parser.add_argument(
-        "--bin-count", 
-        type=int,  
-        default=20,
-        help="Choose the amount of bins to calibrate on.")  
+        default="linear",
+        help="Choose which binning type to use.",
+    )
 
     parser.add_argument(
-        "--control-exp", 
+        "--bin-count", type=int, default=20, help="Number of bins for calibration."
+    )
+
+    parser.add_argument(
+        "--save-charts",
         action="store_true",
         default=False,
-        help="Only for the LR mehtod.")      
-    
+        help="Save the charts for the method.",
+    )
+
     parser.add_argument(
-        "--save-history", 
+        "--save-data",
         action="store_true",
         default=False,
-        help="Only for the IGHB/IGLB method.")  
-     
+        help="Save the output data of all methods",
+    )
+
     parser.add_argument(
-        "--save-charts", 
-        action="store_true",
-        default=False,
-        help="Save the charts for the method.")  
-    
-    parser.add_argument(
-        "--save-data", 
-        action="store_true",
-        default=False,
-        help="Save the output data of all methods")     
-            
-    parser.add_argument(
-        "--epsilon", 
-        type=float,  
+        "--epsilon",
+        type=float,
         default=0.01,
-        help="Epsilon value only for IGLB method.") 
-    
-    parser.add_argument(
-        "--model", 
-        choices=["gpt_4o_mini"],
-        required=("quantitativ" in sys.argv or "qualitativ" in sys.argv),
-        help="Model with which the verbalized data was created") 
-         
-    parser.add_argument(
-        "--debug", 
-        action="store_true",
-        default=False,
-        help="Print debug information.")      
+        help="Epsilon value only for IGLB method.",
+    )
 
     parser.add_argument(
-        "--print-info", 
+        "--debug", action="store_true", default=False, help="Print debug information."
+    )
+
+    parser.add_argument(
+        "--print-info",
         action="store_true",
         default=False,
-        help="Print intermediate states to command line.")           
-    
+        help="Print intermediate states to command line.",
+    )
+
     args = parser.parse_args()
 
     return args

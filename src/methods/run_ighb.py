@@ -4,9 +4,8 @@ from tools import binning, cmd_input
 from methods.ighb_calibration import IGHB_calibration
 import pickle
 from sklearn.model_selection import KFold
-from tools.create_charts import Charts
-from tools.data import data_loader
-from tools.split import split
+from tools.create_charts import CalibrationCharts
+
 
 DEBUG = True
 OUTPUTS = True
@@ -125,7 +124,7 @@ def main(data_provider, extern=False, bins=None, plots=None):
     else:
         if getattr(args, "save_charts", False):
             if plots is None:
-                plots = Charts(
+                plots = CalibrationCharts(
                     data_provider.run, args.binning_type, bins.grid, data_provider.save_dir
                 )
             plots.calibration_info(

@@ -3,7 +3,7 @@ import numpy as np
 import os
 from tools import binning, cmd_input
 
-from tools.create_charts import Charts
+from tools.create_charts import CalibrationCharts
 from methods.platt_calibration import Platt_calibration
 
 
@@ -11,7 +11,7 @@ def main(
     data_provider,
     extern: bool = False,
     bins: Optional[binning.Binning] = None,
-    plots: Optional[Charts]=None,
+    plots: Optional[CalibrationCharts]=None,
 ):
     args = cmd_input.load_parser()
 
@@ -89,7 +89,7 @@ def main(
         if getattr(args, "save_charts", False):
             if plots is None:
         
-                plots = Charts(
+                plots = CalibrationCharts(
                     data_provider.run, args.binning_type, bins.grid, data_provider.save_dir
                 )
             plots.calibration_info(

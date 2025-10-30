@@ -283,6 +283,8 @@ class HumanEvalDataset(LiveCodeBenchDataset):
         )
 
         self.group_config = group_config
+        self.group_names = []
+        self.is_names_set = False
         self.median_prompt = None
         self.median_loc = None
         self.median_output = None
@@ -537,7 +539,7 @@ class HumanEvalDataset(LiveCodeBenchDataset):
 if __name__ == "__main__":
     # DEBUG
     path = "../LiveCodeBench/output/Qwen3-Coder-30B-A3B/preprocessed/codegeneration_10_0.2.jsonl"
-    he_dir = "tyler/multipl-e/runs/humaneval-all-keep-Qwen3-Coder-30B-A3B-instruct"
+    
     config = GroupConfig(
         add_counter=False,
         larger_than_median_loc=True,
@@ -548,7 +550,7 @@ if __name__ == "__main__":
         language=True
     )
 
-    he_dataset = HumanEvalDataset(path, run_dir=he_dir, group_config=config)
+
     dataset = LiveCodeBenchDataset(path, split="train", group_config=config)
     print(f"Dataset size: {len(dataset)}")
     print(f"First item: {dataset[0]}")

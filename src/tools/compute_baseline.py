@@ -1,6 +1,6 @@
 from tools import  binning, cmd_input
 from tools.calibration_scores import Score
-from tools.create_charts import Charts
+from tools.create_charts import CalibrationCharts
 
 
 

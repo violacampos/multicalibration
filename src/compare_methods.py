@@ -10,8 +10,8 @@ import methods.run_iglb as run_iglb
 import tools.compute_baseline as compute_baseline
 import methods.run_platt as run_platt
 from tools import binning, cmd_input
-from tools.create_charts import Charts
-from tools.dataset import GroupConfig, HumanEvalDataset, LiveCodeBenchDataset
+from tools.create_charts import CalibrationCharts
+from data.dataset import GroupConfig, HumanEvalDataset, LiveCodeBenchDataset
 
 
 def get_benchmark_configs():
@@ -142,7 +142,7 @@ def main():
     
     # Set up bins and plotting
     bins = binning.Binning(args.bin_count, args.binning_type)
-    plots = Charts(split_obj.run, args.binning_type, bins.grid, split_obj.save_dir)
+    plots = CalibrationCharts(split_obj.run, args.binning_type, bins.grid, split_obj.save_dir)
     
     # Run all calibration methods
     results = run_calibration_methods(split_obj, bins, plots)
