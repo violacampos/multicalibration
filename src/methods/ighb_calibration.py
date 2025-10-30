@@ -1,6 +1,6 @@
 import numpy as np
 from tools.calibration_scores import Score
-from tools import binning, groups
+
 
 
 class IGHB_calibration:

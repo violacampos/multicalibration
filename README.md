@@ -58,7 +58,9 @@ To reproduce the experiments from the paper:
 
 
 ```bash
-python src/run_experiments.py \
+cd src/
+
+python compare_methods.py \
     --data_path <PATH TO DATA> \ # until dataset is published
     --benchmark livecodebench \
     --prob-method avg_logprob \
@@ -67,7 +69,7 @@ python src/run_experiments.py \
     --print-info"
 ```
 
-For an overview of available parameters see `src/toold/cmd_input.py`.
+For an overview of available parameters see `src/tools/cmd_input.py`.
 
 Results (ECE, BSS, and reliability diagrams) will be saved in `results/`.
 
