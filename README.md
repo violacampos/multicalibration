@@ -58,15 +58,13 @@ To reproduce the experiments from the paper:
 
 
 ```bash
-cd src/
-
-python compare_methods.py \
+python src/compare_methods.py \
     --data_path <PATH TO DATA> \ # until dataset is published
     --benchmark livecodebench \
     --prob-method avg_logprob \
     --save-charts \
     --save-table \
-    --print-info"
+    --print-info
 ```
 
 For an overview of available parameters see `src/tools/cmd_input.py`.
