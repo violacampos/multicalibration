@@ -35,7 +35,7 @@ def build_return_dict(data_provider, args, scores, total_bin, correctness_bin,
         "is_correct": data_provider.get_test_is_correct(),
         "groups": data_provider.get_test_groups(),
         "language": data_provider.get_test_languages(),
-        "names": data_provider.get_test_names(),
+        #"names": data_provider.get_test_names(), TODO use ids instead
         "programs": data_provider.get_test_programs(),
         "prompts": data_provider.get_test_prompts(),
         "token_logprobs": data_provider.get_test_token_logprobs(),

@@ -23,6 +23,13 @@ def load_parser():
         default="humaneval",
         help="The evaluation benchmark.",
     )
+    
+    parser.add_argument(
+        "--model",
+        choices=["qwen3", "gpt-oss", "r1-distil"],
+        default="qwen3",
+        help="The LLM used for sample generation.",
+    )
 
     parser.add_argument(
         "--save-table", action="store_true", help="Flag to save the result table."

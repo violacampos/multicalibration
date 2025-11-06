@@ -11,7 +11,7 @@ import tools.compute_baseline as compute_baseline
 import methods.run_platt as run_platt
 from tools import binning, cmd_input
 from tools.create_charts import CalibrationCharts
-from data.dataset import GroupConfig, HumanEvalDataset, LiveCodeBenchDataset
+from data.dataset import CalibrationDataset, GroupConfig, HumanEvalDataset, LiveCodeBenchDataset
 
 
 def get_benchmark_configs():
@@ -51,13 +51,19 @@ def get_benchmark_configs():
 def load_dataset(args, config):
     """Load the appropriate dataset based on benchmark type."""
     if args.benchmark in ["livecodebench", "mceval"]:
-        return LiveCodeBenchDataset(
-            jsonl_path=args.data_path,
-            split='train',
+        return CalibrationDataset(
             benchmark=args.benchmark,
+            model=args.model,
             group_config=config,
             args=args
         )
+        # return LiveCodeBenchDataset(
+        #     jsonl_path=args.data_path,
+        #     split='train',
+        #     benchmark=args.benchmark,
+        #     group_config=config,
+        #     args=args
+        # )
     else:
         run_dirs = sorted([x[0] for x in os.walk(args.dir[0])])
         run_dir = run_dirs[0]

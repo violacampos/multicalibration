@@ -26,7 +26,7 @@ class Platt_calibration:
 
             :return: LR object
         """
-        X = X.values.reshape(-1,1)
+        X = X.reshape(-1,1)
         self.platt = LogisticRegression(solver='lbfgs').fit(X,y) 
         return self
 
@@ -38,7 +38,7 @@ class Platt_calibration:
 
             :return: list of calibrated probabilities
         """
-        X = X.values.reshape(-1,1)
+        X = X.reshape(-1,1)
         return self.platt.predict_proba(X)[:,1]
     
     

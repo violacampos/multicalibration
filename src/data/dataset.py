@@ -7,7 +7,9 @@ import random
 from typing import List, Optional
 import pandas as pd
 import numpy as np
+
 from torch.utils.data import Dataset
+from datasets import Dataset as HF_Dataset, load_dataset
 
 
 class GroupConfig:
@@ -32,7 +34,262 @@ class GroupConfig:
         self.difficulty_hard = difficulty_hard
 
 
+# static helper functions
 
+
+def add_features(batch):
+    outputs = batch["output"]
+    logprobs = batch["token_logprobs"]
+    cumprobs = [sum([float(prob) for (prob, tok) in logprob]) for logprob in logprobs]
+    return {
+        "output_size": [len(output) for output in outputs],
+        "cumulative_logprob": cumprobs,
+        "avg_prob": [
+            np.exp(cumprob / len(logprobs))
+            for cumprob, logprobs in zip(cumprobs, logprobs)
+        ],
+        "is_correct": [int(flag) for flag in batch["is_correct"]],
+    }
+
+
+
+
+class CalibrationDataset:
+    """
+    Dataset wrapper for CALIBRI datasets.
+
+    """
+
+    def __init__(
+        self,
+        model: str = "qwen3",
+        benchmark: str = "livecodebench",
+        group_config: GroupConfig = None,
+        split: Optional[str] = None,
+        cache_dir: Optional[str] = None,
+        args=None,
+    ):
+        config_name = f"{benchmark}_{model}"
+        self.config_name = config_name
+        self.dataset = load_dataset(
+            "violasara/CALIBRI", config_name, split=split, cache_dir=cache_dir
+        )
+        
+        # always save dataset in dict form for easier handling of splits
+        if isinstance(self.dataset, HF_Dataset):
+            self.dataset = {split: self.dataset}
+
+        for split in self.dataset:
+            self.dataset[split] = self.unfold(self.dataset[split])
+            self.dataset[split] = self.dataset[split].map(
+                add_features, batched=True
+            )
+
+        self.run, self.save_dir = self.init_run_and_outputdir(model, benchmark)
+
+        self.group_config = group_config
+
+        self.median_loc = self.get_median_loc()
+        self.median_output = self.get_median_length("output")
+        self.median_prompt = self.get_median_length("prompt")    
+        self.languages = sorted(set(self.dataset[split]["language"])) # use only last split, should be ok
+        self.group_names = self.get_group_names()
+        
+        for split in self.dataset:
+            self.dataset[split] = self.dataset[split].map(
+                lambda x: self.add_group_info(x), batched=True
+            )
+
+
+    def get_median_length(self, feature) -> float:
+        return np.median(
+            np.concatenate(
+                [
+                    pd.array(self.dataset[split][feature]).map(len)
+                    for split in self.dataset
+                    if feature in self.dataset[split].features
+                ]
+            )
+        )
+
+        
+    def get_median_loc(self) -> float:
+        return np.median(
+            np.concatenate(
+                [
+                    pd.array(self.dataset[split]["program"]).map(lambda x: x.count('\n'))
+                    for split in self.dataset
+                    if 'program' in self.dataset[split].features
+                ]
+            )
+        )
+        
+    def get_group_names(self) -> List[str]:
+        
+        feature_names = ['language', 
+                         'larger_than_median_loc', 
+                         'larger_than_median_prompt',
+                         'larger_than_median_output',
+                         'difficulty_easy', 
+                         'difficulty_medium',
+                         'difficulty_hard',
+                         ]
+        group_names = {
+                         'larger_than_median_loc': 'loc_high', 
+                         'larger_than_median_prompt': 'prompt_len_high',
+                         'larger_than_median_output': 'len_high',
+                         'difficulty_easy': 'comp_easy', 
+                         'difficulty_medium': 'comp_medium',
+                         'difficulty_hard': 'comp_hard',}
+        enabled_features = [name for name in feature_names if getattr(self.group_config, name, False)]
+        result = []
+        for feature in enabled_features:
+            if feature == 'language':
+                for language in self.languages:
+                    result.append("lang_" + language)
+            else:
+                result.append(group_names[feature])
+                if self.group_config.add_counter:
+                    if feature.startswith('larger'):
+                        result.append(group_names[feature].replace('_high', '_low'))
+        return result
+        
+    def add_group_info(self, batch):
+        groups = [[] for _ in range(len(batch['id']))]
+        difficulty = batch["difficulty"]
+        languages = batch["language"]
+        config = self.group_config
+        if config.language:
+            for lang in self.languages:
+                for i, l in enumerate(languages):
+                    groups[i].append(1 if l == lang else 0)
+                    
+        if config.larger_than_median_loc:
+            for i, program in enumerate(batch["program"]):
+                loc_count = program.count("\n") if program is not None else 0
+                groups[i].append(1 if loc_count > self.median_loc else 0)
+                if config.add_counter:
+                    groups[i].append(0 if loc_count > self.median_loc else 1)
+        if config.larger_than_median_prompt:
+            for i, prompt in enumerate(batch["prompt"]):
+                groups[i].append(1 if len(prompt) > self.median_prompt else 0)
+                if config.add_counter:
+                    groups[i].append(0 if len(prompt) > self.median_prompt else 1)
+        if config.larger_than_median_output:
+            for i, output in enumerate(batch["output"]):
+                groups[i].append(1 if len(output) > self.median_output else 0)
+                if config.add_counter:
+                    groups[i].append(0 if len(output) > self.median_output else 1)
+                
+        if config.difficulty_easy:
+            for i, d in enumerate(difficulty):
+                groups[i].append(1 if d == "easy" else 0)
+                if config.add_counter:
+                    groups[i].append(0 if d == "easy" else 1)
+        if config.difficulty_medium:
+            for i, d in enumerate(difficulty):
+                groups[i].append(1 if d in ["medium", "middle"] else 0)
+                if config.add_counter:
+                    groups[i].append(0 if d in ["medium", "middle"] else 1)
+        if config.difficulty_hard:
+            for i, d in enumerate(difficulty):
+                groups[i].append(1 if d == "hard" else 0)
+                if config.add_counter:
+                    groups[i].append(0 if d == "hard" else 1)
+            
+        return {'groups': groups}
+
+    @staticmethod
+    def unfold(dataset: HF_Dataset) -> HF_Dataset:
+        unfolded_data = []
+        for example in dataset:
+            for i in range(10):
+                unfolded_example = {
+                    # Scalar fields (keep as-is)
+                    "id": example["id"],
+                    "prompt": example["prompt"],
+                    "language": example["language"],
+                    # Sequence fields (extract i-th element)
+                    "program": example["program"][i],
+                    "is_correct": example["is_correct"][i],
+                    "token_logprobs": example["token_logprobs"][i],
+                    # Add sample index
+                    "sample_idx": i,
+                }
+
+                # Handle optional fields
+                if "output" in example:
+                    unfolded_example["output"] = example["output"][i]
+                if "difficulty" in example:
+                    unfolded_example["difficulty"] = example["difficulty"]
+                if "name" in example:
+                    unfolded_example["name"] = example["name"]
+                if "code_token_idx" in example:
+                    unfolded_example["code_token_idx"] = example["code_token_idx"][i]
+
+                unfolded_data.append(unfolded_example)
+
+        return HF_Dataset.from_list(unfolded_data)
+
+    @staticmethod
+    def init_run_and_outputdir(model: str, benchmark: str):
+        run = benchmark + "_" + model
+        dir = os.path.join("results", run, "output")
+        os.makedirs(dir, exist_ok=True)
+        return run, dir
+    
+    def get_train_probs(self, prob_type: str):
+        return np.array(self.dataset["train"][prob_type])
+
+    def get_train_is_correct(self):
+        return np.array(self.dataset["train"]["is_correct"])
+
+    def get_train_groups(self):
+        return np.array(self.dataset["train"]["groups"])
+
+    ########################################################
+
+    def get_test_probs(self, prob_type: str):
+        return np.array(self.dataset["test"][prob_type])
+
+    def set_test_probs(self, new_probs):
+        self.dataset["test"]["probs"] = new_probs
+
+    def get_test_is_correct(self):
+        return np.array(self.dataset["test"]["is_correct"])
+
+    def get_test_groups(self):
+        return np.array(self.dataset["test"]["groups"])
+
+    def get_test_languages(self):
+        return self.dataset["test"]["language"]
+
+    def get_test_names(self):
+        return self.dataset["test"]["name"]
+
+    def get_test_programs(self):
+        return self.dataset["test"]["program"] if "program" in self.dataset["test"] else None
+
+    def get_test_prompts(self):
+        return self.dataset["test"]["prompt"]
+
+    def get_test_token_logprobs(self):
+        return (
+            self.dataset["test"]["token_logprobs"]
+            if "token_logprobs" in self.dataset["test"]
+            else None
+        )
+
+    #########################################################
+
+    def get_val_probs(self, prob_type: str):
+        return np.array(self.dataset["validation"][prob_type])
+
+    def get_val_is_correct(self):
+        return np.array(self.dataset["validation"]["is_correct"])
+
+    def get_val_groups(self):
+        return np.array(self.dataset["validation"]["groups"])
 
 
 class LiveCodeBenchDataset(Dataset):
@@ -46,7 +303,7 @@ class LiveCodeBenchDataset(Dataset):
         n: int = 10,
         val_ratio: float = 0.25,
         seed: int = 42,
-        args = None
+        args=None,
     ):
         self.data = {"train": [], "val": [], "test": []}
         self.data_path = jsonl_path
@@ -67,7 +324,7 @@ class LiveCodeBenchDataset(Dataset):
         with open(jsonl_path, "r") as f:
             for line in f:
                 entry = json.loads(line)
-                
+
                 entries.append(entry)
 
         # Shuffle and split
@@ -83,6 +340,11 @@ class LiveCodeBenchDataset(Dataset):
 
         # Broadcast after split
         for split, split_entries in split_entries.items():
+            # out_path = Path(jsonl_path).parent / f"{split}.jsonl"
+            # with open(out_path, 'w') as out:
+            #    for entry in split_entries:
+            #        out.write(json.dumps(entry) + "\n")
+
             data = {key: [] for key in split_entries[0].keys()}
 
             for entry in split_entries:
@@ -92,19 +354,24 @@ class LiveCodeBenchDataset(Dataset):
                     else:
                         data[key].extend([value] * self.n)
             self.data[split] = pd.DataFrame(data)
-            if args and args.prob_method=='code_prob':
-                self.data[split].dropna(subset=['code_logprob'], inplace=True)
+            if args and args.prob_method == "code_prob":
+                self.data[split].dropna(subset=["code_logprob"], inplace=True)
             # some postprocessing:
+            self.data[split]["output_size"] = self.data[split]["output"].apply(len)
+            self.data[split]["cumulative_logprob"] = self.data[split][
+                "token_logprobs"
+            ].apply(lambda x: sum([float(prob) for (prob, tok) in x]))
             self.data[split]["is_correct"] = self.data[split]["is_correct"].astype(int)
             self.data[split]["avg_prob"] = np.exp(
-                self.data[split]["cumulative_logprob"] / self.data[split]["token_count"]
+                self.data[split]["cumulative_logprob"]
+                / self.data[split]["token_logprobs"].apply(len)
             )
             self.add_group_info(split=split)
 
-            #self.data[split]["code_prob"] = np.exp(self.data[split]['code_logprob'])
-            #self.data[split]["tail_prob"] = np.exp(self.data[split]['tail_logprob'])
-            #self.data[split]["code_top20_prob"] = np.exp(self.data[split]['avg_top20_code_probs'])
-            #self.data[split]["tail_top20_prob"] = np.exp(self.data[split]['avg_top20_tail'])
+            # self.data[split]["code_prob"] = np.exp(self.data[split]['code_logprob'])
+            # self.data[split]["tail_prob"] = np.exp(self.data[split]['tail_logprob'])
+            # self.data[split]["code_top20_prob"] = np.exp(self.data[split]['avg_top20_code_probs'])
+            # self.data[split]["tail_top20_prob"] = np.exp(self.data[split]['avg_top20_tail'])
 
     @staticmethod
     def get_run_and_outdir_from_path(path: str, benchmark_name: str):
@@ -114,8 +381,8 @@ class LiveCodeBenchDataset(Dataset):
         dir = os.path.join("results", run, "output")
         os.makedirs(dir, exist_ok=True)
         return run, dir
-    
-    def get_model(self)->str:
+
+    def get_model(self) -> str:
         return self.data_path.split("/")[-3]
 
     def add_group_info(self, split=None):
@@ -142,60 +409,70 @@ class LiveCodeBenchDataset(Dataset):
         groups = []
         for idx, row in self.data[split].iterrows():
             check = []
-            
+
             if self.group_config.difficulty_easy:
                 if not self.is_names_set:
-                        self.group_names.append('comp_easy')
+                    self.group_names.append("comp_easy")
                 check.append(1) if row["difficulty"] == "easy" else check.append(0)
             if self.group_config.difficulty_medium:
                 if not self.is_names_set:
-                        self.group_names.append('comp_medium')
-                check.append(1) if row["difficulty"] in ["medium", "middle"] else check.append(0)
+                    self.group_names.append("comp_medium")
+                (
+                    check.append(1)
+                    if row["difficulty"] in ["medium", "middle"]
+                    else check.append(0)
+                )
             if self.group_config.difficulty_hard:
                 if not self.is_names_set:
-                        self.group_names.append('comp_hard')
+                    self.group_names.append("comp_hard")
                 check.append(1) if row["difficulty"] == "hard" else check.append(0)
 
             if self.group_config.larger_than_median_prompt:
                 if not self.is_names_set:
-                        self.group_names.append('prompt_len_high')
+                    self.group_names.append("prompt_len_high")
                 check.append(1 if len(row["prompt"]) > self.median_prompt else 0)
                 if self.group_config.add_counter:
                     if not self.is_names_set:
-                        self.group_names.append('prompt_len_low')
+                        self.group_names.append("prompt_len_low")
                     check.append(0 if len(row["prompt"]) > self.median_prompt else 1)
             if self.group_config.larger_than_median_loc:
                 if not self.is_names_set:
-                        self.group_names.append('loc_high')
+                    self.group_names.append("loc_high")
                 check.append(
-                    1 if row["program"] != None and row["program"].count("\n") + 1 > self.median_loc else 0
+                    1
+                    if row["program"] != None
+                    and row["program"].count("\n") + 1 > self.median_loc
+                    else 0
                 )
                 if self.group_config.add_counter:
                     if not self.is_names_set:
-                        self.group_names.append('loc_low')
-                    
+                        self.group_names.append("loc_low")
+
                     check.append(
-                        1 if row['program'] == None  or row["program"].count("\n") + 1 < self.median_loc else 0
+                        1
+                        if row["program"] == None
+                        or row["program"].count("\n") + 1 < self.median_loc
+                        else 0
                     )
             if self.group_config.larger_than_median_output:
                 if not self.is_names_set:
-                    self.group_names.append('len_high')
+                    self.group_names.append("len_high")
                 check.append(1 if row["output_size"] > self.median_output else 0)
                 if self.group_config.add_counter:
                     if not self.is_names_set:
-                        self.group_names.append('len_low')
+                        self.group_names.append("len_low")
                     check.append(0 if row["output_size"] > self.median_output else 1)
             if self.group_config.language:
                 if len(self.languages) == 0:
                     self.languages = sorted(set(self.data[split]["language"]))
                 for language in self.languages:
                     if not self.is_names_set:
-                        self.group_names.append('lang_' + language)
+                        self.group_names.append("lang_" + language)
                     check.append(1) if row["language"] == language else check.append(0)
             groups.append(check)
             if not self.is_names_set:
                 self.is_names_set = True
-        
+
         self.data[split]["groups"] = groups
 
     # def collect_languages(self):
@@ -213,7 +490,7 @@ class LiveCodeBenchDataset(Dataset):
 
     ########################################################
 
-    def get_train_probs(self, prob_type:str):
+    def get_train_probs(self, prob_type: str):
         return self.data["train"][prob_type]
 
     def get_train_is_correct(self):
@@ -224,7 +501,7 @@ class LiveCodeBenchDataset(Dataset):
 
     ########################################################
 
-    def get_test_probs(self, prob_type:str):
+    def get_test_probs(self, prob_type: str):
         return self.data["test"][prob_type]
 
     def set_test_probs(self, new_probs):
@@ -249,11 +526,15 @@ class LiveCodeBenchDataset(Dataset):
         return self.data["test"]["prompt"]
 
     def get_test_token_logprobs(self):
-        return self.data["test"]["token_logprobs"] if "token_logprobs" in self.data["test"] else None
+        return (
+            self.data["test"]["token_logprobs"]
+            if "token_logprobs" in self.data["test"]
+            else None
+        )
 
     #########################################################
 
-    def get_val_probs(self, prob_type:str):
+    def get_val_probs(self, prob_type: str):
         return self.data["val"][prob_type]
 
     def get_val_is_correct(self):
@@ -263,12 +544,11 @@ class LiveCodeBenchDataset(Dataset):
         return np.array(self.data["val"]["groups"].to_list())
 
 
-
 class HumanEvalDataset(LiveCodeBenchDataset):
     def __init__(
         self,
         jsonl_path: str,
-        run_dir:str,
+        run_dir: str,
         split: str = "train",
         group_config: GroupConfig = None,
         benchmark="humaneval",
@@ -289,24 +569,26 @@ class HumanEvalDataset(LiveCodeBenchDataset):
         self.median_loc = None
         self.median_output = None
         self.languages = []
-        
+
         results, num_samples = self.load_multipl_e_run(run_dir)
-        
+
         data = self.load_samples(results)
 
         self.split_in_train_test(data)
         for split in self.data:
+            out_path = Path("data/humaneval/r1-distill") / f"{split}.jsonl"
+            self.data[split].to_json(out_path, orient="records", lines=True)
+
             self.add_group_info(split=split)
-            
-            
-    def get_test_probs(self, prob_type:str):
-        return self.data["test"]['probs'] # ignore type for humanEval
-    
-    def get_train_probs(self, prob_type:str):
-        return self.data["train"]['probs'] # ignore type for humanEval
-    
-    def get_val_probs(self, prob_type:str):
-        return self.data["val"]['probs'] # ignore type for humanEval
+
+    def get_test_probs(self, prob_type: str):
+        return self.data["test"]["probs"]  # ignore type for humanEval
+
+    def get_train_probs(self, prob_type: str):
+        return self.data["train"]["probs"]  # ignore type for humanEval
+
+    def get_val_probs(self, prob_type: str):
+        return self.data["val"]["probs"]  # ignore type for humanEval
 
     def for_file(self, path: Path):
         """
@@ -323,7 +605,7 @@ class HumanEvalDataset(LiveCodeBenchDataset):
                     data = json.load(f)
             except Exception as e:
                 data = None
-            
+
         else:
             with open(path, "r") as f:
                 data = json.load(f)
@@ -357,8 +639,7 @@ class HumanEvalDataset(LiveCodeBenchDataset):
             return_values.append(res_dict)
 
         return return_values
-    
-    
+
     def folders_in(self, path_to_parent):
         """
         Checks if samples lie in the subfolder of the passed dir.
@@ -371,7 +652,6 @@ class HumanEvalDataset(LiveCodeBenchDataset):
         for fname in os.listdir(path_to_parent):
             if os.path.isdir(os.path.join(path_to_parent, fname)):
                 yield os.path.join(path_to_parent, fname)
-
 
     def load_multipl_e_run(self, path):
         """
@@ -395,7 +675,6 @@ class HumanEvalDataset(LiveCodeBenchDataset):
             ]
             results = [r for r in results if r is not None]
 
-            
             n = list(set(r[0]["n"] for r in results))[0]
 
             num_samples = len(results) * n
@@ -411,41 +690,43 @@ class HumanEvalDataset(LiveCodeBenchDataset):
                 ]
                 results.extend([r for r in results_folder if r is not None])
 
-            
             n = list(set(r[0]["n"] for r in results))[0]
 
             num_samples = len(results) * n
 
         return results, num_samples
-        
-    def split_in_train_test(self, df:pd.DataFrame, fractions:Optional[List[float]] = [0.5, 0.25, 0.25]):
-        """
-            Split the data into train, validation and test. 
 
-            :param df: Dataframe containing the data for the run
-        """  
+    def split_in_train_test(
+        self, df: pd.DataFrame, fractions: Optional[List[float]] = [0.5, 0.25, 0.25]
+    ):
+        """
+        Split the data into train, validation and test.
+
+        :param df: Dataframe containing the data for the run
+        """
 
         # clean split along problems
         group_names = ["train", "val", "test"]
         rng = np.random.default_rng(42)
-        unique_names = df['name'].unique()
+        unique_names = df["name"].unique()
         rng.shuffle(unique_names)
-        
+
         n = len(unique_names)
         sizes = (np.array(fractions) * n).astype(int)
         sizes[-1] = n - sizes[:-1].sum()  # fix rounding
         splits = np.split(unique_names, np.cumsum(sizes)[:-1])
 
-
-        name_to_split = {name: group for group, names in zip(group_names, splits) for name in names}
+        name_to_split = {
+            name: group for group, names in zip(group_names, splits) for name in names
+        }
         df["split"] = df["name"].map(name_to_split)
 
         # --- 4. get split dataframes ---
-        self.data['train'] = df[df["split"] == "train"].copy().drop(['split'], axis=1)
-        self.data['val'] = df[df["split"] == "val"].copy().drop(['split'], axis=1)
-        self.data['test'] = df[df["split"] == "test"].copy().drop(['split'], axis=1)
+        self.data["train"] = df[df["split"] == "train"].copy().drop(["split"], axis=1)
+        self.data["val"] = df[df["split"] == "val"].copy().drop(["split"], axis=1)
+        self.data["test"] = df[df["split"] == "test"].copy().drop(["split"], axis=1)
 
-    def load_samples(self, results:List[List[dict]], type="avg_logprob"):
+    def load_samples(self, results: List[List[dict]], type="avg_logprob"):
         """
         Loads needed data for all samples.
         Parts used from https://github.com/parameterlab/apricot/blob/main/src/eval.py. (Quantative and qualitative data)
@@ -462,11 +743,20 @@ class HumanEvalDataset(LiveCodeBenchDataset):
         programs = []
         languages = []
         names = []
-        output_sizes = []
-  
-        token_logprobs = []
-        
+        output_sizes = (
+            []
+        )  # this is not the complete output but code only -> TODO Robin?
 
+        token_logprobs = []
+
+        # "id": sample["question_id"],
+
+        # "output": sample["output_list"],
+
+        # "token_logprobs": logprobs,
+        # "code_token_idx": code_token_idxs,
+        # "difficulty": sample["difficulty"],
+        # "model": model
 
         # Get the token probabilities from the samples and create arrays
         for r in results:
@@ -510,16 +800,19 @@ class HumanEvalDataset(LiveCodeBenchDataset):
                     )
                 else:
                     is_correct.append(1) if sample["c"] == 1 else is_correct.append(0)
-                token_logprobs.append(sample["token_logprobs"])
+                filtered_probs = [
+                    (prob, tok)
+                    for item in sample["token_logprobs"]
+                    for (prob, rank, tok) in item.values()
+                    if rank == 1
+                ]
+                token_logprobs.append(filtered_probs)
                 output_sizes.append(len(sample["program"]))
-               
 
         prob_value_list = np.array(prob_value_list)
         is_correct = np.array(is_correct)
         languages = np.array(languages)
 
-
-        
         return pd.DataFrame(
             {
                 "probs": prob_value_list,
@@ -529,28 +822,25 @@ class HumanEvalDataset(LiveCodeBenchDataset):
                 "language": languages,
                 "name": names,
                 "token_logprobs": token_logprobs,
-                "output_size": output_sizes
-               
+                "output_size": output_sizes,
             }
         )
-
 
 
 if __name__ == "__main__":
     # DEBUG
     path = "../LiveCodeBench/output/Qwen3-Coder-30B-A3B/preprocessed/codegeneration_10_0.2.jsonl"
-    
+
     config = GroupConfig(
-        add_counter=False,
+        add_counter=True,
         larger_than_median_loc=True,
         larger_than_median_prompt=True,
         difficulty_easy=False,
-        difficulty_medium=False,
+        difficulty_medium=True,
         difficulty_hard=False,
-        language=True
+        language=True,
     )
 
-
-    dataset = LiveCodeBenchDataset(path, split="train", group_config=config)
+    dataset = CalibrationDataset(group_config=config, split='test')
     print(f"Dataset size: {len(dataset)}")
     print(f"First item: {dataset[0]}")

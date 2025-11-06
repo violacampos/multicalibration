@@ -12,7 +12,7 @@ def main(data_provider, type="linear", extern=False, bins=None, plots=None):
     y = data_provider.get_train_is_correct()
     X = np.hstack(
         [
-            data_provider.get_train_probs(args.prob_method).values.reshape(-1, 1),
+            data_provider.get_train_probs(args.prob_method).reshape(-1, 1),
             data_provider.get_train_groups(),
         ]
     )
@@ -39,7 +39,7 @@ def main(data_provider, type="linear", extern=False, bins=None, plots=None):
     ) = lr.score_obj.get_total_and_correctness(test_probs, test_is_correct, test_groups)
 
     # Predict for test data
-    calibrated_predictions = lr.predict(np.hstack([test_probs.values.reshape(-1, 1), test_groups]))
+    calibrated_predictions = lr.predict(np.hstack([test_probs.reshape(-1, 1), test_groups]))
 
 
     # Calculate calibrated scores on test set
