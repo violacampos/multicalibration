@@ -33,7 +33,7 @@ It includes:
 OpenAI `GPT-OSS-20B` and `DeepSeek-R1-Distill-Qwen-
 32B` )
 * Model-generated token likelihoods
-* Unit test results indicating correctness
+* Correctness labels, obtained through unit tests
 
 ---
 

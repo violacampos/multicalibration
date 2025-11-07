@@ -39,12 +39,8 @@ def load_parser():
         "--prob-method",
         choices=[
             "avg_prob",
-            "qualitativ",
-            "quantitativ",
             "code_prob",
             "tail_prob",
-            "code_top20_prob",
-            "tail_top20_prob",
         ],
         default="avg_prob",
         help="Choose which probability to use.",
