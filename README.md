@@ -24,8 +24,8 @@ The accompanying dataset will be made publicly available via Hugging Face.
 
 ### 💾 Dataset
 
-The dataset used in our experiments will be released on **Hugging Face Datasets**:
-👉 [https://huggingface.co/datasets/lavis-nlp/CALIBRI](https://huggingface.co/datasetslavis-nlp/CALIBRI) 
+The dataset used in our experiments is available at **Hugging Face Datasets**:
+👉 [https://huggingface.co/datasets/lavis-nlp/CALIBRI](https://huggingface.co/datasets/lavis-nlp/CALIBRI) 
 
 It includes:
 
@@ -53,13 +53,12 @@ pip install -r requirements.txt
 
 ### 🚀 Running Experiments
 
-To reproduce the experiments from the paper:
-
+To reproduce the experiments from the paper, use for instance:
 
 
 ```bash
 python src/compare_methods.py \
-    --data_path <PATH TO DATA> \ # until dataset is published
+    --model qwen3 \ 
     --benchmark livecodebench \
     --prob-method avg_logprob \
     --save-charts \

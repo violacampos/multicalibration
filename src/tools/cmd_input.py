@@ -19,8 +19,8 @@ def load_parser():
 
     parser.add_argument(
         "--benchmark",
-        choices=["livecodebench", "humaneval", "mceval"],
-        default="humaneval",
+        choices=["livecodebench", "multipl-e", "mceval"],
+        default="livecodebench",
         help="The evaluation benchmark.",
     )
     
