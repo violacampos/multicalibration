@@ -37,4 +37,4 @@ class LR_calibration:
 
             :return: list of adjustments (or deltas)
         """
-        return self.reg.predict(X)
+        return self.reg.predict(X).astype(float)

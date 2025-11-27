@@ -19,9 +19,16 @@ def load_parser():
 
     parser.add_argument(
         "--benchmark",
-        choices=["livecodebench", "humaneval", "mceval"],
-        default="humaneval",
+        choices=["livecodebench", "multipl-e", "mceval"],
+        default="livecodebench",
         help="The evaluation benchmark.",
+    )
+    
+    parser.add_argument(
+        "--model",
+        choices=["qwen3", "gpt-oss", "r1-distil"],
+        default="qwen3",
+        help="The LLM used for sample generation.",
     )
 
     parser.add_argument(
@@ -32,12 +39,8 @@ def load_parser():
         "--prob-method",
         choices=[
             "avg_prob",
-            "qualitativ",
-            "quantitativ",
             "code_prob",
             "tail_prob",
-            "code_top20_prob",
-            "tail_top20_prob",
         ],
         default="avg_prob",
         help="Choose which probability to use.",

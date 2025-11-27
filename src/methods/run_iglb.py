@@ -42,9 +42,9 @@ def main(data_provider, extern=False, bins=None, plots=None):
                                                                                                                                         test_groups) 
     
     
-    train_probs = train_probs.to_numpy(copy=True)
-    test_probs = test_probs.to_numpy(copy=True)
-    val_probs = data_provider.get_val_probs(args.prob_method).to_numpy(copy=True)
+    train_probs = train_probs.copy()
+    test_probs = test_probs.copy()
+    val_probs = data_provider.get_val_probs(args.prob_method).copy()
 
 
     while True: 
