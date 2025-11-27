@@ -105,10 +105,6 @@ def main(data_provider, extern=False, bins=None, plots=None):
         )
     )
 
-    # Add to score table
-    ighb.score_obj.add_to_score_table(
-        data_provider.run, scores_uncalibrated, scores_calibrated
-    )
 
     if extern:
         return {
@@ -134,13 +130,7 @@ def main(data_provider, extern=False, bins=None, plots=None):
                 correctness_bin_calibrated,
             )
     
-    # display score table for all runs
-    ighb.score_obj.display_score_table()
-
-    # saves the score table
-    if args.save_table:
-        with open(data_provider.save_dir + "scores.txt", "w") as f:
-            f.write(ighb.score_obj.printable_table)
+    
 
 
 

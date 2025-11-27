@@ -39,13 +39,32 @@ OpenAI `GPT-OSS-20B` and `DeepSeek-R1-Distill-Qwen-
 
 ### ⚙️ Installation
 
-We recommend using a clean Python environment (Python ≥ 3.10):
+We recommend using uv for dependency management (Python ≥ 3.11):
+
+```bash
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh  # macOS/Linux
+# or: pip install uv
+
+git clone https://github.com/violacampos/multicalibration
+cd multicalibration
+
+# Install dependencies and create virtual environment
+uv sync
+
+# Run with uv (no activation needed)
+uv run python src/compare_methods.py --help
+```
+
+Using pip and venv (Python ≥ 3.11):
 
 ```bash
 git clone https://github.com/violacampos/multicalibration
 cd multicalibration
+
 python -m venv venv
 source venv/bin/activate  # (on Windows: venv\Scripts\activate)
+
 pip install -r requirements.txt
 ```
 
@@ -53,8 +72,21 @@ pip install -r requirements.txt
 
 ### 🚀 Running Experiments
 
-To reproduce the experiments from the paper, use for instance:
+To reproduce the experiments from the paper:
 
+With uv:
+
+```bash
+uv run python src/compare_methods.py \
+    --model qwen3 \ 
+    --benchmark livecodebench \
+    --prob-method avg_logprob \
+    --save-charts \
+    --save-table \
+    --print-info
+```
+
+With pip/venv:
 
 ```bash
 python src/compare_methods.py \

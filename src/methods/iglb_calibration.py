@@ -1,21 +1,20 @@
 import numpy as np
-from tools.calibration_scores import Score
-from tools import binning
+
 from scipy.special import logit, expit
 from scipy.optimize import minimize
+
+from tools.calibration_scores import Score
 
 
 class IGLB_calibration:
 
     def __init__(self, bins, args):
         """
-        Initilaizes a iterative group linear binning object
+        Initializes an iterative group linear binning object
 
         :param bins: used bins for calibration
-        :param m: Number of bins
         :param args: passed commandline parameter
         """
-
         self.bins = bins
         self.epsilon = args.epsilon
         self.debug = args.debug
@@ -23,215 +22,311 @@ class IGLB_calibration:
         self.outputs = args.print_info
         self.score_obj = Score(bins, args)
 
-        self.deltas = None
-        self.deltas_square = None
-        self.LS = None
+        # Store calibration steps for reproducibility
+        self.calibration_steps = []
+        self.is_fitted = False
 
-        self.changes = []
-
-    def fit(self, X, y, groups):
+    def fit(self, X_train, y_train, groups_train, X_val, y_val, groups_val):
         """
-        Learns deltas for each bin-group combination and creates a linear scaling within each bin-group combination
+        Learns calibration transformations iteratively on training data,
+        using validation data for early stopping.
 
-        :param X: Probabilities for calibration
-        :param y: Label of correctness
-        :param groups: Group matrix
-
-        :return: ILGB object
+        :param X_train: Training probabilities
+        :param y_train: Training labels
+        :param groups_train: Training group matrix
+        :param X_val: Validation probabilities
+        :param y_val: Validation labels
+        :param groups_val: Validation group matrix
+        :return: self
         """
-        # calculate deltas
-        self.deltas = self.get_deltas(X, y, groups)
-
-        # set deltas_square for further use
-        self.deltas_square = self.deltas**2
-
-        # set the linear scaling for every bin, group and tau combination
-        self.LS = self.get_LS(X, y, groups)
-
+        # Reset calibration steps
+        self.calibration_steps = []
+        
+        # Work on copies to avoid modifying original data
+        train_probs = X_train.copy()
+        val_probs = X_val.copy()
+        
+        iteration = 0
+        while True:
+            if self.debug:
+                print(f"\n=== Iteration {iteration} ===")
+            
+            # Calculate MSE on validation set before this step
+            mse_before = self._calculate_mse(val_probs, y_val)
+            
+            # Calculate deltas on current training probabilities
+            deltas = self._get_deltas(train_probs, y_train, groups_train)
+            deltas_square = deltas ** 2
+            
+            # Calculate probability of each tau-bin-group combination
+            P_S_p_g = self._get_P_S_p_g(train_probs, groups_train)
+            
+            # Find the tau, bin, group combination with maximum weighted error
+            tau, bin_idx, group_idx = np.unravel_index(
+                (P_S_p_g * deltas_square).argmax(), 
+                deltas.shape
+            )
+            
+            if self.debug:
+                print(f"Max delta in: Tau {tau}, Bin {bin_idx}, Group {group_idx}")
+                print(f"P_S_p_g value: {P_S_p_g[tau, bin_idx, group_idx]}")
+            
+            # Stopping criterion 1: probability threshold
+            if P_S_p_g[tau, bin_idx, group_idx] < self.epsilon:
+                if self.debug:
+                    print(f"Stopping: P_S_p_g < epsilon ({self.epsilon})")
+                break
+            
+            # Calculate linear scaling parameters for this subset
+            alpha, beta = self._get_linear_scaling_params(
+                train_probs, y_train, groups_train, tau, bin_idx, group_idx
+            )
+            
+            # Apply transformation to training data
+            train_probs = self._apply_transformation(
+                train_probs, groups_train, tau, bin_idx, group_idx, alpha, beta
+            )
+            
+            # Apply transformation to validation data
+            val_probs = self._apply_transformation(
+                val_probs, groups_val, tau, bin_idx, group_idx, alpha, beta
+            )
+            
+            # Calculate MSE on validation set after this step
+            mse_after = self._calculate_mse(val_probs, y_val)
+            
+            if self.debug:
+                print(f"MSE before: {mse_before:.6f}, MSE after: {mse_after:.6f}")
+            
+            # Stopping criterion 2: MSE increase
+            if mse_after >= mse_before:
+                if self.debug:
+                    print(f"Stopping: MSE increased from {mse_before:.6f} to {mse_after:.6f}")
+                break
+            
+            # Save this calibration step
+            step = {
+                'tau': tau,
+                'bin_idx': bin_idx,
+                'group_idx': group_idx,
+                'alpha': alpha,
+                'beta': beta,
+                'bin_threshold': self.bins.grid[bin_idx]
+            }
+            self.calibration_steps.append(step)
+            
+            if self.debug:
+                print(f"Step saved: {step}")
+            
+            iteration += 1
+        
+        self.is_fitted = True
+        if self.debug:
+            print(f"\nCalibration complete after {len(self.calibration_steps)} steps")
+        
         return self
 
-    def predict(
-        self, X, groups, assigned_bins, tau, bin, group, test=False, is_correct=None
-    ):
+    def transform(self, X, groups):
         """
-        Uses the learned delta on a selected bin-group combination for adjustement.
+        Apply learned calibration transformations to new data.
 
-        :param X: Probabilities for calibration
+        :param X: Probabilities to calibrate
         :param groups: Group matrix
-        :param assigned_bins: Discretized probabilities # VIOLA: TODO removed from iteration, only used for robins saved changes if test==True -> TODO check
-        :param tau: Tau of the probabilites that have to be adjusted
-        :param bin: Bin of the probabilites that have to be adjusted
-        :param group: Group of the probabilites that have to be adjusted
-        :param test: Flag to store changes on test subset
-        :param is_correct: Labels of correctness for history
-
-        :return: adjusted probabilities
+        :return: Calibrated probabilities
         """
-        # get the alpha and beta values for the given tau, bin, group
-        alpha_star, beta_star = self.LS[tau, bin, group]
-
-        if self.debug:
-            print(f"Alpha: {alpha_star}, Beta: {beta_star}")
-
-        # Set the new values with the help of the alpha and beta values for all elements in the set
-        if tau == 0:
-            X_ = np.array(
-                [
-                    (
-                        expit(alpha_star + beta_star * logit(X[idx]))
-                        if (bin_a <= (bin / self.m)) and (groups[idx, group] == 1)
-                        else X[idx]
-                    )
-                    for idx, bin_a in enumerate(X)
-                ]
+        if not self.is_fitted:
+            raise ValueError("Model must be fitted before transform. Call fit() first.")
+        
+        calibrated_probs = X.copy()
+        
+        # Apply each saved calibration step in order
+        for step in self.calibration_steps:
+            calibrated_probs = self._apply_transformation(
+                calibrated_probs,
+                groups,
+                step['tau'],
+                step['bin_idx'],
+                step['group_idx'],
+                step['alpha'],
+                step['beta']
             )
-        else:
-            X_ = np.array(
-                [
-                    (
-                        expit(alpha_star + beta_star * logit(X[idx]))
-                        if (bin_a >= (bin / self.m)) and (groups[idx, group] == 1)
-                        else X[idx]
-                    )
-                    for idx, bin_a in enumerate(X)
-                ]
-            )
+        
+        return calibrated_probs
 
-
-        return X_
-
-    def get_deltas(self, X, y, groups):
+    def fit_transform(self, X_train, y_train, groups_train, X_val, y_val, groups_val):
         """
-        Calculates the deltas for the different tau-bin-group combinations
+        Fit on training data and return calibrated training probabilities.
 
-        :param X: Probabilities for calibration
-        :param y: Labels of correctness
+        :param X_train: Training probabilities
+        :param y_train: Training labels
+        :param groups_train: Training group matrix
+        :param X_val: Validation probabilities
+        :param y_val: Validation labels
+        :param groups_val: Validation group matrix
+        :return: Calibrated training probabilities
+        """
+        self.fit(X_train, y_train, groups_train, X_val, y_val, groups_val)
+        return self.transform(X_train, groups_train)
+
+    def _get_deltas(self, X, y, groups):
+        """
+        Calculates the deltas for different tau-bin-group combinations.
+
+        :param X: Probabilities
+        :param y: Labels
         :param groups: Group matrix
-
         :return: 3D delta array
         """
-
-        # Calculate correcteness bias in the given bin, group and use smaller then
+        # Calculate correctness bias for <= threshold
         deltas_smaller = [
             [
-                np.mean(
-                    y[(X <= i) & (g == 1)]
-                    - X[(X <= i) & (g == 1)]
-                )
+                np.mean(y[(X <= threshold) & (g == 1)] - X[(X <= threshold) & (g == 1)])
+                if np.any((X <= threshold) & (g == 1)) else 0.0
                 for g in groups.T
             ]
-            for i in self.bins.grid
+            for threshold in self.bins.grid
         ]
 
-        # Calculate correcteness bias in the given bin, group and use greater then
+        # Calculate correctness bias for >= threshold
         deltas_greater = [
             [
-                np.mean(
-                    y[(X >= i) & (g == 1)]
-                    - X[(X >= i) & (g == 1)]
-                )
+                np.mean(y[(X >= threshold) & (g == 1)] - X[(X >= threshold) & (g == 1)])
+                if np.any((X >= threshold) & (g == 1)) else 0.0
                 for g in groups.T
             ]
-            for i in self.bins.grid
+            for threshold in self.bins.grid
         ]
 
-        # Stack both arrays index 0 is <= and 1 is >=
+        # Stack: index 0 is <=, index 1 is >=
         deltas = np.stack([np.array(deltas_smaller), np.array(deltas_greater)])
         deltas[np.isnan(deltas)] = 0
 
         return deltas
 
-    def get_P_S_p_g(self, probs, groups):
+    def _get_P_S_p_g(self, probs, groups):
         """
-        Calculates the probability that a sample is in the different tau-bin-group combinations
+        Calculates the probability that a sample is in different tau-bin-group combinations.
 
-        :param probs: Sample probabilities
+        :param probs: Probabilities
         :param groups: Group matrix
-
-        :return: 3D probaility array
+        :return: 3D probability array
         """
-        # Create sets with tau <= bin, for each bin and group
+        total_samples = len(probs)
+        
+        # Probability for <= threshold
         P_S_p_g_smaller = [
             [
-                len(probs[(probs <= i) & (g == 1)]) / len(probs)
+                np.sum((probs <= threshold) & (g == 1)) / total_samples
                 for g in groups.T
             ]
-            for i in self.bins.grid
+            for threshold in self.bins.grid
         ]
 
-        # Create sets with tau >= bin, for each bin and group
+        # Probability for >= threshold
         P_S_p_g_greater = [
             [
-                len(probs[(probs >= i) & (g == 1)]) / len(probs)
+                np.sum((probs >= threshold) & (g == 1)) / total_samples
                 for g in groups.T
             ]
-            for i in self.bins.grid
+            for threshold in self.bins.grid
         ]
 
-        # Stack both arrays index 0 is <= and 1 is >=
         P_S_p_g = np.stack([np.array(P_S_p_g_smaller), np.array(P_S_p_g_greater)])
         P_S_p_g[np.isnan(P_S_p_g)] = 0
 
         return P_S_p_g
 
-    def get_LS(self, X, is_correct, groups):
+    def _get_linear_scaling_params(self, X, y, groups, tau, bin_idx, group_idx):
         """
-        Gets the liner scaling parameters for the different tau-bin-group combinations
+        Calculate linear scaling parameters for a specific subset.
 
         :param X: Probabilities
-        :param is_correct: Labels of correctness
+        :param y: Labels
         :param groups: Group matrix
-
-        :return: 3D probaility array
+        :param tau: Direction (0 for <=, 1 for >=)
+        :param bin_idx: Bin index
+        :param group_idx: Group index
+        :return: (alpha, beta) tuple
         """
-        # Get alpha and beta values for <= subsets
-        LS_smaller = [
-            [
-                self.linear_scaling(
-                    X[(X <= i) & (g == 1)], is_correct[(X <= i) & (g == 1)]
-                )
-                for g in groups.T
-            ]
-            for i in self.bins.grid
-        ]
+        threshold = self.bins.grid[bin_idx]
+        group_mask = groups[:, group_idx] == 1
+        
+        if tau == 0:
+            mask = (X <= threshold) & group_mask
+        else:
+            mask = (X >= threshold) & group_mask
+        
+        if not np.any(mask):
+            return 0.0, 1.0
+        
+        subset_X = X[mask]
+        subset_y = y[mask]
+        
+        return self._linear_scaling(subset_X, subset_y)
 
-        # Get alpha and beta values for >= subsets
-        LS_greater = [
-            [
-                self.linear_scaling(
-                    X[(X >= i) & (g == 1)], is_correct[(X >= i) & (g == 1)]
-                )
-                for g in groups.T
-            ]
-            for i in self.bins.grid
-        ]
-
-        # Stack both arrays index 0 is <= and 1 is >=
-        LS = np.stack([np.array(LS_smaller), np.array(LS_greater)])
-        return LS
-
-    def linear_scaling(self, X, is_correct):
+    def _linear_scaling(self, X, y):
         """
-        Learns the alpha and beta values of the linear scaling for the given probabilities and labels.
+        Learn alpha and beta for linear scaling in logit space.
 
         :param X: Probabilities
-        :param is_correct: Labels of correctness
-
-        :return: List with alpha and beta
+        :param y: Labels
+        :return: (alpha, beta) tuple
         """
-        # clip the value to dont get -inf or inf
-        X = np.clip(X, 1e-10, 1 - 1e-10)
-        # get logits for confidences
-        logit_f = logit(X)
+        if len(X) == 0:
+            return 0.0, 1.0
+        
+        # Clip to avoid infinite logits
+        X_clipped = np.clip(X, 1e-10, 1 - 1e-10)
+        logit_X = logit(X_clipped)
 
-        # mse function to optimize for alpha and beta
         def mse(params):
             alpha, beta = params
-            transformed = expit(alpha + beta * logit_f)
-            return np.mean((transformed - is_correct) ** 2)
+            transformed = expit(alpha + beta * logit_X)
+            return np.mean((transformed - y) ** 2)
 
-        # minimize for the mse and get alpha and beta values
-        result = minimize(mse, x0=[0, 1])
-        alpha_star, beta_star = result.x
+        result = minimize(mse, x0=[0, 1], method='BFGS')
+        alpha, beta = result.x
 
-        return [alpha_star, beta_star]
+        return alpha, beta
+
+    def _apply_transformation(self, X, groups, tau, bin_idx, group_idx, alpha, beta):
+        """
+        Apply a single calibration transformation.
+
+        :param X: Probabilities
+        :param groups: Group matrix
+        :param tau: Direction (0 for <=, 1 for >=)
+        :param bin_idx: Bin index
+        :param group_idx: Group index
+        :param alpha: Linear scaling parameter
+        :param beta: Linear scaling parameter
+        :return: Transformed probabilities
+        """
+        threshold = self.bins.grid[bin_idx]
+        X_new = X.copy()
+        
+        # Clip to avoid infinite logits
+        X_clipped = np.clip(X, 1e-10, 1 - 1e-10)
+        
+        for idx in range(len(X)):
+            group_match = groups[idx, group_idx] == 1
+            
+            if tau == 0:
+                threshold_match = X[idx] <= threshold
+            else:
+                threshold_match = X[idx] >= threshold
+            
+            if group_match and threshold_match:
+                X_new[idx] = expit(alpha + beta * logit(X_clipped[idx]))
+        
+        return X_new
+
+    def _calculate_mse(self, X, y):
+        """
+        Calculate mean squared error.
+
+        :param X: Probabilities
+        :param y: Labels
+        :return: MSE value
+        """
+        return np.mean((X - y) ** 2)

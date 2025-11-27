@@ -422,6 +422,17 @@ class CalibrationCharts:
         ]
         
         # Generate charts
+        
+        self.calibration_bar_scatter_chart(
+            args.prob_method,
+            totals,
+            correctness_bins,
+            correctness_groups,
+            confidence_groups,
+            total_groups
+        )
+        
+        
         self.calibration_method_comparison_bar_chart(
             args.prob_method,
             totals,

@@ -67,10 +67,6 @@ def main(data_provider, type="linear", extern=False, bins=None, plots=None):
         print(f"Group weights: {lr.reg.coef_}")
         print(f"bias: {lr.reg.intercept_}")
 
-    # Add result to score table
-    lr.score_obj.add_to_score_table(
-        data_provider.run, scores_uncalibrated, scores_calibrated
-    )
 
     # only return values when called from other script
     if extern:
@@ -97,12 +93,6 @@ def main(data_provider, type="linear", extern=False, bins=None, plots=None):
                 correctness_bin_calibrated,
             )
 
-    # display score table 
-    lr.score_obj.display_score_table()
-
-    if getattr(args, "save_table", False):
-        out_path = os.path.join(data_provider.save_dir, "scores.txt")
-        with open(out_path, "w") as f:
-            f.write(lr.score_obj.printable_table)
+    
 
 

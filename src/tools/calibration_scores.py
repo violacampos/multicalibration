@@ -30,7 +30,7 @@ class Score:
         self.brier_ref_score = 0
 
         self.score_table = []
-        self.printable_table = []
+        self.printable_table = ""
 
     def ece(self, correctness_per_bin, confidence_per_bin, total_per_bin, num_samples):
         """
@@ -551,15 +551,18 @@ class Score:
         self.score_table.append(entry)
 
 
-
-    def display_score_table(self):
-        """Print the formatted score table."""
+    def _format_table(self):
         self.printable_table = tabulate(
             self.score_table,
             headers=["Run", "Type", "ECE", "ASCE", "MSE", "brier_ref", 
                     "skill_score", "ACC", "GASCE"],
             tablefmt="orgtbl",
         )
+    
+    
+    def display_score_table(self):
+        """Print the formatted score table."""
+        self._format_table()
         print(self.printable_table)
         
 
@@ -571,6 +574,7 @@ class Score:
         Args:
             save_dir: Directory to save the scores file
         """
+        self._format_table()
         output_path = os.path.join(save_dir, 'scores.txt')
         with open(output_path, 'w') as f:
             f.write(self.printable_table)

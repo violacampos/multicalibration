@@ -1,8 +1,5 @@
 from tools import  binning, cmd_input
 from tools.calibration_scores import Score
-from tools.create_charts import CalibrationCharts
-
-
 
 
 
@@ -84,14 +81,6 @@ def main(data_provider, bins=None):
         test_groups
     )
     
-    # Add entry to score table
-    score_obj.add_to_score_table(data_provider.run, scores_uncalibrated, [], baseline=True)
-    
-    
-    # Display and save results
-    score_obj.display_score_table()
-    if args.save_table:
-        score_obj.save_scores_table(data_provider.save_dir)
 
     return build_return_dict(
         data_provider, args, scores_uncalibrated,

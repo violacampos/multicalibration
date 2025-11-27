@@ -34,6 +34,7 @@ def main(
     scores_uncalibrated = platt.score_obj.calc_all(
         test_probs, test_is_correct, groups=test_groups, set_brier_ref=True
     )
+    
     (
         total_group_uncalibrated,
         correctness_group_uncalibrated,
@@ -69,9 +70,6 @@ def main(
         print(f"coef: {platt.platt.coef_}")
         print(f"bias: {platt.platt.intercept_}")
 
-    # add results to score table
-    platt.score_obj.add_to_score_table(data_provider.run, scores_uncalibrated, scores_calibrated)
-
 
     # only return values when called from other script
     if extern:
@@ -99,15 +97,6 @@ def main(
                 correctness_bin_calibrated,
             )
 
-    # display score table for all runs
-    platt.score_obj.display_score_table()
-
-    # saves the score table
-    if getattr(args, "save_table", False):
-        out_path = os.path.join(data_provider.save_dir, "scores.txt")
-        os.makedirs(data_provider.save_dir, exist_ok=True)
-        with open(out_path, "w") as f:
-            f.write(platt.score_obj.printable_table)
 
 
 

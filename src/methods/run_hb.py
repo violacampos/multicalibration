@@ -43,10 +43,7 @@ def main(data_provider, extern=False, bins=None, plots=None):
     total_group, correctness_group, average_group_confidence = hb.score_obj.get_correctness_per_group(corrected_probs, 
                                                                                                       data_provider.get_test_is_correct(), 
                                                                                                       data_provider.get_test_groups()) 
-                    
-    # Add entry for the run in the score table
-    hb.score_obj.add_to_score_table(data_provider.run, scores_uncalibrated, scores_calibrated)
-    
+                        
     # only return values when script is called from another script
     if extern:
         return {"correctness_bin_calibrated": correctness_bin_calibrated, 
@@ -67,13 +64,4 @@ def main(data_provider, extern=False, bins=None, plots=None):
                 
             plots.calibration_info(total_bin_uncalibrated, correctness_bin_uncalibrated, total_bin_calibrated, correctness_bin_calibrated)
         
-    # display score table for all runs
-    hb.score_obj.display_score_table()
 
-    # saves the score table
-    if args.save_table:
-        with open(data_provider.save_dir+'scores.txt', 'w') as f:
-            f.write(hb.score_obj.printable_table)
-
-if __name__ == "__main__":
-    main()

@@ -8,7 +8,6 @@ from typing import List, Optional
 import pandas as pd
 import numpy as np
 
-from torch.utils.data import Dataset
 from datasets import Dataset as HF_Dataset, load_dataset
 
 
