@@ -78,29 +78,27 @@ With uv:
 
 ```bash
 uv run python src/compare_methods.py \
-    --model qwen3 \ 
-    --benchmark livecodebench \
-    --prob-method avg_logprob \
+    --model qwen3             # or gpt-oss / r1-distill \ 
+    --benchmark livecodebench # or mceval / multipl-e \
+    --prob-method avg_prob    # or code_prob / tail_prob \
     --save-charts \
     --save-table \
-    --print-info
 ```
 
 With pip/venv:
 
 ```bash
 python src/compare_methods.py \
-    --model qwen3 \ 
-    --benchmark livecodebench \
-    --prob-method avg_logprob \
+    --model qwen3             # or gpt-oss / r1-distill \ 
+    --benchmark livecodebench # or mceval / multipl-e \
+    --prob-method avg_prob    # or code_prob / tail_prob \
     --save-charts \
     --save-table \
-    --print-info
 ```
 
-For an overview of available parameters see `src/tools/cmd_input.py`.
+For an overview of available parameters use `python src/compare_methods.py --help`.
 
-Results (ECE, BSS, and reliability diagrams) will be saved in `results/`.
+Results (ECE, BSS, accuracy, .. for each method, reliability diagrams and group calibration plots) will be saved in `results/`.
 
 ---
 

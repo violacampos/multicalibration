@@ -26,7 +26,7 @@ def load_parser():
     
     parser.add_argument(
         "--model",
-        choices=["qwen3", "gpt-oss", "r1-distil"],
+        choices=["qwen3", "gpt-oss", "r1-distill"],
         default="qwen3",
         help="The LLM used for sample generation.",
     )
