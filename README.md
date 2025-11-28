@@ -5,8 +5,8 @@ This repository contains the replication package for the paper:
 > **Multicalibration for LLM-based Code Generation**
 > [Viola Campos, Robin Kuschnereit and Adrian Ulges] (2025)
 
-It includes all code and configuration files necessary to reproduce the experiments described in the paper.
-The accompanying dataset will be made publicly available via Hugging Face.
+It includes all code files necessary to reproduce the experiments described in the paper.
+The accompanying dataset is publicly available via Hugging Face.
 
 ---
 
@@ -15,9 +15,7 @@ The accompanying dataset will be made publicly available via Hugging Face.
 | Folder / File      | Description                                                       |
 | ------------------ | ----------------------------------------------------------------- |
 | `src/`             | Source code for running calibration and evaluation experiments    |
-| `configs/`         | Configuration files specifying experiment parameters              |
 | `results/`         | Example outputs and evaluation metrics                            |
-| `requirements.txt` | Python dependencies                                               |
 | `notebooks/`       | Optional Jupyter notebooks for visualization                      |
 
 ---
@@ -96,7 +94,7 @@ python src/compare_methods.py \
     --save-table \
 ```
 
-For an overview of available parameters use `python src/compare_methods.py --help`.
+For an overview of available parameters see `python src/compare_methods.py --help`.
 
 Results (ECE, BSS, accuracy, .. for each method, reliability diagrams and group calibration plots) will be saved in `results/`.
 
