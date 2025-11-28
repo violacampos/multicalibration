@@ -1,14 +1,10 @@
-import gzip
-import itertools
-import json
 import os
-from pathlib import Path
-import random
-from typing import List, Optional
+
+from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 
-from datasets import Dataset as HF_Dataset, load_dataset
+from datasets import Dataset, IterableDataset, load_dataset
 
 
 class GroupConfig:
@@ -79,35 +75,41 @@ class CalibrationDataset:
 
     def __init__(
         self,
+        group_config: GroupConfig,
         model: str = "qwen3",
         benchmark: str = "livecodebench",
-        group_config: GroupConfig = None,
         split: Optional[str] = None,
         cache_dir: Optional[str] = None,
         args=None,
     ):
         config_name = f"{benchmark}_{model}"
         self.config_name = config_name
-        self.dataset = load_dataset(
+        dataset = load_dataset(
             "violasara/CALIBRI", config_name, split=split, cache_dir=cache_dir
         )
 
-        # always save dataset in dict form for easier handling of splits
-        if isinstance(self.dataset, HF_Dataset):
-            self.dataset = {split: self.dataset}
+        # always save dataset in dict[str, HF_Dataset] form for easier handling of splits
+        if isinstance(dataset, Dataset) or isinstance(dataset, IterableDataset):
+            # prefer .name for NamedSplit-like objects, fall back to str(split)
+            key = getattr(split, "name", None) if split is not None else None
+            key = str(key) if key is not None else ("default" if split is None else str(split))
+            self.dataset: Dict[str, Dataset | IterableDataset] = {key: dataset}
+        else:
+            # self.dataset is mapping-like: coerce keys to plain strings
+            self.dataset = {str(k): v for k, v in dataset.items()}
 
-        for split in self.dataset:
-            self.dataset[split] = (
-                self.dataset[split]
+        for split_name in self.dataset:
+            self.dataset[split_name] = (
+                self.dataset[split_name]
                 .map(
                     explode,
                     batched=True,
-                    remove_columns=self.dataset[split].column_names,
+                    remove_columns=self.dataset[split_name].column_names,
                 )
                 .flatten_indices()
             )
 
-            self.dataset[split] = self.dataset[split].map(add_features, batched=True)
+            self.dataset[split_name] = self.dataset[split_name].map(add_features, batched=True)
 
         self.run, self.save_dir = self.init_run_and_outputdir(model, benchmark)
 
@@ -117,38 +119,38 @@ class CalibrationDataset:
         self.median_output = self.get_median_length("output")
         self.median_prompt = self.get_median_length("prompt")
         self.languages = sorted(
-            set(self.dataset[split]["language"])
-        )  # use only last split, should be ok
+            set(self.dataset[split_name]["language"])
+        )  # use only last split here, should be ok
         self.group_names = self.get_group_names()
 
-        for split in self.dataset:
-            self.dataset[split] = self.dataset[split].map(
+        for split_name in self.dataset:
+            self.dataset[split_name] = self.dataset[split_name].map(
                 lambda x: self.add_group_info(x), batched=True
             )
 
     def get_median_length(self, feature) -> float:
         lengths = [
-            pd.array(self.dataset[split][feature]).map(len)
-            for split in self.dataset
-            if feature in self.dataset[split].features
+            pd.Series(self.dataset[split_name][feature]).map(len)
+            for split_name in self.dataset
+            if feature in self.dataset[split_name].features
         ]
         if len(lengths) == 0:
             return 0.0
         else:
-            return np.median(np.concatenate(lengths))
+            return float(np.median(np.concatenate(lengths)))
 
     def get_median_loc(self) -> float:
         locs = [
-            pd.array(self.dataset[split]["program"])
+            pd.array(self.dataset[split_name]["program"])
             .dropna()
             .map(lambda x: x.count("\n"))
-            for split in self.dataset
-            if "program" in self.dataset[split].features
+            for split_name in self.dataset
+            if "program" in self.dataset[split_name].features
         ]
         if len(locs) == 0:
             return 0.0
         else:
-            return np.median(np.concatenate(locs))
+            return float(np.median(np.concatenate(locs)))
 
     def get_group_names(self) -> List[str]:
 

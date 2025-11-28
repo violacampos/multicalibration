@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 import numpy as np
 from numpy.typing import NDArray
 
@@ -43,7 +44,9 @@ class CalibrationCharts:
         self.grid = grid
 
         # Generate color palette for scatter plots
-        cmaps = [plt.cm.tab20, plt.cm.tab20b, plt.cm.tab20c]
+        cmaps = [plt.cm.get_cmap("tab20"), 
+                 plt.cm.get_cmap("tab20b"), 
+                 plt.cm.get_cmap("tab20c")]
         self.colors = [
             color for cmap in cmaps for color in cmap.colors
         ]
@@ -107,7 +110,7 @@ class CalibrationCharts:
         
     def calibration_bar_chart(
         self,
-        ax: plt.Axes,
+        ax: Axes,
         title: str,
         correctness: NDArray[np.floating],
         bar_colors: List[Tuple[str, float]],
@@ -160,11 +163,11 @@ class CalibrationCharts:
     
     def scatter_plot(
         self,
-        ax: plt.Axes,
-        method: str,
+        ax: Axes,
         confidence: NDArray[np.floating],
         correctness: NDArray[np.floating],
-        sizes: NDArray[np.floating]
+        sizes: NDArray[np.floating],
+        title: Optional[str] = None,
     ):
         """
         Create a scatter plot showing group-level calibration.
@@ -176,6 +179,10 @@ class CalibrationCharts:
             correctness: Correctness values for each group
             sizes: Dot sizes representing sample counts
         """
+        
+        if title: 
+            ax.set_title(title, fontsize=18, fontweight="bold")
+        
         colors = self.colors[:len(confidence)]
 
         ax.scatter(
@@ -231,7 +238,7 @@ class CalibrationCharts:
                 ax, method, corr, colors, show_ylabel=(idx == 0)
             )
 
-        self._save_and_close(f"{scoring_method}_calibration_comparison_bar.pdf")
+        self._save_and_close(f"{scoring_method}_reliability_plot.pdf")
 
 
 
@@ -272,9 +279,9 @@ class CalibrationCharts:
         for ax, conf, corr, total in zip(
             axs[1], confidence_groups, correctness_groups, total_groups
         ):
-            self.scatter_plot(ax, "", conf, corr, total / 2)
+            self.scatter_plot(ax, conf, corr, total / 2)
 
-        self._save_and_close(f"{scoring_method}_calibration_bar_scatter.pdf") 
+        self._save_and_close(f"{scoring_method}_combined_plots.pdf") 
 
 
     
@@ -301,14 +308,14 @@ class CalibrationCharts:
             axs, self.CALIBRATION_METHODS, confidence_groups, 
             correctness_groups, total_groups
         ):
-            self.scatter_plot(ax, method, conf, corr, total / 2)
+            self.scatter_plot(ax, conf, corr, total / 2, title=method)
 
         self._save_and_close(f"{scoring_method}_group_calibration.pdf")
         
     
     def count_distribution(
         self,
-        ax: plt.Axes,
+        ax: Axes,
         title: str,
         totals: NDArray[np.floating]
     ):

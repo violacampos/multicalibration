@@ -1,40 +1,40 @@
 import numpy as np
-import os
 from tools import binning, cmd_input
 from methods.ighb_calibration import IGHB_calibration
-import pickle
-from sklearn.model_selection import KFold
 from tools.create_charts import CalibrationCharts
-
-
-DEBUG = True
-OUTPUTS = True
 
 np.seterr(divide="ignore", invalid="ignore")
 
 
 def main(data_provider, extern=False, bins=None, plots=None):
-    # loads commandline parameter
+    """
+    Main function to run IGHB calibration.
+    
+    :param data_provider: Data provider object
+    :param extern: Whether to return results externally
+    :param bins: Optional binning object
+    :param plots: Optional plotting object
+    :return: Results dictionary if extern=True
+    """
+    # Load command line parameters
     args = cmd_input.load_parser()
 
+    # Initialize binning if not provided
     if bins is None:
         bins = binning.Binning(args.bin_count, args.binning_type)
 
+    # Load training data
     train_probs = data_provider.get_train_probs(args.prob_method)
     train_is_correct = data_provider.get_train_is_correct()
     train_groups = data_provider.get_train_groups()
 
-    ighb = IGHB_calibration(bins, args).fit(
-        train_probs,
-        train_is_correct,
-        train_groups,
-    )
-
-    # Calculate values for uncalibrated test set
-
+    # Load test data
     test_probs = data_provider.get_test_probs(args.prob_method)
     test_is_correct = data_provider.get_test_is_correct()
     test_groups = data_provider.get_test_groups()
+
+    # Create calibration object
+    ighb = IGHB_calibration(bins, args)
 
     scores_uncalibrated = ighb.score_obj.calc_all(
         test_probs,
@@ -54,44 +54,23 @@ def main(data_provider, extern=False, bins=None, plots=None):
         test_groups,
     )
 
-    # set the conficence to calibrate on
-    train_conf = train_probs.copy()
-    test_conf = test_probs.copy()
+    # Fit calibration model on training data
+    # The calibration loop is now inside the fit() method
+    ighb.fit(train_probs, train_is_correct, train_groups)
 
-    # calibration
-    while ighb.max_error > ighb.alpha:
+    # Transform test data using learned calibration
+    test_probs_calibrated = ighb.transform(test_probs, test_groups)
 
-        train_conf = ighb.predict(train_conf, train_groups)
-
-        # calculate corrected values for the test set
-        test_conf = ighb.predict(test_conf, test_groups)
-
-        # Calculate some metrics on the values
-        curr_group_total, curr_group_correctness, _, curr_bin_correctness = (
-            ighb.score_obj.get_total_and_correctness(
-                test_conf,
-                test_is_correct,
-                test_groups,
-            )
-        )
-       
-        # fit the model on the updated train confidences
-        ighb = ighb.fit(
-            train_conf,
-            train_is_correct,
-            train_groups,
-        )
-
-    # Calculate values for calibrated test set
+    # Calculate calibrated scores
     scores_calibrated = ighb.score_obj.calc_all(
-        test_conf,
+        test_probs_calibrated,
         test_is_correct,
         groups=test_groups,
     )
 
     _, _, total_bin_calibrated, correctness_bin_calibrated = (
         ighb.score_obj.get_total_and_correctness(
-            test_conf,
+            test_probs_calibrated,
             test_is_correct,
             test_groups,
         )
@@ -99,13 +78,14 @@ def main(data_provider, extern=False, bins=None, plots=None):
 
     total_group, correctness_group, average_group_confidence = (
         ighb.score_obj.get_correctness_per_group(
-            test_conf,
+            test_probs_calibrated,
             test_is_correct,
             test_groups,
         )
     )
 
 
+    # Return results or save/display
     if extern:
         return {
             "total_bin_calibrated": total_bin_calibrated,
@@ -114,14 +94,19 @@ def main(data_provider, extern=False, bins=None, plots=None):
             "average_group_confidence": average_group_confidence,
             "total_group": total_group,
             "scores_calibrated": scores_calibrated,
-            "calibrated_probs": test_probs,
+            "calibrated_probs": test_probs_calibrated,
             "group_names": data_provider.group_names,
+            "calibration_steps": ighb.calibration_steps,
         }
     else:
+        # Create charts if requested
         if getattr(args, "save_charts", False):
             if plots is None:
                 plots = CalibrationCharts(
-                    data_provider.run, args.binning_type, bins.grid, data_provider.save_dir
+                    data_provider.run,
+                    args.binning_type,
+                    bins.grid,
+                    data_provider.save_dir,
                 )
             plots.calibration_info(
                 total_bin_uncalibrated,
@@ -129,8 +114,5 @@ def main(data_provider, extern=False, bins=None, plots=None):
                 total_bin_calibrated,
                 correctness_bin_calibrated,
             )
-    
-    
 
-
-
+        

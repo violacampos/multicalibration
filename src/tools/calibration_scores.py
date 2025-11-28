@@ -1,6 +1,8 @@
+from argparse import Namespace
 import os
 import numpy as np
-import math
+from typing import Any
+from numpy.typing import NDArray
 from termcolor import colored
 from tabulate import tabulate
 from tools import binning
@@ -14,7 +16,7 @@ class Score:
     Brier score, skill score, and group-aware metrics.
     """
     
-    def __init__(self, bins: binning.Binning, args: dict):
+    def __init__(self, bins: binning.Binning, args: Namespace):
         """
         Initialize the Score Class
 
@@ -55,7 +57,7 @@ class Score:
         
 
 
-    def ece_not_rounded(self, labels: np.array, confidences: np.array) -> float:
+    def ece_not_rounded(self, labels: NDArray[Any], confidences: NDArray[Any]) -> float:
 
         """
         Calculate ECE without rounding probabilities to grid.
@@ -108,7 +110,7 @@ class Score:
         return asce
 
 
-    def asce_not_rounded(self, labels: np.array, confidences: np.array) -> float:
+    def asce_not_rounded(self, labels: NDArray[Any], confidences: NDArray[Any]) -> float:
         """
         Calculate ASCE without rounding probabilities to grid.
         
@@ -254,8 +256,8 @@ class Score:
 
 
     def gasce_not_rounded(
-        self, confidences: np.array, labels: np.array, groups: np.array
-    ) -> np.array:
+        self, confidences: NDArray[Any], labels: NDArray[Any], groups: NDArray[Any]
+    ) -> NDArray[Any]:
         """
         Calculate GASCE without rounding probabilities to grid.
         
@@ -506,49 +508,7 @@ class Score:
         return total_group, correctness_group, average_group_confidence
         
 
-    def add_to_score_table(self, run, uncalib_scores, calib_scores, baseline=False):
-        """
-        Add scores to the printable score table.
-        
-        Args:
-            run: Name of the run
-            uncalib_scores: Dictionary of uncalibrated scores
-            calib_scores: Dictionary of calibrated scores
-            baseline: Flag to only use uncalibrated scores for baseline
-        """
-        uncalib_values = list(list(uncalib_scores.values())[0].values())
-        uncalib_gasce = uncalib_values[-1]
-        uncalib_values = uncalib_values[:-1]
-        
-        self.add_entry(run, "Uncalib", uncalib_values + [uncalib_gasce])
-        
-        if not baseline:
-            calib_values = list(list(calib_scores.values())[0].values())
-            calib_gasce = calib_values[-1]
-            calib_values = calib_values[:-1]
-            
-            score_diff = np.round(
-                np.array(calib_values) - np.array(uncalib_values), 4
-            ).tolist()
-            gasce_diff = np.round(calib_gasce - uncalib_gasce, 4)
-            
-            self.add_entry(run, "Calib", calib_values + [calib_gasce])
-            self.add_entry(run, "Diff", score_diff + [gasce_diff])
-        
-        
-       
-
-    def add_entry(self, run:str, score_type:str, scores:dict):
-        """
-        Add an entry to the score table.
-        
-        Args:
-            run: Name of the run
-            score_type: Type of score (Uncalib, Calib, Diff)
-            scores: List of score values
-        """
-        entry = [run if score_type == "Uncalib" else "", score_type] + list(scores)
-        self.score_table.append(entry)
+    
 
 
     def _format_table(self):
@@ -559,25 +519,6 @@ class Score:
             tablefmt="orgtbl",
         )
     
-    
-    def display_score_table(self):
-        """Print the formatted score table."""
-        self._format_table()
-        print(self.printable_table)
-        
-
-
-    def save_scores_table(self, save_dir:str):
-        """
-        Save the scores table to a text file.
-        
-        Args:
-            save_dir: Directory to save the scores file
-        """
-        self._format_table()
-        output_path = os.path.join(save_dir, 'scores.txt')
-        with open(output_path, 'w') as f:
-            f.write(self.printable_table)
 
     @staticmethod
     def _safe_divide(numerator, denominator):

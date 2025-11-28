@@ -13,7 +13,7 @@ class Platt_calibration:
         self.bins = bins
         self.debug = args.debug
         self.outputs = args.print_info
-        self.platt = None
+        self.platt = LogisticRegression(solver='lbfgs')
 
         self.score_obj = Score(bins, args)
  
@@ -27,7 +27,7 @@ class Platt_calibration:
             :return: LR object
         """
         X = X.reshape(-1,1)
-        self.platt = LogisticRegression(solver='lbfgs').fit(X,y) 
+        self.platt.fit(X,y) 
         return self
 
     def predict(self, X):

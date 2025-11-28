@@ -1,3 +1,4 @@
+from argparse import Namespace
 import numpy as np
 from tools import binning
 from tools.calibration_scores import Score
@@ -5,7 +6,7 @@ from termcolor import colored
 
 class Hb_calibration:
     
-    def __init__(self, grid:binning.Binning, args:dict):
+    def __init__(self, grid:binning.Binning, args:Namespace):
         """
             Initializes a histogram binning object
 

@@ -13,8 +13,8 @@ class LR_calibration:
         self.grid = grid
         self.debug = args.debug
         self.outputs = args.print_info
-        self.reg = None
         self.type = type
+        self.reg = LinearRegression() if self.type == 'linear' else LogisticRegression()
         self.score_obj = Score(grid, args)
 
     def fit(self, X, y):
@@ -26,7 +26,7 @@ class LR_calibration:
 
             :return: LR object
         """
-        self.reg = LinearRegression().fit(X, y) if self.type == 'linear' else LogisticRegression().fit(X,y) 
+        self.reg.fit(X, y)  
         return self
 
     def predict(self, X):
