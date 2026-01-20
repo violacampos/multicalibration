@@ -79,6 +79,7 @@ def main(data_provider, type="linear", extern=False, bins=None, plots=None):
             "scores_calibrated": scores_calibrated,
             "calibrated_probs": calibrated_predictions,
             "group_names": data_provider.group_names,
+            "group_descriptions": data_provider.group_descriptions,
         }
     else:
         if args.save_charts:

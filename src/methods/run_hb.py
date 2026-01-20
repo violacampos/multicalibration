@@ -53,7 +53,8 @@ def main(data_provider, extern=False, bins=None, plots=None):
                 "total_group": total_group, 
                 "scores_calibrated": scores_calibrated, 
                 "calibrated_probs": corrected_probs,
-                "group_names": data_provider.group_names}
+                "group_names": data_provider.group_names,
+                "group_descriptions": data_provider.group_descriptions}
     else:
         # Charts
         if args.save_charts:

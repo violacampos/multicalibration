@@ -1,6 +1,6 @@
 import os
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 
@@ -121,7 +121,7 @@ class CalibrationDataset:
         self.languages = sorted(
             set(self.dataset[split_name]["language"])
         )  # use only last split here, should be ok
-        self.group_names = self.get_group_names()
+        self.group_names, self.group_descriptions = self.get_group_names()
 
         for split_name in self.dataset:
             self.dataset[split_name] = self.dataset[split_name].map(
@@ -152,7 +152,7 @@ class CalibrationDataset:
         else:
             return float(np.median(np.concatenate(locs)))
 
-    def get_group_names(self) -> List[str]:
+    def get_group_names(self) -> Tuple[List[str], List[str]]:
 
         feature_names = [
             "language",
@@ -171,20 +171,33 @@ class CalibrationDataset:
             "difficulty_medium": "comp_medium",
             "difficulty_hard": "comp_hard",
         }
+        
+        group_descs = {
+            "larger_than_median_loc": f"Code > {int(self.median_loc)} LOC",
+            "larger_than_median_prompt": f"Prompt > {int(round(self.median_prompt, -2))} tokens",
+            "larger_than_median_output": f"Output > {int(round(self.median_output, -2))} tokens",
+            "difficulty_easy": "Low complexity",
+            "difficulty_medium": "Medium complexity",
+            "difficulty_hard": "High complexity",
+        }
         enabled_features = [
             name for name in feature_names if getattr(self.group_config, name, False)
         ]
-        result = []
+        names = []
+        descriptions = []
         for feature in enabled_features:
             if feature == "language":
                 for language in self.languages:
-                    result.append("lang_" + language)
+                    names.append("lang_" + language)
+                    descriptions.append(f"Language: {language}")
             else:
-                result.append(group_names[feature])
+                names.append(group_names[feature])
+                descriptions.append(group_descs[feature])
                 if self.group_config.add_counter:
                     if feature.startswith("larger"):
-                        result.append(group_names[feature].replace("_high", "_low"))
-        return result
+                        names.append(group_names[feature].replace("_high", "_low"))
+                        descriptions.append(group_descs[feature].replace(">", "<"))
+        return names, descriptions
 
     def add_group_info(self, batch):
         config = self.group_config

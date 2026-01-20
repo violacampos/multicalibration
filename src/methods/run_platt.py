@@ -82,6 +82,7 @@ def main(
             "scores_calibrated": scores_calibrated,
             "calibrated_probs": calibrated_predictions,
             "group_names": data_provider.group_names,
+            "group_descriptions": data_provider.group_descriptions,
         }
     else:
         if getattr(args, "save_charts", False):

@@ -22,7 +22,7 @@ class Hb_calibration:
         self.m = args.bin_count
         self.score_obj = Score(grid, args)
 
-    def fit(self, X, y):
+    def fit(self, X:np.ndarray, y:np.ndarray):
         """
             Learns the deltas for each bin on the data X and y.
 
@@ -37,7 +37,7 @@ class Hb_calibration:
 
         return self
 
-    def predict(self, X):
+    def predict(self, X:np.ndarray):
         """
             Uses the learned deltas to adjust the probabilities X
 

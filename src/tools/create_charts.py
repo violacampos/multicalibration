@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
+from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 import numpy as np
@@ -115,7 +116,8 @@ class CalibrationCharts:
         correctness: NDArray[np.floating],
         bar_colors: List[Tuple[str, float]],
         totals: Optional[NDArray[np.floating]] = None,
-        show_ylabel: bool = False
+        show_ylabel: bool = False,
+        show_xlabel: bool = True
     ):
         """
         Create a bar chart showing calibration correctness over confidence bins.
@@ -150,10 +152,12 @@ class CalibrationCharts:
         # Configure axes
         ax.set_xticks(np.arange(0, 1.1, 0.2))
         ax.set_yticks(np.arange(0, 1.1, 0.2))
-        ax.set_xlabel("Confidence")
+        
         ax.set_xlim(-0.05, 1.05)
         ax.set_ylim(-0.05, 1.05)
         
+        if show_xlabel:
+            ax.set_xlabel("Confidence")
         if show_ylabel:
             ax.set_ylabel("Correctness")
         
@@ -167,6 +171,7 @@ class CalibrationCharts:
         confidence: NDArray[np.floating],
         correctness: NDArray[np.floating],
         sizes: NDArray[np.floating],
+        names: Optional[List[str]] = None,
         title: Optional[str] = None,
     ):
         """
@@ -190,8 +195,9 @@ class CalibrationCharts:
             correctness,
             s=sizes,
             c=colors,
-            alpha=0.7,
+            #alpha=0.7,
             marker="o",
+            #label=names,
             edgecolors='black',
             linewidths=0.5
         )
@@ -249,7 +255,8 @@ class CalibrationCharts:
         correctness_bins: List[NDArray[np.floating]],
         correctness_groups: List[NDArray[np.floating]],
         confidence_groups: List[NDArray[np.floating]],
-        total_groups: List[NDArray[np.floating]]
+        total_groups: List[NDArray[np.floating]],
+        group_names: Optional[List[str]] = None
     ):
         """
         Create combined bar and scatter plot comparison chart.
@@ -263,7 +270,7 @@ class CalibrationCharts:
             total_groups: List of group totals for each method
         """
         self._setup_plot_style()
-        fig, axs = plt.subplots(2, 7, figsize=(24, 8), sharey='row')
+        fig, axs = plt.subplots(2, 7, figsize=(24, 7), sharey='row')
 
         # Top row: bar charts
         for idx, (ax, method, total, corr) in enumerate(
@@ -272,16 +279,43 @@ class CalibrationCharts:
             is_uncalibrated = idx == 0
             colors = self._get_bar_colors(total, use_orange=is_uncalibrated)
             self.calibration_bar_chart(
-                ax, method, corr, colors, show_ylabel=(idx == 0)
+                ax, method, corr, colors, show_ylabel=(idx == 0), show_xlabel=False
             )
 
         # Bottom row: scatter plots
         for ax, conf, corr, total in zip(
             axs[1], confidence_groups, correctness_groups, total_groups
         ):
-            self.scatter_plot(ax, conf, corr, total / 2)
+            self.scatter_plot(ax, conf, corr, total / 2, names=group_names)
+        
+        
+        
 
-        self._save_and_close(f"{scoring_method}_combined_plots.pdf") 
+              # Build group legend from group_names and the class color palette
+        if group_names:
+            n_groups = len(group_names)
+            legend_handles = [
+                Line2D([0], [0],
+                    marker='o', color='w',
+                    markerfacecolor=self.colors[i % len(self.colors)],
+                    markersize=14, markeredgecolor='black')
+                for i in range(n_groups)
+            ]
+            fig.subplots_adjust(hspace=0.3)
+            fig.legend(
+                legend_handles,
+                group_names,
+                loc='upper center',
+                ncol=min(6, n_groups),
+                bbox_to_anchor=(0.5, 0.52),
+                frameon=False,
+                fontsize=14,
+                bbox_transform=fig.transFigure
+            )
+
+        filepath = self.save_dir / f"{scoring_method}_combined_plots.pdf"
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+
 
 
     
@@ -290,7 +324,8 @@ class CalibrationCharts:
         scoring_method: str,
         correctness_groups: List[NDArray[np.floating]],
         confidence_groups: List[NDArray[np.floating]],
-        total_groups: List[NDArray[np.floating]]
+        total_groups: List[NDArray[np.floating]],
+        group_names: Optional[List[str]] = None
     ):
         """
         Create scatter plot comparison for group-level calibration.
@@ -308,7 +343,33 @@ class CalibrationCharts:
             axs, self.CALIBRATION_METHODS, confidence_groups, 
             correctness_groups, total_groups
         ):
-            self.scatter_plot(ax, conf, corr, total / 2, title=method)
+            self.scatter_plot(ax, conf, corr, total / 2, title=method, names=group_names)
+            
+        #handles, labels = axs[0].get_legend_handles_labels()
+        #fig.legend(handles, labels, loc='upper center', ncol=4, 
+        #   bbox_to_anchor=(0.5, 1.0), frameon=True)
+
+        # Build group legend from group_names and the class color palette
+        if group_names:
+            n_groups = len(group_names)
+            legend_handles = [
+                Line2D([0], [0],
+                    marker='o', color='w',
+                    markerfacecolor=self.colors[i % len(self.colors)],
+                    markersize=14, markeredgecolor='black')
+                for i in range(n_groups)
+            ]
+            fig.subplots_adjust(top=1.2)
+            fig.legend(
+                legend_handles,
+                group_names,
+                loc='upper center',
+                ncol=min(6, n_groups),
+                bbox_to_anchor=(0.5, 1.05),
+                frameon=False,
+                fontsize=14,
+                bbox_transform=fig.transFigure
+            )
 
         self._save_and_close(f"{scoring_method}_group_calibration.pdf")
         
@@ -427,6 +488,7 @@ class CalibrationCharts:
         total_groups = [method_data[0]["total_group_uncalib"]] + [
             data["total_group"] for data in method_data[1:]
         ]
+        group_descriptions = method_data[0].get("group_descriptions", None)
         
         # Generate charts
         
@@ -436,7 +498,8 @@ class CalibrationCharts:
             correctness_bins,
             correctness_groups,
             confidence_groups,
-            total_groups
+            total_groups,
+            group_names=group_descriptions
         )
         
         
@@ -450,7 +513,8 @@ class CalibrationCharts:
             args.prob_method,
             correctness_groups,
             confidence_groups,
-            total_groups
+            total_groups,
+            group_names=group_descriptions
         )
     
         

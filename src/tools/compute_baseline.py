@@ -36,7 +36,8 @@ def build_return_dict(data_provider, args, scores, total_bin, correctness_bin,
         "programs": data_provider.get_test_programs(),
         "prompts": data_provider.get_test_prompts(),
         "token_logprobs": data_provider.get_test_token_logprobs(),
-        "group_names": data_provider.group_names
+        "group_names": data_provider.group_names,
+        "group_descriptions": data_provider.group_descriptions
     }
 
 

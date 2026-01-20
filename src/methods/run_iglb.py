@@ -103,6 +103,7 @@ def main(data_provider, extern=False, bins=None, plots=None):
             "scores_calibrated": scores_calibrated,
             "calibrated_probs": test_probs_calibrated,
             "group_names": data_provider.group_names,
+            "group_descriptions": data_provider.group_descriptions,
             "calibration_steps": iglb.calibration_steps
         }
     else:
