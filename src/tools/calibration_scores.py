@@ -171,6 +171,30 @@ class Score:
         brier_score = np.mean((labels - confidences) ** 2)
         return brier_score
 
+    @staticmethod
+    def bss(confidences:np.ndarray, labels:np.ndarray) -> float:
+        """
+        Calculate the Brier Skill Score (BSS).
+
+        Baseline score is 0.0. Negative scores show deterioration, 
+        positive scores show improvement over the baseline score,  
+        BSS=1.0 is a perfect prediction.
+        
+        Args:
+            confidences: List of prediction probabilities
+            labels: List of labels indicating correctness
+        
+        Returns:
+            BSS score
+        """
+        brier_score = np.mean((labels - confidences) ** 2)
+        base_rate = np.mean(labels)
+        brier_ref = base_rate * (1 - base_rate)
+        if brier_ref == 0:
+            return 1.0 if brier_score == 0 else -np.inf
+        return float((brier_ref - brier_score) / brier_ref)
+        
+
 
     def skill_score(self, brier_ref, brier_actual):
         """
@@ -342,8 +366,10 @@ class Score:
         
         # Calculate skill score
         skill_score = self.skill_score(self.brier_ref_score, mse)
+        bss = self.bss(confidences, labels)
         if self.outputs:
             print(f"{colored(prefix, color)} Skill Score: {skill_score}")
+            print(f"{colored(prefix, color)} BSS: {bss}")
         
         # Build results dictionary
         results = {
